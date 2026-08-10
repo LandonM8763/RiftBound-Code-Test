@@ -225,6 +225,12 @@ function placeBattlefields(
     if (deck.battlefields.length === 0) {
       throw new Error(`Player ${seat} brought no Battlefields`);
     }
-    return { card: rng.pick(deck.battlefields), controller: null, units: [], scoredBy: [] };
+    return {
+      card: rng.pick(deck.battlefields),
+      controller: null,
+      units: [],
+      contestedBy: null,
+      scoredBy: [],
+    };
   });
 }

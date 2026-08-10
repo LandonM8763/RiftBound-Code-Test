@@ -35,9 +35,10 @@ What is built:
   Champion, and Domain Identity).
 - **`@riftbound/engine`** — a deterministic seeded PRNG, the game state model,
   the full turn phase machine (Awaken, Beginning, Channel, Draw, Main, Ending),
-  Scoring by Hold, Burn Out, the win condition, **Rune Pools, the Chain with
-  Priority, and the Process of Play**, first-class legal action generation,
-  per-player observable views, and a structural invariant checker.
+  Scoring by Hold, Burn Out, the win condition, Rune Pools, the Chain with
+  Priority, the Process of Play, **the Standard Move and Contested status**,
+  first-class legal action generation, per-player observable views, and a
+  structural invariant checker.
 - **`@riftbound/ai`** — the `Agent` interface, a seeded random legal agent, and a
   single-game runner that keeps agents honest.
 - **`@riftbound/analysis`** — the analytic statistics: a hypergeometric core
@@ -56,8 +57,13 @@ quantity in `GameConfig` cites its rule number.
 
 What is **not** built yet, in rough dependency order:
 
-1. **Movement, Showdowns and Combat** (rules 341, 445, 459-466), and with them
-   Scoring by Conquer and the Final Point restriction.
+1. **Showdowns and Combat** (rules 341, 459-466), and with them Scoring by
+   Conquer and the Final Point restriction. Movement is done and already applies
+   Contested status (450), which is exactly the trigger Showdowns hang off
+   (190.3.c) — `showdownInProgress` in `move.ts` is the placeholder they replace.
+   Note that establishing Control happens at the *end* of a Showdown (190.4), so
+   until they exist, moving onto an empty Battlefield leaves it Contested and
+   nobody ever takes Control.
 2. **Card effects.** Cards currently have costs and types but no rules text
    behaviour, so a Spell resolving off the Chain simply goes to the trash. The
    seams are `totalCost` in `play.ts` (rule 356's cost modification layers) and

@@ -149,6 +149,16 @@ export interface BattlefieldState {
   readonly controller: PlayerId | null;
   readonly units: readonly EntityId[];
   /**
+   * Who applied the Contested status, or `null` if the Battlefield is not
+   * Contested (rule 190.3.a).
+   *
+   * Contested is a temporary status applied when a Unit becomes present at a
+   * Battlefield its controller does not control. It is what tells the engine a
+   * Showdown or Combat is due (190.3.c), and it persists until Control is
+   * established or the contesting player has no Units left there (190.3.b).
+   */
+  readonly contestedBy: PlayerId | null;
+  /**
    * Players who have already Scored this Battlefield this turn.
    *
    * Rule 470: a player may only Score a given Battlefield once per turn, by

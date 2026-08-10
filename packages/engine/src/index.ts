@@ -59,6 +59,15 @@ export { knownCardCount, observe, opponentsOf, pointsOf } from './view.js';
 export type { BattlefieldView, EntityView, GameView, PlayerView } from './view.js';
 
 export {
+  applyContested,
+  canStandardMove,
+  cleanupControl,
+  showdownInProgress,
+  standardMoveDestinations,
+  standardMoves,
+} from './move.js';
+
+export {
   canPay,
   payFrom,
   playableFromHand,

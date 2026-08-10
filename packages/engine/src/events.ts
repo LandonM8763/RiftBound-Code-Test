@@ -58,6 +58,25 @@ export type GameEvent =
   /** Rule 359.3.d: a Chain item resolved. */
   | { readonly type: 'chainItemResolved'; readonly entity: EntityId }
   | { readonly type: 'priorityPassed'; readonly player: PlayerId }
+  /** Rule 144: Units took their Standard Move. */
+  | {
+      readonly type: 'unitsMoved';
+      readonly player: PlayerId;
+      readonly units: readonly EntityId[];
+      readonly battlefield: number | null;
+    }
+  /** Rule 450: a Battlefield became Contested. */
+  | {
+      readonly type: 'battlefieldContested';
+      readonly battlefield: number;
+      readonly player: PlayerId;
+    }
+  /** Rule 190.4.c: a player lost Control of a Battlefield. */
+  | {
+      readonly type: 'controlLost';
+      readonly battlefield: number;
+      readonly player: PlayerId;
+    }
   | { readonly type: 'runeChannelled'; readonly player: PlayerId; readonly entity: EntityId }
   | { readonly type: 'runeDeckEmpty'; readonly player: PlayerId }
   | { readonly type: 'cardDrawn'; readonly player: PlayerId; readonly entity: EntityId }

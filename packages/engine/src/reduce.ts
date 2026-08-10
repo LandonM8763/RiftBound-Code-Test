@@ -3,6 +3,12 @@ import type { CardDefinition } from '@riftbound/cards';
 import { IllegalActionError, type Action } from './actions.js';
 import type { GameEvent } from './events.js';
 import { addPoints, moveEntity, withEntity, withPlayer } from './mutate.js';
+import {
+  applyContested,
+  canStandardMove,
+  cleanupControl,
+  standardMoveDestinations,
+} from './move.js';
 import { canPay, payFrom, timingAllows, totalCost, validUnitLocations } from './play.js';
 import { Rng } from './rng.js';
 import type {
@@ -61,6 +67,8 @@ export function reduce(state: GameState, action: Action): ReduceResult {
       return playCard(state, action.card, action.location);
     case 'pass':
       return pass(state);
+    case 'moveUnits':
+      return moveUnits(state, action.units, action.to);
     default: {
       const exhaustive: never = action;
       throw new IllegalActionError(`Unknown action: ${JSON.stringify(exhaustive)}`);
@@ -251,6 +259,78 @@ function pass(state: GameState): ReduceResult {
   };
 
   events.push({ type: 'chainItemResolved', entity: top.entity });
+  return { state: next, events };
+}
+
+/**
+ * The Standard Move (rule 144).
+ *
+ * Exhausting each Unit is the cost (144.2), and several Units may move together
+ * to a shared destination as one action (144.3). Moving is instantaneous, uses
+ * no Chain and cannot be Reacted to (446.3), so this resolves in full and then
+ * performs the Move's Cleanup (453).
+ */
+function moveUnits(
+  state: GameState,
+  units: readonly EntityId[],
+  to: Location,
+): ReduceResult {
+  const player = requirePriority(state);
+
+  if (units.length === 0) {
+    throw new IllegalActionError('A Move needs at least one Unit');
+  }
+  if (new Set(units).size !== units.length) {
+    throw new IllegalActionError('A Unit cannot move twice in the same Move');
+  }
+
+  for (const unit of units) {
+    if (getEntity(state, unit).controller !== player) {
+      throw new IllegalActionError(`Player ${player} does not control unit ${unit}`);
+    }
+    if (!canStandardMove(state, unit)) {
+      throw new IllegalActionError(`Unit ${unit} cannot take its Standard Move now`);
+    }
+    if (!standardMoveDestinations(state, unit).some((candidate) => sameLocation(candidate, to))) {
+      throw new IllegalActionError(`Unit ${unit} cannot move there`);
+    }
+  }
+
+  let next = state;
+  for (const unit of units) {
+    // 144.2: exhausting the Unit is the cost, paid simultaneously (144.3.c).
+    next = withEntity(next, unit, (current) => ({ ...current, exhausted: true }));
+    next = moveEntity(next, unit, to);
+  }
+
+  const events: GameEvent[] = [
+    {
+      type: 'unitsMoved',
+      player,
+      units: [...units],
+      battlefield: to.kind === 'battlefield' ? to.index : null,
+    },
+  ];
+
+  // 450: the destination becomes Contested if its controller is someone else.
+  if (to.kind === 'battlefield') {
+    const before = next.battlefields[to.index]?.contestedBy ?? null;
+    next = applyContested(next, to.index, player);
+    if (before === null && next.battlefields[to.index]?.contestedBy === player) {
+      events.push({ type: 'battlefieldContested', battlefield: to.index, player });
+    }
+  }
+
+  // 453: a Move is followed by a Cleanup.
+  const before = next.battlefields;
+  next = cleanupControl(next);
+  next.battlefields.forEach((battlefield, index) => {
+    const previous = before[index];
+    if (previous?.controller !== null && previous?.controller !== undefined && battlefield.controller === null) {
+      events.push({ type: 'controlLost', battlefield: index, player: previous.controller });
+    }
+  });
+
   return { state: next, events };
 }
 

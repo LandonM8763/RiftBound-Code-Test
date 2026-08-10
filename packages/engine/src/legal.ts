@@ -1,4 +1,5 @@
 import type { Action } from './actions.js';
+import { standardMoves } from './move.js';
 import { playableFromHand, validUnitLocations } from './play.js';
 import type { GameState, PlayerId } from './state.js';
 import { entityCard, getPlayer, isClosed, isOver } from './state.js';
@@ -51,6 +52,16 @@ export function legalActions(state: GameState, player: PlayerId): readonly Actio
       }
     } else {
       actions.push({ type: 'playCard', card: entity.id });
+    }
+  }
+
+  // Rule 144.3 permits moving several Units at once, but enumerating every
+  // subset is exponential. Single-Unit moves are offered here; the action
+  // itself takes a list, so a heuristic or search agent can build a multi-Unit
+  // move directly when it wants one.
+  for (const { unit, destinations } of standardMoves(state, player)) {
+    for (const to of destinations) {
+      actions.push({ type: 'moveUnits', units: [unit], to });
     }
   }
 

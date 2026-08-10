@@ -27,7 +27,16 @@ export type Action =
   /** Play a card from hand (rules 349-359). Units need a Location. */
   | { readonly type: 'playCard'; readonly card: EntityId; readonly location?: Location }
   /** Pass Priority (rule 312.2.d). Resolves the Chain once everyone passes. */
-  | { readonly type: 'pass' };
+  | { readonly type: 'pass' }
+  /**
+   * The Standard Move (rule 144): exhaust one or more Units to move them to a
+   * shared destination. Rule 144.3 allows several at once as a single action.
+   */
+  | {
+      readonly type: 'moveUnits';
+      readonly units: readonly EntityId[];
+      readonly to: Location;
+    };
 
 export type ActionType = Action['type'];
 
