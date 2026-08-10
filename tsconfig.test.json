@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "baseUrl": ".",
+    "paths": {
+      "@riftbound/cards": ["./packages/cards/src/index.ts"],
+      "@riftbound/cards/testing": ["./packages/cards/src/testing.ts"],
+      "@riftbound/engine": ["./packages/engine/src/index.ts"]
+    }
+  },
+  "include": ["packages/*/src/**/*"]
+}

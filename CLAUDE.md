@@ -21,10 +21,43 @@ card game). The application has four capabilities:
 
 ## Current status
 
-**Greenfield. No application code exists yet.** The repository contains only this
-file. Nothing below describes code that has been written — it describes the plan
-and the conventions to build against. Keep this section honest: update it as real
-code lands, and delete it once the structure below actually exists.
+**Phase 1, in progress.** Two packages exist and are covered by tests; the rest of
+the architecture below is still a plan.
+
+What is built:
+
+- **`@riftbound/cards`** — the six Domains, the Energy/Power `Cost` model, card
+  definition types (Legend, Unit, Spell, Gear, Rune, Battlefield), and a
+  duplicate-rejecting `CardRegistry`. No real card data yet.
+- **`@riftbound/engine`** — a deterministic seeded PRNG, the game state model,
+  the A/B/C/D turn phase machine, first-class legal action generation, per-player
+  observable views, and a structural invariant checker.
+
+What is deliberately **not** built, and why: playing cards, moving Units,
+Showdowns, and combat. Those depend on rules not yet verified against the official
+rulebook. Guessing them would bake wrong behaviour into the layer every statistic
+this application reports is measured against. See [Open questions](#open-questions).
+
+Anything in the code marked `UNVERIFIED` is a placeholder chosen so the engine can
+run, not a rule that has been confirmed. Most are `GameConfig` fields rather than
+constants, so correcting them is a one-line change.
+
+## Development
+
+```bash
+npm install
+npm test           # vitest, all packages
+npm run typecheck  # tsc --build, then the test files separately
+npm run build      # emit dist/ per package
+```
+
+Node 22+. Tests run against TypeScript sources via aliases in `vitest.config.ts`,
+so no build step is needed before testing. Test files are excluded from the
+package builds and typechecked by `tsconfig.test.json` instead — that is why
+`typecheck` runs `tsc` twice.
+
+CI (`.github/workflows/ci.yml`) runs the typecheck and the suite, which includes
+the random-agent fuzz run.
 
 ## Scope and phasing
 
@@ -149,15 +182,33 @@ those above it):
 
 ```
 packages/
-  cards/      Card data ingest, normalization, and the card definition schema
-  deck/       Deck list parsing, deck model, format legality validation
-  engine/     The rules engine: game state, legal action generation, resolution
-  ai/         Agents (random → heuristic → search-based)
-  analysis/   Statistics: curve, consistency, draw probabilities, win rates
-  suggest/    Deck edit recommendations
-  sim/        Batch simulation harness
-  cli/        Developer-facing entry point until the UI exists
+  cards/      EXISTS  Card definition schema, Domains, cost model, registry
+  deck/       planned Deck list parsing, deck model, format legality validation
+  engine/     EXISTS  The rules engine: state, legal actions, resolution
+  ai/         planned Agents (random → heuristic → search-based)
+  analysis/   planned Statistics: curve, consistency, draw probabilities, win rates
+  suggest/    planned Deck edit recommendations
+  sim/        planned Batch simulation harness
+  cli/        planned Developer-facing entry point until the UI exists
 ```
+
+Deck *construction* rules (40 cards, 12 Runes, the 3-copy limit, Domain Identity)
+belong to `deck/`, not `engine/`. The engine deliberately accepts any deck list so
+that its own tests can use three-card decks.
+
+### Engine map
+
+| File | Responsibility |
+|---|---|
+| `rng.ts` | sfc32 seeded by splitmix32; unbiased bounded ints, Fisher-Yates shuffle, serializable state |
+| `state.ts` | Ids, zones, entities, `GameConfig`, `GameState`, accessors |
+| `mutate.ts` | Structural-sharing update helpers; the only place zone lists and `entity.location` are written |
+| `actions.ts` | The `Action` union and `IllegalActionError` |
+| `reduce.ts` | `(state, action) -> { state, events }`, the phase machine |
+| `legal.ts` | `legalActions(state, player)` |
+| `view.ts` | Per-player observable view; redacts hidden zones |
+| `invariants.ts` | `checkInvariants(state)`, run after every action when fuzzing |
+| `setup.ts` | `createGame` — entity creation, shuffles, opening hands |
 
 ### Engine design principles
 
@@ -227,9 +278,10 @@ provided the engine uses flat data structures and avoids per-node allocation chu
 Should simulation throughput become the binding constraint, the engine package is
 the isolated piece to port to a faster language — another reason to keep it pure.
 
-**This is a reasoned default, not a mandate from the project owner. Confirm it
-before writing implementation code**, since it is the most expensive decision to
-reverse.
+**Confirmed by the project owner; implementation has started against it.**
+Concretely: npm workspaces, `tsc --build` project references, and vitest. The
+strict flags in `tsconfig.base.json` include `noUncheckedIndexedAccess` and
+`exactOptionalPropertyTypes` — do not loosen them to make a change compile.
 
 ## Conventions
 
@@ -276,20 +328,41 @@ prerequisite for engine work.
 
 ## Open questions
 
-Resolve these before or during early implementation; record the answers here.
+Resolve these and record the answers here.
 
-1. **Confirm the tech stack** (see above).
-2. **Obtain the official comprehensive rulebook** and reconcile it against the
-   domain primer. Highest priority — everything else depends on it.
-3. **Choose a card data source** and pin a set/version. Which sets must be supported?
-4. **Define the deck list input format(s).** Plain text? Piltover Archive URL or
+1. **Obtain the official comprehensive rulebook** and reconcile it against the
+   domain primer. Highest priority — everything else depends on it. The official
+   site is blocked by this environment's egress proxy; a local copy works just as
+   well.
+2. **Choose a card data source** and pin a set/version. Which sets must be supported?
+3. **Define the deck list input format(s).** Plain text? Piltover Archive URL or
    export? Multiple importers behind one interface?
-5. **Player count.** Riftbound supports 2–4 players; the engine's state model is
+4. **Player count.** Riftbound supports 2–4 players; the engine's state model is
    materially simpler if scoped to 1v1. Assume **1v1 unless told otherwise**, but do
-   not hard-code a two-player assumption where a list would do.
-6. **What "suggest edits" should optimize for** — raw win rate against a fixed AI, a
+   not hard-code a two-player assumption where a list would do. The current code
+   keeps players in a list and takes `playerCount` from the deck list count.
+5. **What "suggest edits" should optimize for** — raw win rate against a fixed AI, a
    specific matchup, or consistency metrics? This determines whether the suggestion
    engine needs simulation in the loop.
+
+### Rules the code currently guesses
+
+Each of these is marked `UNVERIFIED` at its definition. They are the first things
+to check against the rulebook, roughly in order of how much damage a wrong answer
+does.
+
+| Question | Current placeholder | Where |
+|---|---|---|
+| Can the final (8th) point be scored by any means? | Not implemented — 8 points simply wins | `reduce.ts`, `beginning` |
+| Is Beginning-phase scoring one point per Battlefield held, or one total? | One per Battlefield | `reduce.ts`, `beginning` |
+| How many Battlefields are contested at once? | `battlefieldCount: 2` | `state.ts`, `DEFAULT_CONFIG` |
+| How are the Battlefields in play chosen from the players' three each? | Round-robin by seat | `setup.ts`, `placeBattlefields` |
+| Opening hand size, and whether a mulligan exists | `openingHandSize: 5`, no mulligan | `state.ts`, `DEFAULT_CONFIG` |
+| What happens on an empty main deck | Emits `mainDeckEmpty`, game continues | `reduce.ts`, `draw` |
+| Who takes the first turn, and does turn 1 skip anything? | Random, no first-turn adjustment | `setup.ts`, `createGame` |
+
+`maxTurns` is *not* in this table: it is an explicit harness guard so fuzzing
+terminates, not a rule, and real simulations should raise it.
 
 ## Maintaining this file
 

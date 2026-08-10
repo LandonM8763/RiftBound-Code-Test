@@ -1,0 +1,7 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/cards" },
+    { "path": "./packages/engine" }
+  ]
+}
