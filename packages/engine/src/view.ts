@@ -7,8 +7,9 @@ import type {
   Outcome,
   Phase,
   PlayerId,
+  RunePool,
 } from './state.js';
-import { getEntity, getPlayer } from './state.js';
+import { getEntity, getPlayer, isClosed } from './state.js';
 
 /**
  * Hidden information is modelled explicitly.
@@ -43,6 +44,8 @@ export interface PlayerView {
    */
   readonly mainDeckCount: number;
   readonly runeDeckCount: number;
+  /** Rune Pools are public: rule 166.3 gives them no hidden component. */
+  readonly pool: RunePool;
 }
 
 export interface BattlefieldView {
@@ -59,6 +62,11 @@ export interface GameView {
   readonly outcome: Outcome | null;
   readonly players: readonly PlayerView[];
   readonly battlefields: readonly BattlefieldView[];
+  /** The Chain, bottom to top. Its contents are public (rule 328). */
+  readonly chain: readonly EntityView[];
+  /** Rule 331: a Chain existing means the turn is in a Closed State. */
+  readonly closed: boolean;
+  readonly priority: PlayerId | null;
 }
 
 /** What `viewer` is entitled to know about the current state. */
@@ -90,6 +98,7 @@ export function observe(state: GameState, viewer: PlayerId): GameView {
       champion: firstOrNull(player.zones.championZone, reveal),
       mainDeckCount: player.zones.mainDeck.length,
       runeDeckCount: player.zones.runeDeck.length,
+      pool: player.pool,
     };
   });
 
@@ -109,6 +118,9 @@ export function observe(state: GameState, viewer: PlayerId): GameView {
     outcome: state.outcome,
     players,
     battlefields,
+    chain: state.chain.map((item) => reveal(item.entity, true)),
+    closed: isClosed(state),
+    priority: state.priority,
   };
 }
 

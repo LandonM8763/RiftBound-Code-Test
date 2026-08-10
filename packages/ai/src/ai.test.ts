@@ -64,7 +64,7 @@ function engineDeck(): DeckList {
 const DECKS: readonly DeckList[] = [engineDeck(), engineDeck()];
 
 function someView(): GameView {
-  const state = createGame({ decks: DECKS, seed: 'view' }).state;
+  const state = createGame({ registry: REGISTRY, decks: DECKS, seed: 'view' }).state;
   return observe(state, state.activePlayer);
 }
 
@@ -138,7 +138,7 @@ describe('agent isolation', () => {
       },
     };
 
-    playGame({ decks: DECKS, agents: [spy, new FirstActionAgent()], seed: 'spy', config: { maxTurns: 4 } });
+    playGame({ registry: REGISTRY, decks: DECKS, agents: [spy, new FirstActionAgent()], seed: 'spy', config: { maxTurns: 4 } });
 
     expect(captured).toBeDefined();
     // None of the engine's internal state reaches the agent.
@@ -158,7 +158,7 @@ describe('agent isolation', () => {
       },
     };
 
-    playGame({ decks: DECKS, agents: [spy, spy], seed: 'hidden', config: { maxTurns: 4 } });
+    playGame({ registry: REGISTRY, decks: DECKS, agents: [spy, spy], seed: 'hidden', config: { maxTurns: 4 } });
 
     const view = views[0] as GameView;
     const opponent = view.players.find((player) => player.id !== view.viewer);
@@ -172,6 +172,7 @@ describe('agent isolation', () => {
 describe('playGame', () => {
   it('plays a full game to an outcome', () => {
     const result = playGame({
+      registry: REGISTRY,
       decks: DECKS,
       agents: [new RandomAgent('a'), new RandomAgent('b')],
       seed: 'match',
@@ -187,6 +188,7 @@ describe('playGame', () => {
   it('is reproducible for the same game and agent seeds', () => {
     const run = () =>
       playGame({
+        registry: REGISTRY,
         decks: DECKS,
         agents: [new RandomAgent('a'), new RandomAgent('b')],
         seed: 'repeat',
@@ -204,6 +206,7 @@ describe('playGame', () => {
   it('reports events in order, starting with the game starting', () => {
     const events: GameEvent[] = [];
     playGame({
+      registry: REGISTRY,
       decks: DECKS,
       agents: [new FirstActionAgent(), new FirstActionAgent()],
       seed: 'events',
@@ -219,6 +222,7 @@ describe('playGame', () => {
   it('verifies engine invariants when asked', () => {
     expect(() =>
       playGame({
+        registry: REGISTRY,
         decks: DECKS,
         agents: [new RandomAgent('inv-a'), new RandomAgent('inv-b')],
         seed: 'invariants',
@@ -236,19 +240,20 @@ describe('playGame', () => {
     };
 
     expect(() =>
-      playGame({ decks: DECKS, agents: [cheat, cheat], seed: 'cheat' }),
+      playGame({ registry: REGISTRY, decks: DECKS, agents: [cheat, cheat], seed: 'cheat' }),
     ).toThrow(IllegalAgentChoiceError);
   });
 
   it('rejects a mismatched number of agents', () => {
     expect(() =>
-      playGame({ decks: DECKS, agents: [new FirstActionAgent()], seed: 'mismatch' }),
+      playGame({ registry: REGISTRY, decks: DECKS, agents: [new FirstActionAgent()], seed: 'mismatch' }),
     ).toThrow(/1 agents for 2 decks/);
   });
 
   it('stops rather than hanging if the engine stops progressing', () => {
     expect(() =>
       playGame({
+        registry: REGISTRY,
         decks: DECKS,
         agents: [new FirstActionAgent(), new FirstActionAgent()],
         seed: 'stuck',
@@ -260,7 +265,7 @@ describe('playGame', () => {
 
   it('never offers an empty action list while the game is running', () => {
     // The runner throws on an empty list; this asserts the engine's side of it.
-    const state = createGame({ decks: DECKS, seed: 'nonempty' }).state;
+    const state = createGame({ registry: REGISTRY, decks: DECKS, seed: 'nonempty' }).state;
     expect(legalActions(state, state.activePlayer).length).toBeGreaterThan(0);
   });
 });
@@ -281,6 +286,7 @@ describe('deck to engine integration', () => {
     expect(lists.battlefields).toHaveLength(3);
 
     const result = playGame({
+      registry: REGISTRY,
       decks: [lists, lists],
       agents: [new RandomAgent('deck-a'), new RandomAgent('deck-b')],
       seed: 'integration',
@@ -293,7 +299,7 @@ describe('deck to engine integration', () => {
 
   it('draws the opening hand from the parsed 40-card deck', () => {
     const lists = engineDeck();
-    const state = createGame({ decks: [lists, lists], seed: 'opening' }).state;
+    const state = createGame({ registry: REGISTRY, decks: [lists, lists], seed: 'opening' }).state;
 
     for (const player of state.players) {
       expect(player.zones.hand).toHaveLength(state.config.openingHandSize);

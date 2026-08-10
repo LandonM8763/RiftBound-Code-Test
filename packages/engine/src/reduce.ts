@@ -1,9 +1,33 @@
+import type { CardDefinition } from '@riftbound/cards';
+
 import { IllegalActionError, type Action } from './actions.js';
 import type { GameEvent } from './events.js';
-import { addPoints, moveEntity, withEntity } from './mutate.js';
+import { addPoints, moveEntity, withEntity, withPlayer } from './mutate.js';
+import { canPay, payFrom, timingAllows, totalCost, validUnitLocations } from './play.js';
 import { Rng } from './rng.js';
-import type { BattlefieldState, EntityId, GameState, Outcome, Phase, PlayerId } from './state.js';
-import { getPlayer, isOver, nextPlayer, playerLocation, zoneOf } from './state.js';
+import type {
+  BattlefieldState,
+  EntityId,
+  GameState,
+  Location,
+  Outcome,
+  Phase,
+  PlayerId,
+} from './state.js';
+import {
+  EMPTY_POOL,
+  addEnergyTo,
+  addPowerTo,
+  entityCard,
+  getEntity,
+  getPlayer,
+  isClosed,
+  isOver,
+  nextPlayer,
+  playerLocation,
+  sameLocation,
+  zoneOf,
+} from './state.js';
 
 export interface ReduceResult {
   readonly state: GameState;
@@ -29,11 +53,212 @@ export function reduce(state: GameState, action: Action): ReduceResult {
       return resolvePhase(state);
     case 'endTurn':
       return endTurn(state);
+    case 'addEnergy':
+      return addEnergy(state, action.rune);
+    case 'addPower':
+      return addPower(state, action.rune);
+    case 'playCard':
+      return playCard(state, action.card, action.location);
+    case 'pass':
+      return pass(state);
     default: {
       const exhaustive: never = action;
       throw new IllegalActionError(`Unknown action: ${JSON.stringify(exhaustive)}`);
     }
   }
+}
+
+/** A Basic Rune's `[E]: Add [1]` (rule 164.2.a). */
+function addEnergy(state: GameState, rune: EntityId): ReduceResult {
+  const player = requirePriority(state);
+  const entity = getEntity(state, rune);
+
+  if (entity.controller !== player || !sameLocation(entity.location, playerLocation(player, 'runes'))) {
+    throw new IllegalActionError(`Entity ${rune} is not a Rune ${player} controls in play`);
+  }
+  if (entity.exhausted) {
+    throw new IllegalActionError(`Rune ${rune} is already exhausted`);
+  }
+
+  let next = withEntity(state, rune, (current) => ({ ...current, exhausted: true }));
+  next = withPlayer(next, player, (current) => ({
+    ...current,
+    pool: addEnergyTo(current.pool, 1),
+  }));
+
+  return {
+    state: next,
+    events: [{ type: 'resourcesAdded', player, rune, energy: 1, power: null }],
+  };
+}
+
+/** A Basic Rune's `Recycle this: Add [C]` (rule 164.2.b). */
+function addPower(state: GameState, rune: EntityId): ReduceResult {
+  const player = requirePriority(state);
+  const entity = getEntity(state, rune);
+
+  if (entity.controller !== player || !sameLocation(entity.location, playerLocation(player, 'runes'))) {
+    throw new IllegalActionError(`Entity ${rune} is not a Rune ${player} controls in play`);
+  }
+  const card = entityCard(state, rune);
+  if (card.type !== 'rune') {
+    throw new IllegalActionError(`${card.name} is not a Rune`);
+  }
+
+  // Recycling returns it to the bottom of the Rune Deck (rule 416.1.b).
+  let next = moveEntity(state, rune, playerLocation(player, 'runeDeck'), 'bottom');
+  next = withEntity(next, rune, (current) => ({ ...current, exhausted: false }));
+  next = withPlayer(next, player, (current) => ({
+    ...current,
+    pool: addPowerTo(current.pool, card.domain, 1),
+  }));
+
+  return {
+    state: next,
+    events: [{ type: 'resourcesAdded', player, rune, energy: 0, power: card.domain }],
+  };
+}
+
+/**
+ * The Process of Play (rule 353).
+ *
+ * Steps 1-6 run atomically here. Nothing can interrupt a card between going on
+ * the Chain and finalizing: other players only get Priority once an item is
+ * Finalized, and a Permanent leaves the Chain at that moment (359.2).
+ */
+function playCard(state: GameState, card: EntityId, location: Location | undefined): ReduceResult {
+  const player = requirePriority(state);
+  const entity = getEntity(state, card);
+
+  if (entity.controller !== player || !sameLocation(entity.location, playerLocation(player, 'hand'))) {
+    throw new IllegalActionError(`Entity ${card} is not in ${player}'s hand`);
+  }
+
+  const definition = entityCard(state, card);
+  if (!timingAllows(definition, isClosed(state))) {
+    throw new IllegalActionError(
+      `${definition.name} cannot be played while the turn is ${isClosed(state) ? 'Closed' : 'Open'}`,
+    );
+  }
+
+  const cost = totalCost(definition);
+  if (cost === undefined) {
+    throw new IllegalActionError(`${definition.name} is not a playable card`);
+  }
+  if (!canPay(getPlayer(state, player).pool, cost)) {
+    throw new IllegalActionError(`Cannot pay for ${definition.name}`);
+  }
+
+  // Step 4: pay (rule 357.1).
+  let next = withPlayer(state, player, (current) => ({
+    ...current,
+    pool: payFrom(current.pool, cost),
+  }));
+
+  const events: GameEvent[] = [];
+
+  if (definition.type === 'spell') {
+    // 359.3: a Spell lingers on the Chain as a Finalized item.
+    next = moveEntity(next, card, playerLocation(player, 'chain'));
+    next = {
+      ...next,
+      chain: [...next.chain, { entity: card, controller: player, pending: false }],
+      passes: 0,
+      priority: player,
+    };
+    events.push(
+      { type: 'cardPlayed', player, entity: card, onChain: true },
+      { type: 'chainItemAdded', entity: card, controller: player },
+    );
+    return { state: next, events };
+  }
+
+  // 359.2: a Permanent leaves the Chain and becomes a Game Object at once.
+  const destination = resolvePermanentLocation(next, player, definition, location);
+  next = moveEntity(next, card, destination);
+  // 359.2.c: a Unit enters exhausted; 359.2.d: Gear enters ready at the Base.
+  next = withEntity(next, card, (current) => ({
+    ...current,
+    exhausted: definition.type === 'unit',
+  }));
+
+  events.push({ type: 'cardPlayed', player, entity: card, onChain: false });
+  return { state: next, events };
+}
+
+function resolvePermanentLocation(
+  state: GameState,
+  player: PlayerId,
+  definition: CardDefinition,
+  location: Location | undefined,
+): Location {
+  if (definition.type !== 'unit') {
+    // 359.2.d: non-Unit Gear always enters at the player's Base.
+    return playerLocation(player, 'base');
+  }
+  const allowed = validUnitLocations(state, player);
+  if (location === undefined) {
+    return allowed[0] as Location;
+  }
+  if (!allowed.some((candidate) => sameLocation(candidate, location))) {
+    throw new IllegalActionError(`Units may not be played to that location`);
+  }
+  return location;
+}
+
+/**
+ * Pass Priority (rule 312.2.d).
+ *
+ * With a Chain, passing all the way around resolves the top item. With no
+ * Chain, passing is how the Turn Player declines to act — the Main Phase then
+ * has nothing left to do but end, so `pass` is only offered while a Chain
+ * exists.
+ */
+function pass(state: GameState): ReduceResult {
+  const player = requirePriority(state);
+  if (!isClosed(state)) {
+    throw new IllegalActionError('There is nothing to pass Priority on: the Chain is empty');
+  }
+
+  const events: GameEvent[] = [{ type: 'priorityPassed', player }];
+  const passes = state.passes + 1;
+
+  if (passes < state.players.length) {
+    return {
+      state: { ...state, passes, priority: nextPlayer(state, player) },
+      events,
+    };
+  }
+
+  // Everyone passed in succession: the top Chain item resolves (359.3.d).
+  const top = state.chain[state.chain.length - 1];
+  if (top === undefined) {
+    throw new IllegalActionError('The Chain is empty');
+  }
+
+  // No card has effects yet, so resolution is the Spell going to the trash.
+  let next = moveEntity(state, top.entity, playerLocation(top.controller, 'trash'));
+  const chain = state.chain.slice(0, -1);
+  const nextTop = chain[chain.length - 1];
+
+  next = {
+    ...next,
+    chain,
+    passes: 0,
+    // 312.2.c: Priority goes to the controller of the next item; with an empty
+    // Chain the state Opens and the Turn Player acts again (312.2.a).
+    priority: nextTop === undefined ? state.activePlayer : nextTop.controller,
+  };
+
+  events.push({ type: 'chainItemResolved', entity: top.entity });
+  return { state: next, events };
+}
+
+function requirePriority(state: GameState): PlayerId {
+  if (state.priority === null) {
+    throw new IllegalActionError('No player has Priority right now');
+  }
+  return state.priority;
 }
 
 function resolvePhase(state: GameState): ReduceResult {
@@ -185,7 +410,33 @@ function draw(state: GameState): ReduceResult {
     events.push({ type: 'cardDrawn', player, entity: top });
   }
 
-  return advance(next, 'main', events);
+  return enterMain(next, events);
+}
+
+/**
+ * Enter the Main Phase (rule 316).
+ *
+ * 316.3: every player's Rune Pool empties first and unspent resources are lost.
+ * 312.2.a: the Turn Player then has Priority for as long as the state is
+ * Neutral Open.
+ */
+function enterMain(state: GameState, events: GameEvent[]): ReduceResult {
+  let next = emptyPools(state, events);
+  next = { ...next, phase: 'main', priority: next.activePlayer, passes: 0 };
+  events.push({ type: 'phaseEntered', turn: next.turn, player: next.activePlayer, phase: 'main' });
+  return { state: next, events };
+}
+
+function emptyPools(state: GameState, events: GameEvent[]): GameState {
+  let next = state;
+  for (const player of state.players) {
+    if (player.pool.energy === 0 && Object.values(player.pool.power).every((n) => n === 0)) {
+      continue;
+    }
+    next = withPlayer(next, player.id, (current) => ({ ...current, pool: EMPTY_POOL }));
+    events.push({ type: 'poolEmptied', player: player.id });
+  }
+  return next;
 }
 
 /**
@@ -240,6 +491,9 @@ function ending(state: GameState): ReduceResult {
     events.push({ type: 'healed', entities: healed });
   }
 
+  // 317.2.e: every Rune Pool empties again at the end of the turn.
+  next = emptyPools(next, events);
+
   return passTurn(next, events);
 }
 
@@ -247,8 +501,11 @@ function endTurn(state: GameState): ReduceResult {
   if (state.phase !== 'main') {
     throw new IllegalActionError(`Cannot end the turn during the ${state.phase} phase`);
   }
+  if (isClosed(state)) {
+    throw new IllegalActionError('Cannot end the turn while the Chain still holds items');
+  }
   // 316.9: ending the Main Phase moves play to the Ending Phase.
-  return advance(state, 'ending', []);
+  return advance({ ...state, priority: null }, 'ending', []);
 }
 
 function passTurn(state: GameState, events: GameEvent[]): ReduceResult {
@@ -271,7 +528,16 @@ function passTurn(state: GameState, events: GameEvent[]): ReduceResult {
   events.push({ type: 'phaseEntered', turn, player: upcoming, phase: 'awaken' });
 
   return {
-    state: { ...state, activePlayer: upcoming, turn, phase: 'awaken', battlefields },
+    state: {
+      ...state,
+      activePlayer: upcoming,
+      turn,
+      phase: 'awaken',
+      battlefields,
+      // No player has Priority outside the Main Phase (rule 312.2.a).
+      priority: null,
+      passes: 0,
+    },
     events,
   };
 }

@@ -1,3 +1,5 @@
+import type { Domain } from '@riftbound/cards';
+
 import type { EntityId, Outcome, Phase, PlayerId } from './state.js';
 
 /**
@@ -34,6 +36,28 @@ export type GameEvent =
     }
   /** Rule 317.2.b: all Units heal in the Ending Phase. */
   | { readonly type: 'healed'; readonly entities: readonly EntityId[] }
+  /** Rule 429: resources were Added to a Rune Pool. */
+  | {
+      readonly type: 'resourcesAdded';
+      readonly player: PlayerId;
+      readonly rune: EntityId;
+      readonly energy: number;
+      readonly power: Domain | null;
+    }
+  /** Rule 167: the Rune Pool emptied and unspent resources were lost. */
+  | { readonly type: 'poolEmptied'; readonly player: PlayerId }
+  /** Rule 359: a card finished the Process of Play. */
+  | {
+      readonly type: 'cardPlayed';
+      readonly player: PlayerId;
+      readonly entity: EntityId;
+      readonly onChain: boolean;
+    }
+  /** Rule 328: an item was added to the Chain. */
+  | { readonly type: 'chainItemAdded'; readonly entity: EntityId; readonly controller: PlayerId }
+  /** Rule 359.3.d: a Chain item resolved. */
+  | { readonly type: 'chainItemResolved'; readonly entity: EntityId }
+  | { readonly type: 'priorityPassed'; readonly player: PlayerId }
   | { readonly type: 'runeChannelled'; readonly player: PlayerId; readonly entity: EntityId }
   | { readonly type: 'runeDeckEmpty'; readonly player: PlayerId }
   | { readonly type: 'cardDrawn'; readonly player: PlayerId; readonly entity: EntityId }

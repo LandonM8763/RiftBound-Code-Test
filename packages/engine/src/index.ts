@@ -3,6 +3,8 @@ export type { RngState } from './rng.js';
 
 export {
   DEFAULT_CONFIG,
+  EMPTY_POOL,
+  EMPTY_POWER,
   HIDDEN_ZONES,
   PHASES,
   PLAYER_ZONES,
@@ -10,8 +12,14 @@ export {
   entityId,
   getEntity,
   getPlayer,
+  addEnergyTo,
+  addPowerTo,
+  definitionOf,
+  entityCard,
+  isClosed,
   isOver,
   nextPlayer,
+  powerIn,
   playerId,
   playerLocation,
   sameLocation,
@@ -19,6 +27,7 @@ export {
 } from './state.js';
 export type {
   BattlefieldState,
+  ChainItem,
   Entity,
   EntityId,
   GameConfig,
@@ -29,6 +38,8 @@ export type {
   PlayerId,
   PlayerState,
   PlayerZone,
+  PowerPool,
+  RunePool,
 } from './state.js';
 
 export { IllegalActionError } from './actions.js';
@@ -46,6 +57,15 @@ export { currentLegalActions, legalActions } from './legal.js';
 
 export { knownCardCount, observe, opponentsOf, pointsOf } from './view.js';
 export type { BattlefieldView, EntityView, GameView, PlayerView } from './view.js';
+
+export {
+  canPay,
+  payFrom,
+  playableFromHand,
+  timingAllows,
+  totalCost,
+  validUnitLocations,
+} from './play.js';
 
 export { InvariantError, checkInvariants } from './invariants.js';
 

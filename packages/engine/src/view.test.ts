@@ -1,3 +1,4 @@
+import { CardRegistry, type CardDefinition } from '@riftbound/cards';
 import { makeBattlefield, makeLegend, makeRune, makeUnit } from '@riftbound/cards/testing';
 import { describe, expect, it } from 'vitest';
 
@@ -8,18 +9,30 @@ import { type GameState, isOver, playerId, playerLocation } from './state.js';
 import { moveEntity } from './mutate.js';
 import { knownCardCount, observe, opponentsOf, pointsOf } from './view.js';
 
+const CARDS: CardDefinition[] = [];
+const registryFor = (): CardRegistry => CardRegistry.from(CARDS);
+
 function testDeck(): DeckList {
+  const legend = makeLegend(['fury', 'calm']);
+  const champion = makeUnit(3, ['fury'], { champion: true });
+  const main = Array.from({ length: 12 }, () => makeUnit(2, ['fury']));
+  const runes = Array.from({ length: 8 }, () => makeRune('fury'));
+  const battlefields = Array.from({ length: 3 }, () => makeBattlefield());
+
+  CARDS.push(legend, champion, ...main, ...runes, ...battlefields);
+
   return {
-    legend: makeLegend(['fury', 'calm']).id,
-    champion: makeUnit(3, ['fury'], { champion: true }).id,
-    main: Array.from({ length: 12 }, () => makeUnit(2, ['fury']).id),
-    runes: Array.from({ length: 8 }, () => makeRune('fury').id),
-    battlefields: Array.from({ length: 3 }, () => makeBattlefield().id),
+    legend: legend.id,
+    champion: champion.id,
+    main: main.map((card) => card.id),
+    runes: runes.map((card) => card.id),
+    battlefields: battlefields.map((card) => card.id),
   };
 }
 
 function game(seed = 'view'): GameState {
-  return createGame({ decks: [testDeck(), testDeck()], seed }).state;
+  const decks = [testDeck(), testDeck()];
+  return createGame({ decks, registry: registryFor(), seed }).state;
 }
 
 const SEAT_0 = playerId(0);

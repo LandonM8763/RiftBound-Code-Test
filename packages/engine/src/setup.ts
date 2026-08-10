@@ -1,4 +1,4 @@
-import type { CardId } from '@riftbound/cards';
+import type { CardDefinition, CardId, CardRegistry } from '@riftbound/cards';
 
 import type { GameEvent } from './events.js';
 import { moveEntity } from './mutate.js';
@@ -14,7 +14,14 @@ import type {
   PlayerState,
   PlayerZone,
 } from './state.js';
-import { DEFAULT_CONFIG, PLAYER_ZONES, entityId, playerId, playerLocation } from './state.js';
+import {
+  DEFAULT_CONFIG,
+  EMPTY_POOL,
+  PLAYER_ZONES,
+  entityId,
+  playerId,
+  playerLocation,
+} from './state.js';
 
 /**
  * The cards a player brings to a game.
@@ -33,6 +40,14 @@ export interface DeckList {
 
 export interface CreateGameOptions {
   readonly decks: readonly DeckList[];
+  /**
+   * Definitions for every card in every deck.
+   *
+   * The engine needs costs and card types to decide what is playable. The
+   * definitions are copied onto the state at setup so reducers stay pure
+   * functions of the state and a saved game is self-describing.
+   */
+  readonly registry: CardRegistry;
   /** Same seed plus same actions must always replay the same game. */
   readonly seed: number | string;
   readonly config?: Partial<GameConfig> | undefined;
@@ -84,9 +99,17 @@ export function createGame(options: CreateGameOptions): ReduceResult {
   const rng = Rng.fromSeed(options.seed);
 
   const entities: Record<number, Entity> = {};
+  const definitions: Record<string, CardDefinition> = {};
   let nextEntityId = 0;
 
+  const define = (card: CardId): void => {
+    if (definitions[card] === undefined) {
+      definitions[card] = options.registry.mustGet(card);
+    }
+  };
+
   const create = (card: CardId, owner: PlayerId, zone: PlayerZone): EntityId => {
+    define(card);
     const id = entityId(nextEntityId);
     nextEntityId += 1;
     entities[id] = {
@@ -112,7 +135,7 @@ export function createGame(options: CreateGameOptions): ReduceResult {
     for (const card of deck.runes) {
       zones.runeDeck.push(create(card, id, 'runeDeck'));
     }
-    return { id, points: 0, zones };
+    return { id, points: 0, zones, pool: EMPTY_POOL };
   });
 
   for (let seat = 0; seat < playerCount; seat += 1) {
@@ -128,6 +151,9 @@ export function createGame(options: CreateGameOptions): ReduceResult {
   }
 
   const battlefields = placeBattlefields(options.decks, config.battlefieldCount, rng);
+  for (const battlefield of battlefields) {
+    define(battlefield.card);
+  }
   // Rule 115: turn order is determined by any fair random method.
   const startingPlayer = playerId(rng.nextInt(playerCount));
 
@@ -142,6 +168,11 @@ export function createGame(options: CreateGameOptions): ReduceResult {
     battlefields,
     entities,
     nextEntityId,
+    definitions,
+    chain: [],
+    // Rule 312.2.a: Priority is granted on entering the Main Phase.
+    priority: null,
+    passes: 0,
     outcome: null,
   };
 

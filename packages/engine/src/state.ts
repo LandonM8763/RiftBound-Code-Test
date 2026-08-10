@@ -1,4 +1,4 @@
-import type { CardId } from '@riftbound/cards';
+import { DOMAINS, type CardDefinition, type CardId, type Domain } from '@riftbound/cards';
 
 import type { RngState } from './rng.js';
 
@@ -31,6 +31,14 @@ export const PLAYER_ZONES = [
   'trash',
   'legendZone',
   'championZone',
+  /**
+   * Cards partway through the Process of Play (rule 328).
+   *
+   * The Chain itself is a single shared Non-Board Zone, ordered by
+   * `GameState.chain`; the cards on it sit here so that zone bookkeeping and
+   * the invariant checker need no special case.
+   */
+  'chain',
 ] as const;
 
 export type PlayerZone = (typeof PLAYER_ZONES)[number];
@@ -76,11 +84,63 @@ export interface Entity {
   readonly damage: number;
 }
 
+/**
+ * Power held in the Rune Pool, by Domain.
+ *
+ * Every Domain is always present so callers never deal with `undefined`; a
+ * Domain the player holds none of simply reads 0.
+ */
+export type PowerPool = Readonly<Record<Domain, number>>;
+
+/**
+ * A player's available Energy and Power (rule 166).
+ *
+ * Rule 167: every player's Rune Pool empties at the start of each Main Phase
+ * and at the end of each turn, and anything unspent is lost.
+ */
+export interface RunePool {
+  readonly energy: number;
+  readonly power: PowerPool;
+}
+
+export const EMPTY_POWER: PowerPool = Object.freeze(
+  Object.fromEntries(DOMAINS.map((domain) => [domain, 0])) as Record<Domain, number>,
+);
+
+export const EMPTY_POOL: RunePool = Object.freeze({ energy: 0, power: EMPTY_POWER });
+
+export function powerIn(pool: RunePool, domain: Domain): number {
+  return pool.power[domain];
+}
+
+export function addEnergyTo(pool: RunePool, amount: number): RunePool {
+  return { energy: pool.energy + amount, power: pool.power };
+}
+
+export function addPowerTo(pool: RunePool, domain: Domain, amount: number): RunePool {
+  return { energy: pool.energy, power: { ...pool.power, [domain]: pool.power[domain] + amount } };
+}
+
 export interface PlayerState {
   readonly id: PlayerId;
   readonly points: number;
   /** Ordered entity lists. Order is meaningful for decks. */
   readonly zones: Readonly<Record<PlayerZone, readonly EntityId[]>>;
+  readonly pool: RunePool;
+}
+
+/**
+ * An item on the Chain (rules 328-329).
+ *
+ * Items are Pending while the Process of Play is still running for them, and
+ * become Finalized at the Check Legality step (329.2). This engine completes
+ * that process atomically, so an item is only ever observed Finalized — the
+ * flag exists so the distinction survives when Pending windows arrive.
+ */
+export interface ChainItem {
+  readonly entity: EntityId;
+  readonly controller: PlayerId;
+  readonly pending: boolean;
 }
 
 export interface BattlefieldState {
@@ -192,8 +252,45 @@ export interface GameState {
   readonly battlefields: readonly BattlefieldState[];
   readonly entities: Readonly<Record<number, Entity>>;
   readonly nextEntityId: number;
+  /**
+   * Card definitions for every card in the game, denormalised at setup.
+   *
+   * The engine needs costs and card types to decide what may be played, but
+   * keeping a `CardRegistry` on the state would make it unserializable and
+   * would couple every reducer to card data. Copying the definitions in once
+   * keeps `reduce` a pure function of the state alone, and keeps a saved game
+   * self-describing.
+   */
+  readonly definitions: Readonly<Record<string, CardDefinition>>;
+  /**
+   * The Chain (rule 327). Empty means the turn is in an Open State (331.2).
+   * The last element is the top: the next item to resolve.
+   */
+  readonly chain: readonly ChainItem[];
+  /** Who may take Discretionary Actions right now (rule 312). */
+  readonly priority: PlayerId | null;
+  /** Consecutive passes since the last Chain item was added or resolved. */
+  readonly passes: number;
   /** `null` while the game is still running. */
   readonly outcome: Outcome | null;
+}
+
+/** Rule 331: a Chain existing puts the turn in a Closed State. */
+export function isClosed(state: GameState): boolean {
+  return state.chain.length > 0;
+}
+
+export function definitionOf(state: GameState, card: CardId): CardDefinition {
+  const definition = state.definitions[card];
+  if (definition === undefined) {
+    throw new Error(`No card definition for ${card}`);
+  }
+  return definition;
+}
+
+/** The definition of the card an entity is an instance of. */
+export function entityCard(state: GameState, id: EntityId): CardDefinition {
+  return definitionOf(state, getEntity(state, id).card);
 }
 
 export function isOver(state: GameState): boolean {

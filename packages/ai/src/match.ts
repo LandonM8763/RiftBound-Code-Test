@@ -1,3 +1,5 @@
+import type { CardRegistry } from '@riftbound/cards';
+
 import {
   checkInvariants as assertInvariants,
   createGame,
@@ -16,6 +18,8 @@ import { IllegalAgentChoiceError, isOffered, type Agent } from './agent.js';
 
 export interface MatchOptions {
   readonly decks: readonly DeckList[];
+  /** Definitions for every card in every deck; the engine needs costs. */
+  readonly registry: CardRegistry;
   /** One agent per seat, in seat order. */
   readonly agents: readonly Agent[];
   readonly seed: number | string;
@@ -48,14 +52,19 @@ export interface MatchResult {
  * that was not on offer.
  */
 export function playGame(options: MatchOptions): MatchResult {
-  const { decks, agents, seed } = options;
+  const { decks, agents, registry, seed } = options;
 
   if (agents.length !== decks.length) {
     throw new Error(`Got ${agents.length} agents for ${decks.length} decks`);
   }
 
   const maxActions = options.maxActions ?? 100_000;
-  const started = createGame({ decks, seed, ...(options.config ? { config: options.config } : {}) });
+  const started = createGame({
+    decks,
+    registry,
+    seed,
+    ...(options.config ? { config: options.config } : {}),
+  });
 
   let state = started.state;
   emit(started.events, options.onEvent);

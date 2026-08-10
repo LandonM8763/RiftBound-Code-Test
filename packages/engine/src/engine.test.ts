@@ -3,6 +3,7 @@
  *
  * Rule numbers cite the official Riftbound Core Rules, RUP4 of 2026-07-16.
  */
+import { CardRegistry, type CardDefinition } from '@riftbound/cards';
 import { makeBattlefield, makeLegend, makeRune, makeUnit } from '@riftbound/cards/testing';
 import { beforeEach, describe, expect, it } from 'vitest';
 
@@ -14,18 +15,35 @@ import { Rng } from './rng.js';
 import { createGame, type CreateGameOptions, type DeckList } from './setup.js';
 import { type GameState, type Phase, type PlayerId, isOver, playerId, zoneOf } from './state.js';
 
+/**
+ * Every card the fixtures have minted. The engine needs definitions for costs,
+ * so tests build a registry from this rather than passing bare ids.
+ */
+const CARDS: CardDefinition[] = [];
+
+const registryFor = (): CardRegistry => CardRegistry.from(CARDS);
+
 function testDeck(mainSize = 12, runeSize = 8): DeckList {
+  const legend = makeLegend(['fury', 'calm']);
+  const champion = makeUnit(3, ['fury'], { champion: true });
+  const main = Array.from({ length: mainSize }, () => makeUnit(2, ['fury']));
+  const runes = Array.from({ length: runeSize }, () => makeRune('fury'));
+  const battlefields = Array.from({ length: 3 }, () => makeBattlefield());
+
+  CARDS.push(legend, champion, ...main, ...runes, ...battlefields);
+
   return {
-    legend: makeLegend(['fury', 'calm']).id,
-    champion: makeUnit(3, ['fury'], { champion: true }).id,
-    main: Array.from({ length: mainSize }, () => makeUnit(2, ['fury']).id),
-    runes: Array.from({ length: runeSize }, () => makeRune('fury').id),
-    battlefields: Array.from({ length: 3 }, () => makeBattlefield().id),
+    legend: legend.id,
+    champion: champion.id,
+    main: main.map((card) => card.id),
+    runes: runes.map((card) => card.id),
+    battlefields: battlefields.map((card) => card.id),
   };
 }
 
 function newGame(seed: string | number = 'test', config?: CreateGameOptions['config']) {
-  return createGame({ decks: [testDeck(), testDeck()], seed, ...(config ? { config } : {}) });
+  const decks = [testDeck(), testDeck()];
+  return createGame({ decks, registry: registryFor(), seed, ...(config ? { config } : {}) });
 }
 
 /** Drive the game with the first legal action until it reaches `phase`. */
@@ -104,7 +122,7 @@ describe('createGame', () => {
 
   it('selects each player\'s Battlefield from the three they brought (rule 485.5)', () => {
     const decks = [testDeck(), testDeck()];
-    const placed = createGame({ decks, seed: 'bf' }).state.battlefields;
+    const placed = createGame({ decks, registry: registryFor(), seed: 'bf' }).state.battlefields;
 
     expect(placed[0]?.card).toBeDefined();
     expect(decks[0]?.battlefields).toContain(placed[0]?.card);
@@ -116,7 +134,7 @@ describe('createGame', () => {
     const chosen = new Set(
       Array.from(
         { length: 40 },
-        (_, i) => createGame({ decks, seed: `bf-${i}` }).state.battlefields[0]?.card,
+        (_, i) => createGame({ decks, registry: registryFor(), seed: `bf-${i}` }).state.battlefields[0]?.card,
       ),
     );
     // Three to choose from, so several seeds must disagree.
@@ -128,17 +146,23 @@ describe('createGame', () => {
   });
 
   it('rejects a game with fewer than two players', () => {
-    expect(() => createGame({ decks: [testDeck()], seed: 1 })).toThrow(/at least 2 players/);
+    const decks = [testDeck()];
+    expect(() => createGame({ decks, registry: registryFor(), seed: 1 })).toThrow(
+      /at least 2 players/,
+    );
   });
 
   it('rejects a player who brought no Battlefields', () => {
     const thin: DeckList = { ...testDeck(), battlefields: [] };
-    expect(() => createGame({ decks: [thin, thin], seed: 1 })).toThrow(/no Battlefields/);
+    expect(() => createGame({ decks: [thin, thin], registry: registryFor(), seed: 1 })).toThrow(
+      /no Battlefields/,
+    );
   });
 
   it('refuses a Battlefield count the rules do not define placement for', () => {
+    const decks = [testDeck(), testDeck()];
     expect(() =>
-      createGame({ decks: [testDeck(), testDeck()], seed: 1, config: { battlefieldCount: 1 } }),
+      createGame({ decks, registry: registryFor(), seed: 1, config: { battlefieldCount: 1 } }),
     ).toThrow(/one per player/);
   });
 });
@@ -147,20 +171,22 @@ describe('determinism', () => {
   const decks = [testDeck(), testDeck()];
 
   it('replays an identical game for the same seed', () => {
-    expect(JSON.stringify(createGame({ decks, seed: 'same' }).state)).toEqual(
-      JSON.stringify(createGame({ decks, seed: 'same' }).state),
+    const registry = registryFor();
+    expect(JSON.stringify(createGame({ decks, registry, seed: 'same' }).state)).toEqual(
+      JSON.stringify(createGame({ decks, registry, seed: 'same' }).state),
     );
   });
 
   it('produces a different game for a different seed', () => {
-    expect(JSON.stringify(createGame({ decks, seed: 'a' }).state)).not.toEqual(
-      JSON.stringify(createGame({ decks, seed: 'b' }).state),
+    const registry = registryFor();
+    expect(JSON.stringify(createGame({ decks, registry, seed: 'a' }).state)).not.toEqual(
+      JSON.stringify(createGame({ decks, registry, seed: 'b' }).state),
     );
   });
 
   it('replays an identical game for the same seed and action sequence', () => {
     const play = (): GameState => {
-      let state = createGame({ decks, seed: 'replay' }).state;
+      let state = createGame({ decks, registry: registryFor(), seed: 'replay' }).state;
       for (let i = 0; i < 60 && !isOver(state); i += 1) {
         const action = currentLegalActions(state)[0];
         if (action === undefined) break;
@@ -243,7 +269,7 @@ describe('turn structure (rule 314)', () => {
 
   it('Channels as many as possible from a short Rune Deck (rule 315.3.b.1)', () => {
     const decks = [testDeck(12, 1), testDeck(12, 1)];
-    const start = createGame({ decks, seed: 'short-runes' }).state;
+    const start = createGame({ registry: registryFor(), decks, seed: 'short-runes' }).state;
     const player = start.activePlayer;
 
     const afterChannel = runTo(start, 'draw');
@@ -403,7 +429,7 @@ describe('Burn Out (rules 413.4, 431)', () => {
   const emptyDecks = (): DeckList[] => [testDeck(4), testDeck(4)];
 
   it('burns out when the Main Deck is empty at the Draw Phase', () => {
-    const start = createGame({ decks: emptyDecks(), seed: 'burn' }).state;
+    const start = createGame({ decks: emptyDecks(), registry: registryFor(), seed: 'burn' }).state;
     const player = start.activePlayer;
     expect(zoneOf(start, player, 'mainDeck')).toHaveLength(0);
 
@@ -415,7 +441,7 @@ describe('Burn Out (rules 413.4, 431)', () => {
   });
 
   it('gives an opponent a point (rule 431.2.c)', () => {
-    const start = createGame({ decks: emptyDecks(), seed: 'burn-point' }).state;
+    const start = createGame({ decks: emptyDecks(), registry: registryFor(), seed: 'burn-point' }).state;
     const player = start.activePlayer;
     const opponent = playerId((player + 1) % start.players.length);
 
@@ -426,7 +452,7 @@ describe('Burn Out (rules 413.4, 431)', () => {
   });
 
   it('recycles the trash back into the Main Deck (rule 431.2.b)', () => {
-    const start = createGame({ decks: emptyDecks(), seed: 'recycle' }).state;
+    const start = createGame({ decks: emptyDecks(), registry: registryFor(), seed: 'recycle' }).state;
     const player = start.activePlayer;
     const hand = zoneOf(start, player, 'hand');
 
@@ -454,7 +480,7 @@ describe('Burn Out (rules 413.4, 431)', () => {
   });
 
   it('ends the game once repeated Burn Outs carry someone to the Victory Score', () => {
-    let state = createGame({ decks: emptyDecks(), seed: 'burn-win', config: { maxTurns: 400 } }).state;
+    let state = createGame({ decks: emptyDecks(), registry: registryFor(), seed: 'burn-win', config: { maxTurns: 400 } }).state;
 
     while (!isOver(state)) {
       const action = currentLegalActions(state)[0];
@@ -478,10 +504,13 @@ describe('legal actions', () => {
     }
   });
 
-  it('offers endTurn during the Main Phase', () => {
-    expect(currentLegalActions(runTo(newGame('legal-main').state, 'main'))).toEqual([
-      { type: 'endTurn' },
-    ]);
+  it('offers endTurn during the Main Phase, alongside the Add abilities', () => {
+    const actions = currentLegalActions(runTo(newGame('legal-main').state, 'main'));
+
+    expect(actions).toContainEqual({ type: 'endTurn' });
+    // Rule 164.2: each Rune in play offers both of its Add abilities.
+    expect(actions.some((action) => action.type === 'addEnergy')).toBe(true);
+    expect(actions.some((action) => action.type === 'addPower')).toBe(true);
   });
 
   it('offers the inactive player nothing', () => {
@@ -538,7 +567,7 @@ describe('termination guard', () => {
   it('ends in a draw once the turn limit is passed', () => {
     // A deck big enough that nobody burns out before the limit.
     const decks = [testDeck(60, 40), testDeck(60, 40)];
-    let state = createGame({ decks, seed: 'limit', config: { maxTurns: 6 } }).state;
+    let state = createGame({ registry: registryFor(), decks, seed: 'limit', config: { maxTurns: 6 } }).state;
 
     for (let i = 0; i < 500 && !isOver(state); i += 1) {
       const action = currentLegalActions(state)[0];

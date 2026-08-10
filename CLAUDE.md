@@ -35,8 +35,9 @@ What is built:
   Champion, and Domain Identity).
 - **`@riftbound/engine`** — a deterministic seeded PRNG, the game state model,
   the full turn phase machine (Awaken, Beginning, Channel, Draw, Main, Ending),
-  Scoring by Hold, Burn Out, the win condition, first-class legal action
-  generation, per-player observable views, and a structural invariant checker.
+  Scoring by Hold, Burn Out, the win condition, **Rune Pools, the Chain with
+  Priority, and the Process of Play**, first-class legal action generation,
+  per-player observable views, and a structural invariant checker.
 - **`@riftbound/ai`** — the `Agent` interface, a seeded random legal agent, and a
   single-game runner that keeps agents honest.
 - **`@riftbound/analysis`** — the analytic statistics: a hypergeometric core
@@ -55,16 +56,32 @@ quantity in `GameConfig` cites its rule number.
 
 What is **not** built yet, in rough dependency order:
 
-1. **The Chain, Priority and Focus** (rules 307-313, 327) — the substrate
-   everything interactive needs.
-2. **Playing cards and paying costs** — Rune Pools, exhausting for Energy,
-   recycling for Power.
-3. **Movement, Showdowns and Combat** (rules 341, 445, 459-466), and with them
+1. **Movement, Showdowns and Combat** (rules 341, 445, 459-466), and with them
    Scoring by Conquer and the Final Point restriction.
+2. **Card effects.** Cards currently have costs and types but no rules text
+   behaviour, so a Spell resolving off the Chain simply goes to the trash. The
+   seams are `totalCost` in `play.ts` (rule 356's cost modification layers) and
+   the resolution branch of `pass` in `reduce.ts`.
+3. **Focus** (rule 313) — only meaningful once Showdowns exist; `priority` is
+   implemented, `focus` is not.
 4. **The Mulligan** (rule 117) — verified but unimplemented: it is a player
    choice, so it needs a setup-time decision point rather than a config value.
 5. **Signature card limits and champion tag matching** (103.2.a.2, 103.2.d) —
    both need card data that carries champion tags.
+
+### Simplifications in the Process of Play
+
+Both are documented at their call sites and reach the same states as the rules
+would with the cards that exist today:
+
+- **Adding resources is a separate action from playing a card.** Rule 357.1.a
+  lets a controller activate Add Reactions *during* the Pay step. Basic Runes
+  are the only resource source (164.2) and their abilities are Reactions usable
+  whenever resources are needed (429.3), so filling the pool first is equivalent.
+- **Steps 1-6 of rule 353 run atomically.** No player can act between a card
+  going on the Chain and finalizing, and a Permanent leaves the Chain at that
+  moment (359.2), so only Spells ever linger and only they open a response
+  window.
 
 ## Development
 
