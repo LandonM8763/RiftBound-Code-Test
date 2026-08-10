@@ -1,0 +1,33 @@
+// Sample deck list for the example card data in this folder.
+// Fictional cards; see examples/README.md.
+
+# Legend
+1 SAMPLE-001
+
+# Champion
+1 SAMPLE-002
+
+# Main
+3 SAMPLE-010
+3 SAMPLE-011
+3 SAMPLE-012
+3 SAMPLE-013
+3 SAMPLE-014
+3 SAMPLE-015
+3 SAMPLE-016
+3 SAMPLE-017
+3 SAMPLE-018
+3 SAMPLE-019
+3 SAMPLE-020
+3 SAMPLE-021
+3 SAMPLE-022
+1 SAMPLE-023
+
+# Runes
+6 SAMPLE-100
+6 SAMPLE-101
+
+# Battlefields
+1 SAMPLE-200
+1 SAMPLE-201
+1 SAMPLE-202

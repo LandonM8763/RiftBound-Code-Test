@@ -42,6 +42,11 @@ What is built:
   (including the multivariate case), cost curve, draw probabilities by turn,
   Domain/Power consistency, and per-card castability. No engine, no agent, no
   randomness — closed-form and exact.
+- **`@riftbound/cli`** — `riftbound analyze|validate <deck> --cards <cards.json>`,
+  with text or `--json` output. This is where presentation lives; nothing below
+  it formats anything. `packages/cli/examples/` holds invented sample cards and a
+  legal deck list so the tool runs today, and the suite reads them so a broken
+  example fails CI.
 
 What is deliberately **not** built, and why: playing cards, moving Units,
 Showdowns, and combat. Those depend on rules not yet verified against the official
@@ -68,6 +73,24 @@ package builds and typechecked by `tsconfig.test.json` instead — that is why
 
 CI (`.github/workflows/ci.yml`) runs the typecheck and the suite, which includes
 the random-agent fuzz run.
+
+Try the CLI against the sample data:
+
+```bash
+npm run build
+node packages/cli/dist/main.js analyze packages/cli/examples/deck.txt \
+  --cards packages/cli/examples/cards.json
+```
+
+### Adding a package
+
+Only **one** config file needs editing: add a `references` entry to the root
+`tsconfig.json`, which `tsc --build` requires to be explicit. `vitest.config.ts`
+and `tsconfig.test.json` resolve `@riftbound/*` by pattern and need no change —
+that is deliberate, so two people (or two sessions) adding packages at the same
+time do not collide in shared config.
+
+Then add the package to the status list above and the table in `README.md`.
 
 ## Scope and phasing
 
@@ -199,7 +222,7 @@ packages/
   analysis/   EXISTS  Statistics: curve, consistency, draw probabilities
   suggest/    planned Deck edit recommendations
   sim/        planned Batch simulation harness
-  cli/        planned Developer-facing entry point until the UI exists
+  cli/        EXISTS  Developer-facing entry point until the UI exists
 ```
 
 Deck *construction* rules (40 cards, 12 Runes, the 3-copy limit, Domain Identity)

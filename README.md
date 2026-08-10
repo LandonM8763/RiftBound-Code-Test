@@ -26,9 +26,21 @@ Requires Node 22 or newer.
 | `@riftbound/engine` | Rules engine: seeded RNG, game state, turn phases, legal action generation, observable views |
 | `@riftbound/ai` | Agent interface, random legal agent, single-game runner |
 | `@riftbound/analysis` | Cost curve, draw probabilities, Domain/Power consistency, castability |
+| `@riftbound/cli` | `riftbound analyze` / `validate` for a deck list file |
 
 More packages (suggestions, batch simulation harness) are planned; see `CLAUDE.md`
 for the architecture and phasing.
+
+## Try it
+
+```bash
+npm run build
+node packages/cli/dist/main.js analyze packages/cli/examples/deck.txt \
+  --cards packages/cli/examples/cards.json
+```
+
+The example cards are invented placeholders, not real Riftbound cards — see
+`packages/cli/examples/README.md`.
 
 ## Contributing notes
 

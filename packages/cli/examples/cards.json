@@ -1,0 +1,210 @@
+[
+  {
+    "id": "SAMPLE-001",
+    "name": "Ember Warden",
+    "type": "legend",
+    "domains": ["fury", "calm"],
+    "domainIdentity": ["fury", "calm"],
+    "text": "Sample data. Not a real Riftbound card.",
+    "tags": []
+  },
+  {
+    "id": "SAMPLE-002",
+    "name": "Ashen Vanguard",
+    "type": "unit",
+    "domains": ["fury"],
+    "cost": { "energy": 3, "power": ["fury"] },
+    "might": 4,
+    "champion": true,
+    "text": "Sample data. Not a real Riftbound card.",
+    "tags": ["champion"]
+  },
+  {
+    "id": "SAMPLE-010",
+    "name": "Kindling Scout",
+    "type": "unit",
+    "domains": ["fury"],
+    "cost": { "energy": 1, "power": [] },
+    "might": 2,
+    "champion": false,
+    "text": "",
+    "tags": []
+  },
+  {
+    "id": "SAMPLE-011",
+    "name": "Emberling",
+    "type": "unit",
+    "domains": ["fury"],
+    "cost": { "energy": 2, "power": [] },
+    "might": 3,
+    "champion": false,
+    "text": "",
+    "tags": []
+  },
+  {
+    "id": "SAMPLE-012",
+    "name": "Flame Adept",
+    "type": "unit",
+    "domains": ["fury"],
+    "cost": { "energy": 2, "power": ["fury"] },
+    "might": 3,
+    "champion": false,
+    "text": "",
+    "tags": []
+  },
+  {
+    "id": "SAMPLE-013",
+    "name": "Cinder Brute",
+    "type": "unit",
+    "domains": ["fury"],
+    "cost": { "energy": 3, "power": ["fury"] },
+    "might": 5,
+    "champion": false,
+    "text": "",
+    "tags": []
+  },
+  {
+    "id": "SAMPLE-014",
+    "name": "Ashfall Titan",
+    "type": "unit",
+    "domains": ["fury"],
+    "cost": { "energy": 5, "power": ["fury", "fury"] },
+    "might": 8,
+    "champion": false,
+    "text": "",
+    "tags": []
+  },
+  {
+    "id": "SAMPLE-015",
+    "name": "Tidewatcher",
+    "type": "unit",
+    "domains": ["calm"],
+    "cost": { "energy": 1, "power": [] },
+    "might": 1,
+    "champion": false,
+    "text": "",
+    "tags": []
+  },
+  {
+    "id": "SAMPLE-016",
+    "name": "Still Water Monk",
+    "type": "unit",
+    "domains": ["calm"],
+    "cost": { "energy": 2, "power": ["calm"] },
+    "might": 3,
+    "champion": false,
+    "text": "",
+    "tags": []
+  },
+  {
+    "id": "SAMPLE-017",
+    "name": "Deepcurrent Sage",
+    "type": "unit",
+    "domains": ["calm"],
+    "cost": { "energy": 3, "power": ["calm"] },
+    "might": 4,
+    "champion": false,
+    "text": "",
+    "tags": []
+  },
+  {
+    "id": "SAMPLE-018",
+    "name": "Harmony Keeper",
+    "type": "unit",
+    "domains": ["fury", "calm"],
+    "cost": { "energy": 4, "power": ["fury", "calm"] },
+    "might": 6,
+    "champion": false,
+    "text": "",
+    "tags": []
+  },
+  {
+    "id": "SAMPLE-019",
+    "name": "Scorch",
+    "type": "spell",
+    "domains": ["fury"],
+    "cost": { "energy": 1, "power": ["fury"] },
+    "timing": "action",
+    "text": "",
+    "tags": []
+  },
+  {
+    "id": "SAMPLE-020",
+    "name": "Undertow",
+    "type": "spell",
+    "domains": ["calm"],
+    "cost": { "energy": 2, "power": ["calm"] },
+    "timing": "reaction",
+    "text": "",
+    "tags": []
+  },
+  {
+    "id": "SAMPLE-021",
+    "name": "Rally Banner",
+    "type": "gear",
+    "domains": ["fury"],
+    "cost": { "energy": 2, "power": [] },
+    "text": "",
+    "tags": []
+  },
+  {
+    "id": "SAMPLE-022",
+    "name": "Tidal Charm",
+    "type": "gear",
+    "domains": ["calm"],
+    "cost": { "energy": 1, "power": [] },
+    "text": "",
+    "tags": []
+  },
+  {
+    "id": "SAMPLE-023",
+    "name": "Emberheart Relic",
+    "type": "gear",
+    "domains": ["fury", "calm"],
+    "cost": { "energy": 3, "power": ["fury", "calm"] },
+    "text": "",
+    "tags": []
+  },
+  {
+    "id": "SAMPLE-100",
+    "name": "Fury Rune",
+    "type": "rune",
+    "domains": ["fury"],
+    "domain": "fury",
+    "text": "",
+    "tags": []
+  },
+  {
+    "id": "SAMPLE-101",
+    "name": "Calm Rune",
+    "type": "rune",
+    "domains": ["calm"],
+    "domain": "calm",
+    "text": "",
+    "tags": []
+  },
+  {
+    "id": "SAMPLE-200",
+    "name": "Sunken Causeway",
+    "type": "battlefield",
+    "domains": [],
+    "text": "",
+    "tags": []
+  },
+  {
+    "id": "SAMPLE-201",
+    "name": "Cinder Bridge",
+    "type": "battlefield",
+    "domains": [],
+    "text": "",
+    "tags": []
+  },
+  {
+    "id": "SAMPLE-202",
+    "name": "Quiet Harbour",
+    "type": "battlefield",
+    "domains": [],
+    "text": "",
+    "tags": []
+  }
+]

@@ -2,20 +2,20 @@ import { fileURLToPath } from 'node:url';
 
 import { defineConfig } from 'vitest/config';
 
-const src = (pkg: string, file: string): string =>
-  fileURLToPath(new URL(`./packages/${pkg}/src/${file}`, import.meta.url));
+const packages = fileURLToPath(new URL('./packages', import.meta.url));
 
 export default defineConfig({
   resolve: {
-    // Run tests against TypeScript sources so the suite never depends on a
-    // prior build. Longest specifier first — these are matched in order.
+    // Resolve every workspace package to its TypeScript source, so the suite
+    // never depends on a prior build. These are patterns rather than a list
+    // per package: adding a package needs no edit here, which keeps parallel
+    // work on different packages from colliding in this file.
+    //
+    // Subpath rule first — aliases are matched in order, and the bare-package
+    // rule would otherwise swallow `@riftbound/cards/testing`.
     alias: [
-      { find: '@riftbound/cards/testing', replacement: src('cards', 'testing.ts') },
-      { find: '@riftbound/cards', replacement: src('cards', 'index.ts') },
-      { find: '@riftbound/deck', replacement: src('deck', 'index.ts') },
-      { find: '@riftbound/engine', replacement: src('engine', 'index.ts') },
-      { find: '@riftbound/ai', replacement: src('ai', 'index.ts') },
-      { find: '@riftbound/analysis', replacement: src('analysis', 'index.ts') },
+      { find: /^@riftbound\/([^/]+)\/(.+)$/, replacement: `${packages}/$1/src/$2.ts` },
+      { find: /^@riftbound\/([^/]+)$/, replacement: `${packages}/$1/src/index.ts` },
     ],
   },
   test: {

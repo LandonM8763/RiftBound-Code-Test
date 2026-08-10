@@ -1,0 +1,25 @@
+{
+  "name": "@riftbound/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "riftbound": "./dist/main.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@riftbound/analysis": "*",
+    "@riftbound/cards": "*",
+    "@riftbound/deck": "*"
+  },
+  "scripts": {
+    "build": "tsc --build"
+  }
+}

@@ -5,6 +5,7 @@
     { "path": "./packages/deck" },
     { "path": "./packages/engine" },
     { "path": "./packages/ai" },
-    { "path": "./packages/analysis" }
+    { "path": "./packages/analysis" },
+    { "path": "./packages/cli" }
   ]
 }
