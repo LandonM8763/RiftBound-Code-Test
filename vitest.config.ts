@@ -15,6 +15,7 @@ export default defineConfig({
       { find: '@riftbound/deck', replacement: src('deck', 'index.ts') },
       { find: '@riftbound/engine', replacement: src('engine', 'index.ts') },
       { find: '@riftbound/ai', replacement: src('ai', 'index.ts') },
+      { find: '@riftbound/analysis', replacement: src('analysis', 'index.ts') },
     ],
   },
   test: {

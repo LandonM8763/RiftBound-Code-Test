@@ -38,6 +38,10 @@ What is built:
   observable views, and a structural invariant checker.
 - **`@riftbound/ai`** — the `Agent` interface, a seeded random legal agent, and a
   single-game runner that keeps agents honest.
+- **`@riftbound/analysis`** — the analytic statistics: a hypergeometric core
+  (including the multivariate case), cost curve, draw probabilities by turn,
+  Domain/Power consistency, and per-card castability. No engine, no agent, no
+  randomness — closed-form and exact.
 
 What is deliberately **not** built, and why: playing cards, moving Units,
 Showdowns, and combat. Those depend on rules not yet verified against the official
@@ -192,7 +196,7 @@ packages/
   deck/       EXISTS  Deck list parsing, deck model, format legality validation
   engine/     EXISTS  The rules engine: state, legal actions, resolution
   ai/         EXISTS  Agents (random → heuristic → search-based)
-  analysis/   planned Statistics: curve, consistency, draw probabilities, win rates
+  analysis/   EXISTS  Statistics: curve, consistency, draw probabilities
   suggest/    planned Deck edit recommendations
   sim/        planned Batch simulation harness
   cli/        planned Developer-facing entry point until the UI exists
@@ -280,6 +284,18 @@ Two distinct kinds — do not conflate them:
   iterations for meaningful confidence intervals. **Always report the sample size
   and an uncertainty measure** — a win rate with no confidence interval is not a
   statistic.
+
+The analytic side is built in `analysis/`. Two things to know before extending it:
+
+- **Sampling is without replacement**, so the hypergeometric distribution is the
+  model, not the binomial. Multi-Domain Power costs are a *joint* question —
+  every Fury Rune Channelled is one fewer slot for a Calm Rune — so
+  `multivariateAtLeast` solves them together. Multiplying per-Domain
+  probabilities overstates the answer, and there is a test that pins that down.
+- **Power availability ignores Recycling.** Paying Power puts Runes on the bottom
+  of the Rune deck, which changes the population mid-game. The model is exact
+  until the first Recycle and a first-order estimate after it. Fine for the early
+  turns that decide most games; do not quote it as a whole-game figure.
 
 ## Tech stack
 

@@ -12,7 +12,8 @@
       "@riftbound/cards/testing": ["./packages/cards/src/testing.ts"],
       "@riftbound/deck": ["./packages/deck/src/index.ts"],
       "@riftbound/engine": ["./packages/engine/src/index.ts"],
-      "@riftbound/ai": ["./packages/ai/src/index.ts"]
+      "@riftbound/ai": ["./packages/ai/src/index.ts"],
+      "@riftbound/analysis": ["./packages/analysis/src/index.ts"]
     }
   },
   "include": ["packages/*/src/**/*"]

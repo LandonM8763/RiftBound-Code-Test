@@ -4,6 +4,7 @@
     { "path": "./packages/cards" },
     { "path": "./packages/deck" },
     { "path": "./packages/engine" },
-    { "path": "./packages/ai" }
+    { "path": "./packages/ai" },
+    { "path": "./packages/analysis" }
   ]
 }
