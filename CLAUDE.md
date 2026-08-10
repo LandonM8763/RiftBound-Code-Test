@@ -37,9 +37,12 @@ What is built:
   the full turn phase machine (Awaken, Beginning, Channel, Draw, Main, Ending),
   Scoring by Hold, Burn Out, the win condition, Rune Pools, the Chain with
   Priority, the Process of Play, the Standard Move and Contested status,
-  **Non-Combat Showdowns with Focus, and Scoring by Conquer including the Final
-  Point restriction**, first-class legal action generation, per-player
-  observable views, and a structural invariant checker.
+  Showdowns with Focus, **the full Steps of Combat**, and Scoring by Conquer
+  including the Final Point restriction, first-class legal action generation,
+  per-player observable views, and a structural invariant checker.
+
+  With Combat in, the engine can play a complete game of Riftbound with vanilla
+  cards: contest a Battlefield, fight over it, take Control, and score to 8.
 - **`@riftbound/ai`** — the `Agent` interface, a seeded random legal agent, and a
   single-game runner that keeps agents honest.
 - **`@riftbound/analysis`** — the analytic statistics: a hypergeometric core
@@ -58,21 +61,13 @@ quantity in `GameConfig` cites its rule number.
 
 What is **not** built yet, in rough dependency order:
 
-1. **Combat** (rules 459-466), and with it the Combat Showdown. Non-Combat
-   Showdowns are done — moving onto an *empty* Battlefield opens one, Focus
-   passes until everyone passes in sequence, and Control is established with a
-   Conquer. Moving onto a Battlefield an opponent has Units at is the Combat
-   case, and is currently refused: `isValidDestination` in `move.ts` excludes
-   those destinations so `legalActions` never offers a move the engine cannot
-   finish, and `openShowdown` throws as a backstop. Delete both when Combat
-   lands.
-2. **Card effects.** Cards currently have costs and types but no rules text
+1. **Card effects.** Cards currently have costs and types but no rules text
    behaviour, so a Spell resolving off the Chain simply goes to the trash. The
    seams are `totalCost` in `play.ts` (rule 356's cost modification layers) and
    the resolution branch of `pass` in `reduce.ts`.
-3. **The Mulligan** (rule 117) — verified but unimplemented: it is a player
+2. **The Mulligan** (rule 117) — verified but unimplemented: it is a player
    choice, so it needs a setup-time decision point rather than a config value.
-4. **Signature card limits and champion tag matching** (103.2.a.2, 103.2.d) —
+3. **Signature card limits and champion tag matching** (103.2.a.2, 103.2.d) —
    both need card data that carries champion tags.
 
 Focus (rule 313) *is* implemented, as part of Non-Combat Showdowns: granted to
@@ -93,6 +88,19 @@ would with the cards that exist today:
   going on the Chain and finalizing, and a Permanent leaves the Chain at that
   moment (359.2), so only Spells ever linger and only they open a response
   window.
+- **Combat damage assignment order is fixed, not chosen.** Rule 465.2.c lets the
+  assigning player pick the order, which decides *which* enemy Units die.
+  `assignDamage` in `combat.ts` walks the targets in a fixed order instead. Every
+  constraint is still obeyed — lethal-first (465.2.c.3), no overkill while others
+  remain (465.2.c.4) — so totals and death counts are right, but the choice is
+  not yet exposed. Making it one needs a sub-action protocol during the Damage
+  Step.
+
+A note for whoever writes card effects: **a Recall (466.1.a.2) is unreachable
+with vanilla Units.** Might is both the damage a Unit deals and the damage it
+survives, so one side outlives the other exactly when it has more Might — the
+comparison cannot go both ways, and Attacker and Defender can never both
+survive. Damage prevention or healing is what makes Recalls possible.
 
 ## Development
 

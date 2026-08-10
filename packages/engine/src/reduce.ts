@@ -4,6 +4,13 @@ import { IllegalActionError, type Action } from './actions.js';
 import type { GameEvent } from './events.js';
 import { addPoints, moveEntity, withEntity, withPlayer } from './mutate.js';
 import {
+  assignDamage,
+  combatResult,
+  combatSides,
+  hasLethalDamage,
+  sumMight,
+} from './combat.js';
+import {
   applyContested,
   canStandardMove,
   cleanupControl,
@@ -401,18 +408,28 @@ function openShowdown(state: GameState, events: GameEvent[]): GameState {
   );
   // 344.1: opposing Units make this a Combat Showdown, which runs the Steps of
   // Combat. Not implemented, so refuse rather than resolve it wrongly.
+  // 344.1 / 461: opposing Units make this a Combat Showdown.
   const combat = controllers.size > 1;
+
+  // 464.2.c: the Attacker is whoever applied Contested; the Defender is the
+  // other player. 464.2.d: the Attacker gains Focus.
+  let attacker: PlayerId | null = null;
+  let defender: PlayerId | null = null;
   if (combat) {
-    throw new IllegalActionError(
-      'Combat Showdowns are not implemented yet (rules 344.1, 459-466)',
-    );
+    attacker = contestedBy;
+    defender =
+      [...controllers].find((candidate) => candidate !== contestedBy) ?? null;
+    if (defender === null) {
+      throw new Error('A Combat Showdown needs two opposing players');
+    }
+    events.push({ type: 'combatOpened', battlefield: index, attacker, defender });
   }
 
   events.push({ type: 'showdownOpened', battlefield: index, focus: contestedBy });
 
   return {
     ...state,
-    showdown: { battlefield: index, focus: contestedBy, passes: 0, combat },
+    showdown: { battlefield: index, focus: contestedBy, passes: 0, combat, attacker, defender },
     priority: contestedBy,
     passes: 0,
   };
@@ -437,8 +454,14 @@ function closeShowdown(state: GameState, events: GameEvent[]): ReduceResult {
     battlefield.units.map((unit) => getEntity(state, unit).controller),
   );
 
-  let next: GameState = { ...state, showdown: null, priority: state.activePlayer, passes: 0 };
   events.push({ type: 'showdownClosed', battlefield: index });
+
+  // 348.1: a Combat Showdown proceeds with the remaining Steps of Combat.
+  if (showdown.combat && showdown.attacker !== null && showdown.defender !== null) {
+    return resolveCombat(state, index, showdown.attacker, showdown.defender, events);
+  }
+
+  let next: GameState = { ...state, showdown: null, priority: state.activePlayer, passes: 0 };
 
   const claimant = controllers.size === 1 ? [...controllers][0] : undefined;
   if (claimant === undefined || battlefield.controller === claimant) {
@@ -521,6 +544,131 @@ function withBattlefield(
   const battlefields = state.battlefields.slice();
   battlefields[index] = update(battlefields[index] as BattlefieldState);
   return { ...state, battlefields };
+}
+
+/**
+ * The Combat Damage Step and Resolution Step (rules 465-466).
+ *
+ * Damage is summed per side, assigned among the *other* side's Units, and dealt
+ * simultaneously — there is no Might comparison anywhere in this. The result
+ * then falls out of who still has Units at the Battlefield.
+ */
+function resolveCombat(
+  state: GameState,
+  index: number,
+  attacker: PlayerId,
+  defender: PlayerId,
+  events: GameEvent[],
+): ReduceResult {
+  let next: GameState = { ...state, showdown: null, priority: state.activePlayer, passes: 0 };
+
+  const sides = combatSides(next, index, attacker, defender);
+
+  // 465.1: damage only happens if both sides still have Units present.
+  if (sides.attackingUnits.length > 0 && sides.defendingUnits.length > 0) {
+    const attackerMight = sumMight(next, sides.attackingUnits);
+    const defenderMight = sumMight(next, sides.defendingUnits);
+
+    // 465.2.c: the Attacker assigns first, but assignment is not dealing —
+    // both assignments are computed against the pre-damage board and then dealt
+    // together (465.2.c.1.a).
+    const onDefenders = assignDamage(next, attackerMight, sides.defendingUnits);
+    const onAttackers = assignDamage(next, defenderMight, sides.attackingUnits);
+
+    const assigned: { unit: EntityId; damage: number }[] = [];
+    for (const [unit, damage] of [...onDefenders, ...onAttackers]) {
+      assigned.push({ unit, damage });
+      next = withEntity(next, unit, (current) => ({
+        ...current,
+        damage: current.damage + damage,
+      }));
+    }
+
+    events.push({
+      type: 'combatDamage',
+      battlefield: index,
+      attackerMight,
+      defenderMight,
+      assigned,
+    });
+  }
+
+  // 428.4 / 466.1: the Combat Cleanup kills Units with lethal damage, then
+  // heals the survivors.
+  const killed: EntityId[] = [];
+  for (const unit of next.battlefields[index]?.units ?? []) {
+    if (hasLethalDamage(next, unit)) {
+      killed.push(unit);
+    }
+  }
+  for (const unit of killed) {
+    const owner = getEntity(next, unit).owner;
+    next = moveEntity(next, unit, playerLocation(owner, 'trash'));
+    next = withEntity(next, unit, (current) => ({ ...current, damage: 0, exhausted: false }));
+  }
+  if (killed.length > 0) {
+    events.push({ type: 'unitsKilled', units: killed });
+  }
+
+  // 466.1.a.1: heal all Units.
+  for (const unit of next.battlefields[index]?.units ?? []) {
+    next = withEntity(next, unit, (current) => ({ ...current, damage: 0 }));
+  }
+
+  const after = combatSides(next, index, attacker, defender);
+  const defenderHasUnits = after.defendingUnits.length > 0;
+
+  // 466.1.a.2: Recall surviving Attackers if any Defender is still present.
+  let attackersRecalled = false;
+  if (defenderHasUnits && after.attackingUnits.length > 0) {
+    attackersRecalled = true;
+    for (const unit of after.attackingUnits) {
+      // A Recall is not a Move, and leaves damage and statuses alone (458.1).
+      next = moveEntity(next, unit, playerLocation(attacker, 'base'));
+    }
+    events.push({ type: 'unitsRecalled', units: after.attackingUnits });
+  }
+
+  const settled = combatSides(next, index, attacker, defender);
+  const result = combatResult(
+    settled.attackingUnits.length > 0,
+    settled.defendingUnits.length > 0,
+    attackersRecalled,
+    settled,
+  );
+
+  events.push({
+    type: 'combatResolved',
+    battlefield: index,
+    winner: result.kind === 'won' ? result.winner : null,
+    reason: result.kind === 'won' ? 'units remaining' : result.reason,
+  });
+
+  // 466.5: establish Control, clearing Contested (466.5.a). With nobody left
+  // the Battlefield becomes Uncontrolled (466.5.b).
+  next = withBattlefield(next, index, (current) => ({ ...current, contestedBy: null }));
+
+  const holders = new Set(
+    (next.battlefields[index]?.units ?? []).map((unit) => getEntity(next, unit).controller),
+  );
+  const claimant = holders.size === 1 ? [...holders][0] : undefined;
+
+  if (claimant === undefined) {
+    if (holders.size === 0) {
+      next = withBattlefield(next, index, (current) => ({ ...current, controller: null }));
+    }
+    return { state: next, events };
+  }
+
+  if (next.battlefields[index]?.controller === claimant) {
+    return { state: next, events };
+  }
+
+  next = withBattlefield(next, index, (current) => ({ ...current, controller: claimant }));
+  events.push({ type: 'controlEstablished', battlefield: index, player: claimant });
+
+  // 466.5.d: establishing Control is a Conquer.
+  return conquer(next, index, claimant, events);
 }
 
 function requirePriority(state: GameState): PlayerId {

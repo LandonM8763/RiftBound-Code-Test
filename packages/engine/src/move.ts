@@ -46,12 +46,8 @@ export function standardMoveDestinations(state: GameState, unit: EntityId): Loca
  * Units belonging to two *other* players. With two players this never bites,
  * but the rule is about seats rather than about 1v1.
  *
- * ENGINE LIMIT, not a rule: a destination holding *any* other player's Units is
- * refused, because moving in would open a Combat Showdown (344.1) and the Steps
- * of Combat are not implemented. `legalActions` promises every action it offers
- * is one `reduce` accepts, so the restriction has to live here rather than
- * surfacing as a failure part-way through a move. Delete this branch when
- * Combat lands.
+ * Moving onto a Battlefield one other player holds is legal and is how Combat
+ * starts (452, 461).
  */
 function isValidDestination(
   state: GameState,
@@ -65,7 +61,7 @@ function isValidDestination(
       others.add(controller);
     }
   }
-  return others.size === 0;
+  return others.size < 2;
 }
 
 /**

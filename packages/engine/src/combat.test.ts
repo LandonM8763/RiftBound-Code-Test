@@ -1,0 +1,355 @@
+/**
+ * Combat.
+ *
+ * Rule numbers cite the official Riftbound Core Rules, RUP4 of 2026-07-16.
+ *
+ * These tests exist mostly to pin down what Combat is *not*: there is no Might
+ * comparison and no tie-destroys-everything rule, both of which community
+ * summaries assert and a future session may be tempted to "fix" back in.
+ */
+import { CardRegistry, cardId, cost, type CardDefinition } from '@riftbound/cards';
+import { makeBattlefield, makeLegend, makeRune, makeUnit } from '@riftbound/cards/testing';
+import { describe, expect, it } from 'vitest';
+
+import { assignDamage, combatResult, sumMight } from './combat.js';
+import { checkInvariants } from './invariants.js';
+import { moveEntity } from './mutate.js';
+import { reduce } from './reduce.js';
+import { createGame, type DeckList } from './setup.js';
+import {
+  battlefieldLocation,
+  type EntityId,
+  type GameState,
+  isOver,
+  isShowdown,
+  playerId,
+  playerLocation,
+} from './state.js';
+
+const LEGEND = makeLegend(['fury', 'calm'], { id: cardId('C-000') });
+const CHAMPION = makeUnit(3, ['fury'], { id: cardId('C-001'), champion: true });
+const BIG = makeUnit(5, ['fury'], { id: cardId('C-010'), name: 'Big', cost: cost(1) });
+const SMALL = makeUnit(2, ['fury'], { id: cardId('C-011'), name: 'Small', cost: cost(1) });
+const FURY_RUNE = makeRune('fury', { id: cardId('C-100') });
+const BATTLEFIELDS = Array.from({ length: 3 }, (_, i) =>
+  makeBattlefield({ id: cardId(`C-20${i}`) }),
+);
+
+const REGISTRY = CardRegistry.from([
+  LEGEND,
+  CHAMPION,
+  BIG,
+  SMALL,
+  FURY_RUNE,
+  ...BATTLEFIELDS,
+] as CardDefinition[]);
+
+function deck(): DeckList {
+  return {
+    legend: LEGEND.id,
+    champion: CHAMPION.id,
+    main: [...Array.from({ length: 8 }, () => BIG.id), ...Array.from({ length: 8 }, () => SMALL.id)],
+    runes: Array.from({ length: 8 }, () => FURY_RUNE.id),
+    battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
+  };
+}
+
+function inMainPhase(seed = 'combat'): GameState {
+  let state = createGame({ decks: [deck(), deck()], registry: REGISTRY, seed }).state;
+  while (state.phase !== 'main' && !isOver(state)) {
+    state = reduce(state, { type: 'resolvePhase' }).state;
+  }
+  return state;
+}
+
+/** Place a ready Unit of `card` directly at a Battlefield, controlled by `owner`. */
+function place(
+  state: GameState,
+  owner: number,
+  card: CardDefinition,
+  battlefield: number,
+): [GameState, EntityId] {
+  const player = playerId(owner);
+  const id = state.players[player]!.zones.mainDeck.find(
+    (candidate) => state.entities[candidate]!.card === card.id,
+  );
+  if (id === undefined) {
+    throw new Error(`No ${card.name} left in player ${owner}'s deck`);
+  }
+  return [moveEntity(state, id, battlefieldLocation(battlefield)), id];
+}
+
+/**
+ * A board where the defender already holds Battlefield 0, and the attacker has
+ * a ready Unit at their Base poised to move in.
+ */
+function poised(
+  attackerCard: CardDefinition,
+  defenderCard: CardDefinition,
+  seed = 'combat',
+): { state: GameState; attacker: number; defender: number; mover: EntityId } {
+  const start = inMainPhase(seed);
+  const attacker = start.activePlayer;
+  const defender = (attacker + 1) % start.players.length;
+
+  const [withDefender] = place(start, defender, defenderCard, 0);
+  const held: GameState = {
+    ...withDefender,
+    battlefields: withDefender.battlefields.map((battlefield, index) =>
+      index === 0 ? { ...battlefield, controller: playerId(defender) } : battlefield,
+    ),
+  };
+
+  const moverId = held.players[playerId(attacker)]!.zones.mainDeck.find(
+    (candidate) => held.entities[candidate]!.card === attackerCard.id,
+  );
+  if (moverId === undefined) {
+    throw new Error('No attacking Unit available');
+  }
+  const state = moveEntity(held, moverId, playerLocation(playerId(attacker), 'base'));
+
+  return { state, attacker, defender, mover: moverId };
+}
+
+/** Move in, then pass Focus until the Combat resolves. */
+function fight(setup: ReturnType<typeof poised>): GameState {
+  let state = reduce(setup.state, {
+    type: 'moveUnits',
+    units: [setup.mover],
+    to: battlefieldLocation(0),
+  }).state;
+
+  for (let i = 0; i < 10 && isShowdown(state); i += 1) {
+    state = reduce(state, { type: 'pass' }).state;
+  }
+  return state;
+}
+
+describe('damage assignment (rule 465.2.c)', () => {
+  it('assigns lethal to a Unit before moving to the next (465.2.c.3)', () => {
+    let state = inMainPhase();
+    const [a, first] = place(state, 0, SMALL, 0);
+    state = a;
+    const [b, second] = place(state, 0, SMALL, 0);
+    state = b;
+
+    // 5 damage among two 2-Might Units: 2 kills the first, 2 kills the second,
+    // and the last point has nowhere lethal left to go.
+    const assignment = assignDamage(state, 5, [first, second]);
+
+    expect(assignment.get(first)).toBe(2);
+    expect(assignment.get(second)).toBe(2);
+  });
+
+  it('does not overkill while other Units remain (465.2.c.4)', () => {
+    let state = inMainPhase();
+    const [a, first] = place(state, 0, BIG, 0);
+    state = a;
+    const [b, second] = place(state, 0, BIG, 0);
+    state = b;
+
+    // 5 Might exactly kills one 5-Might Unit and leaves nothing for the other.
+    const assignment = assignDamage(state, 5, [first, second]);
+
+    expect(assignment.get(first)).toBe(5);
+    expect(assignment.get(second)).toBeUndefined();
+  });
+
+  it('gives the remainder to a Unit it cannot kill', () => {
+    let state = inMainPhase();
+    const [a, unit] = place(state, 0, BIG, 0);
+    state = a;
+
+    const assignment = assignDamage(state, 3, [unit]);
+
+    expect(assignment.get(unit)).toBe(3);
+  });
+
+  it('accounts for damage already marked', () => {
+    let state = inMainPhase();
+    const [a, unit] = place(state, 0, BIG, 0);
+    state = { ...a, entities: { ...a.entities, [unit]: { ...a.entities[unit]!, damage: 3 } } };
+
+    // 5 Might, already on 3: two more is lethal.
+    expect(assignDamage(state, 4, [unit]).get(unit)).toBe(2);
+  });
+
+  it('sums Might across a side (rule 465.2.a)', () => {
+    let state = inMainPhase();
+    const [a, big] = place(state, 0, BIG, 0);
+    state = a;
+    const [b, small] = place(state, 0, SMALL, 0);
+    state = b;
+
+    expect(sumMight(state, [big, small])).toBe(7);
+  });
+});
+
+describe('the combat result (rule 466.3)', () => {
+  const sides = {
+    attacker: playerId(0),
+    defender: playerId(1),
+    attackingUnits: [],
+    defendingUnits: [],
+  };
+
+  it('is a win for the only player with Units remaining', () => {
+    expect(combatResult(true, false, false, sides)).toEqual({
+      kind: 'won',
+      winner: playerId(0),
+      loser: playerId(1),
+    });
+    expect(combatResult(false, true, false, sides)).toEqual({
+      kind: 'won',
+      winner: playerId(1),
+      loser: playerId(0),
+    });
+  });
+
+  it('is No Result when both sides still have Units', () => {
+    expect(combatResult(true, true, false, sides)).toEqual({ kind: 'noResult', reason: 'both' });
+  });
+
+  it('is No Result when neither side has Units', () => {
+    // Community summaries call this "a tie destroys everything and nobody wins".
+    // The destruction is a consequence of mutual lethal assignment, not a rule,
+    // and the result is simply No Result.
+    expect(combatResult(false, false, false, sides)).toEqual({
+      kind: 'noResult',
+      reason: 'neither',
+    });
+  });
+
+  it('is No Result when Attackers were Recalled (466.1.a.2)', () => {
+    expect(combatResult(true, true, true, sides)).toEqual({
+      kind: 'noResult',
+      reason: 'recalled',
+    });
+  });
+});
+
+describe('fighting a Combat end to end', () => {
+  it('opens a Combat Showdown when Units meet (rule 344.1)', () => {
+    const setup = poised(BIG, SMALL);
+    const state = reduce(setup.state, {
+      type: 'moveUnits',
+      units: [setup.mover],
+      to: battlefieldLocation(0),
+    }).state;
+
+    expect(state.showdown?.combat).toBe(true);
+    expect(state.showdown?.attacker).toBe(playerId(setup.attacker));
+    expect(state.showdown?.defender).toBe(playerId(setup.defender));
+    // 464.2.d: the Attacker gains Focus.
+    expect(state.showdown?.focus).toBe(playerId(setup.attacker));
+  });
+
+  it('kills the smaller side and takes the Battlefield', () => {
+    // 5 Might attacker against a 2 Might defender: the defender dies, the
+    // attacker survives on 2 damage which the Combat Cleanup then heals.
+    const setup = poised(BIG, SMALL);
+    const state = fight(setup);
+
+    expect(isShowdown(state)).toBe(false);
+    expect(state.battlefields[0]?.units).toEqual([setup.mover]);
+    expect(state.entities[setup.mover]!.damage).toBe(0);
+    expect(state.battlefields[0]?.controller).toBe(playerId(setup.attacker));
+    checkInvariants(state);
+  });
+
+  it('scores a Conquer for establishing Control (rule 466.5.d)', () => {
+    const setup = poised(BIG, SMALL);
+    const state = fight(setup);
+
+    expect(state.players[playerId(setup.attacker)]!.points).toBe(1);
+    expect(state.battlefields[0]?.scoredBy).toEqual([playerId(setup.attacker)]);
+  });
+
+  it('destroys both sides when each assigns lethal, leaving nobody in Control', () => {
+    // Two 2-Might Units: each assigns exactly lethal, and because assignment is
+    // not dealing (465.2.c.1.a) both die simultaneously.
+    const setup = poised(SMALL, SMALL);
+    const state = fight(setup);
+
+    expect(state.battlefields[0]?.units).toEqual([]);
+    expect(state.battlefields[0]?.controller).toBeNull();
+    // Nobody Conquered, so nobody scored.
+    expect(state.players[playerId(setup.attacker)]!.points).toBe(0);
+    expect(state.players[playerId(setup.defender)]!.points).toBe(0);
+    checkInvariants(state);
+  });
+
+  it('leaves the defender holding when the attack is too small', () => {
+    // A 2-Might attacker into a 5-Might defender: the defender takes 2 and
+    // lives, the attacker takes 5 and dies.
+    //
+    // Note this is NOT the Recall case (466.1.a.2), which needs the Attacker to
+    // survive while a Defender also survives. With vanilla Units that is
+    // unreachable: Might is both the damage dealt and the damage survived, so
+    // one side outlives the other exactly when it has more Might, and the
+    // comparison cannot go both ways. Reaching a Recall in a real game needs
+    // damage prevention or healing — that is, card effects. Until then
+    // `combatResult` covers the Recall branch directly, above.
+    const setup = poised(SMALL, BIG);
+    const state = fight(setup);
+
+    expect(state.battlefields[0]?.units).toHaveLength(1);
+    expect(state.battlefields[0]?.controller).toBe(playerId(setup.defender));
+    checkInvariants(state);
+  });
+
+  it('leaves the defender in Control after a No Result', () => {
+    const setup = poised(SMALL, BIG);
+    const state = fight(setup);
+
+    // The defender already controlled it and never lost Units, so no Conquer.
+    expect(state.players[playerId(setup.defender)]!.points).toBe(0);
+  });
+
+  it('heals every survivor in the Combat Cleanup (rule 466.1.a.1)', () => {
+    const setup = poised(BIG, SMALL);
+    const state = fight(setup);
+
+    for (const unit of state.battlefields[0]?.units ?? []) {
+      expect(state.entities[unit]!.damage).toBe(0);
+    }
+  });
+
+  it('puts killed Units in their owner\'s trash (rule 428.2)', () => {
+    const setup = poised(BIG, SMALL);
+    const before = setup.state.players[playerId(setup.defender)]!.zones.trash.length;
+    const state = fight(setup);
+
+    expect(state.players[playerId(setup.defender)]!.zones.trash.length).toBe(before + 1);
+  });
+
+  it('reports the whole sequence as events', () => {
+    const setup = poised(BIG, SMALL);
+    let state = reduce(setup.state, {
+      type: 'moveUnits',
+      units: [setup.mover],
+      to: battlefieldLocation(0),
+    }).state;
+
+    state = reduce(state, { type: 'pass' }).state;
+    const result = reduce(state, { type: 'pass' });
+
+    const types = result.events.map((event) => event.type);
+    expect(types).toContain('combatDamage');
+    expect(types).toContain('unitsKilled');
+    expect(types).toContain('combatResolved');
+    expect(types).toContain('controlEstablished');
+  });
+
+  it('lets a Combat happen at all, where movement once refused it', () => {
+    // The guard that used to exclude occupied Battlefields is gone.
+    const setup = poised(BIG, SMALL);
+    expect(() =>
+      reduce(setup.state, {
+        type: 'moveUnits',
+        units: [setup.mover],
+        to: battlefieldLocation(0),
+      }),
+    ).not.toThrow();
+  });
+});

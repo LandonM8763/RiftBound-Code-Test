@@ -156,11 +156,12 @@ export interface ShowdownState {
   readonly focus: PlayerId;
   /** Consecutive Focus passes; equal to the player count ends the Showdown. */
   readonly passes: number;
-  /**
-   * Rule 344.1: a Showdown with opposing Units present is a Combat Showdown and
-   * runs the Steps of Combat instead. Not implemented — see CLAUDE.md.
-   */
+  /** Rule 344.1: a Showdown with opposing Units present is a Combat Showdown. */
   readonly combat: boolean;
+  /** Rule 464.2.c.1: whoever applied Contested. `null` outside Combat. */
+  readonly attacker: PlayerId | null;
+  /** Rule 464.2.c.2: the player who did not apply Contested. */
+  readonly defender: PlayerId | null;
 }
 
 export interface BattlefieldState {

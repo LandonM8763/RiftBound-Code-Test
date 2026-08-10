@@ -61,6 +61,17 @@ export { knownCardCount, observe, opponentsOf, pointsOf } from './view.js';
 export type { BattlefieldView, EntityView, GameView, PlayerView } from './view.js';
 
 export {
+  assignDamage,
+  combatResult,
+  combatSides,
+  hasLethalDamage,
+  lethalRemaining,
+  mightOf,
+  sumMight,
+} from './combat.js';
+export type { CombatResult, CombatSides } from './combat.js';
+
+export {
   applyContested,
   canStandardMove,
   cleanupControl,

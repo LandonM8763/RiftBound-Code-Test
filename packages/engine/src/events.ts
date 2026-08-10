@@ -73,6 +73,32 @@ export type GameEvent =
     }
   /** Rule 344: a Showdown opened at a Battlefield. */
   | { readonly type: 'showdownOpened'; readonly battlefield: number; readonly focus: PlayerId }
+  /** Rule 464: a Combat opened at a Battlefield. */
+  | {
+      readonly type: 'combatOpened';
+      readonly battlefield: number;
+      readonly attacker: PlayerId;
+      readonly defender: PlayerId;
+    }
+  /** Rule 465: Combat Damage was assigned and dealt simultaneously. */
+  | {
+      readonly type: 'combatDamage';
+      readonly battlefield: number;
+      readonly attackerMight: number;
+      readonly defenderMight: number;
+      readonly assigned: readonly { readonly unit: EntityId; readonly damage: number }[];
+    }
+  /** Rule 428: Units died. */
+  | { readonly type: 'unitsKilled'; readonly units: readonly EntityId[] }
+  /** Rule 466.1.a.2: surviving Attackers were Recalled to their Base. */
+  | { readonly type: 'unitsRecalled'; readonly units: readonly EntityId[] }
+  /** Rule 466.3: the Combat result. */
+  | {
+      readonly type: 'combatResolved';
+      readonly battlefield: number;
+      readonly winner: PlayerId | null;
+      readonly reason: string;
+    }
   /** Rule 348: every player passed Focus and the Showdown Closed. */
   | { readonly type: 'showdownClosed'; readonly battlefield: number }
   /** Rule 348.2.a: a player established Control of a Battlefield. */
