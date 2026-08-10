@@ -21,7 +21,19 @@ export type GameEvent =
       readonly battlefield: number;
       readonly amount: number;
       readonly total: number;
+      /** Which of the two Scoring methods this was (rule 469). */
+      readonly method: 'hold' | 'conquer';
     }
+  /** Rule 431: the player ran out of Main Deck and an opponent gained a point. */
+  | {
+      readonly type: 'burnedOut';
+      readonly player: PlayerId;
+      readonly recycled: number;
+      readonly beneficiary: PlayerId;
+      readonly total: number;
+    }
+  /** Rule 317.2.b: all Units heal in the Ending Phase. */
+  | { readonly type: 'healed'; readonly entities: readonly EntityId[] }
   | { readonly type: 'runeChannelled'; readonly player: PlayerId; readonly entity: EntityId }
   | { readonly type: 'runeDeckEmpty'; readonly player: PlayerId }
   | { readonly type: 'cardDrawn'; readonly player: PlayerId; readonly entity: EntityId }

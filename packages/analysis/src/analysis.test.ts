@@ -74,14 +74,14 @@ describe('draw model', () => {
   });
 
   it('adds one draw per turn', () => {
-    expect(cardsSeenByTurn(1)).toBe(6);
-    expect(cardsSeenByTurn(3)).toBe(8);
+    expect(cardsSeenByTurn(1)).toBe(5);
+    expect(cardsSeenByTurn(3)).toBe(7);
   });
 
   it('respects a model that skips the first-turn draw', () => {
     const model = { ...DEFAULT_DRAW_MODEL, drawsOnFirstTurn: false };
-    expect(cardsSeenByTurn(1, model)).toBe(5);
-    expect(cardsSeenByTurn(2, model)).toBe(6);
+    expect(cardsSeenByTurn(1, model)).toBe(4);
+    expect(cardsSeenByTurn(2, model)).toBe(5);
   });
 
   it('Channels twice per turn', () => {
@@ -96,9 +96,9 @@ describe('draw model', () => {
 
 describe('drawing a specific card', () => {
   it('matches a hand-computed opening-hand figure', () => {
-    // Three copies in ten cards, five seen: 1 - C(7,5)/C(10,5) = 1 - 21/252
+    // Three copies in ten cards, four seen: 1 - C(7,4)/C(10,4) = 1 - 35/210
     expect(probabilityOfCard({ deck: DECK, card: CHEAP.id, turn: 0 })).toBeCloseTo(
-      1 - 21 / 252,
+      1 - 35 / 210,
       12,
     );
   });
@@ -106,7 +106,7 @@ describe('drawing a specific card', () => {
   it('improves with each draw step', () => {
     const turn0 = probabilityOfCard({ deck: DECK, card: CHEAP.id, turn: 0 });
     const turn1 = probabilityOfCard({ deck: DECK, card: CHEAP.id, turn: 1 });
-    expect(turn1).toBeCloseTo(1 - 7 / 210, 12);
+    expect(turn1).toBeCloseTo(1 - 21 / 252, 12);
     expect(turn1).toBeGreaterThan(turn0);
   });
 
@@ -126,8 +126,8 @@ describe('drawing a specific card', () => {
   });
 
   it('reports expected copies', () => {
-    // Five of ten cards seen, three copies in the deck.
-    expect(expectedCopies({ deck: DECK, card: CHEAP.id, turn: 0 })).toBeCloseTo(1.5, 12);
+    // Four of ten cards seen, three copies in the deck.
+    expect(expectedCopies({ deck: DECK, card: CHEAP.id, turn: 0 })).toBeCloseTo(1.2, 12);
   });
 
   it('produces a monotonically rising curve', () => {
@@ -316,23 +316,23 @@ describe('opening hand', () => {
   const stats = openingHandStats(DECK, REGISTRY);
 
   it('reports the hand size actually drawn', () => {
-    expect(stats.handSize).toBe(5);
+    expect(stats.handSize).toBe(4);
   });
 
   it('reports expected counts per card type', () => {
-    // Nine of ten cards are Units and five are seen.
-    expect(stats.expectedByType.get('unit')).toBeCloseTo(4.5, 12);
-    expect(stats.expectedByType.get('spell')).toBeCloseTo(0.5, 12);
+    // Nine of ten cards are Units and four are seen.
+    expect(stats.expectedByType.get('unit')).toBeCloseTo(3.6, 12);
+    expect(stats.expectedByType.get('spell')).toBeCloseTo(0.4, 12);
   });
 
   it('reports the chance of seeing each type', () => {
     expect(stats.atLeastOneByType.get('unit')).toBeCloseTo(1, 12);
-    // 1 - C(9,5)/C(10,5) = 1 - 126/252
-    expect(stats.atLeastOneByType.get('spell')).toBeCloseTo(0.5, 12);
+    // 1 - C(9,4)/C(10,4) = 1 - 126/210
+    expect(stats.atLeastOneByType.get('spell')).toBeCloseTo(0.4, 12);
   });
 
   it('answers a threshold question for a type by turn', () => {
-    expect(probabilityOfType(DECK, REGISTRY, 'spell', 1, 0)).toBeCloseTo(0.5, 12);
+    expect(probabilityOfType(DECK, REGISTRY, 'spell', 1, 0)).toBeCloseTo(0.4, 12);
     expect(probabilityOfType(DECK, REGISTRY, 'spell', 2, 0)).toBe(0);
   });
 });
@@ -349,7 +349,7 @@ describe('analyzeDeck', () => {
     expect(analysis.curve.totalCards).toBe(10);
     expect(analysis.domains.totalRunes).toBe(12);
     expect(analysis.castability).toHaveLength(4);
-    expect(analysis.openingHand.handSize).toBe(5);
+    expect(analysis.openingHand.handSize).toBe(4);
   });
 
   it('needs no engine, no agent and no randomness', () => {

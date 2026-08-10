@@ -41,11 +41,15 @@ export interface CreateGameOptions {
 function mergeConfig(overrides: Partial<GameConfig> | undefined, playerCount: number): GameConfig {
   return {
     playerCount,
-    pointsToWin: overrides?.pointsToWin ?? DEFAULT_CONFIG.pointsToWin,
-    battlefieldCount: overrides?.battlefieldCount ?? DEFAULT_CONFIG.battlefieldCount,
+    victoryScore: overrides?.victoryScore ?? DEFAULT_CONFIG.victoryScore,
+    battlefieldCount: overrides?.battlefieldCount ?? playerCount,
+    battlefieldsPerPlayer: overrides?.battlefieldsPerPlayer ?? DEFAULT_CONFIG.battlefieldsPerPlayer,
     channelPerTurn: overrides?.channelPerTurn ?? DEFAULT_CONFIG.channelPerTurn,
     drawPerTurn: overrides?.drawPerTurn ?? DEFAULT_CONFIG.drawPerTurn,
     openingHandSize: overrides?.openingHandSize ?? DEFAULT_CONFIG.openingHandSize,
+    mulliganLimit: overrides?.mulliganLimit ?? DEFAULT_CONFIG.mulliganLimit,
+    secondPlayerBonusRunes:
+      overrides?.secondPlayerBonusRunes ?? DEFAULT_CONFIG.secondPlayerBonusRunes,
     maxTurns: overrides?.maxTurns ?? DEFAULT_CONFIG.maxTurns,
   };
 }
@@ -59,15 +63,16 @@ function emptyZones(): Record<PlayerZone, EntityId[]> {
 }
 
 /**
- * Deal a new game.
+ * Deal a new game (rules 110-118).
  *
  * The order of random draws is fixed and must not be reordered casually:
- * shuffle each player's main deck then Rune deck in seat order, then choose the
- * starting player. Changing that order changes every existing seed's game, and
- * invalidates stored golden games.
+ * shuffle each player's main deck then Rune deck in seat order, then select
+ * Battlefields, then determine turn order. Changing that order changes every
+ * existing seed's game and invalidates stored golden games.
  *
- * UNVERIFIED: which player goes first is chosen at random here, and no
- * first-turn adjustment (skipping the draw, for instance) is applied.
+ * Rule 117's Mulligan is NOT implemented: it is a player choice, so it needs a
+ * setup-time decision point rather than a config value. Opening hands here are
+ * the rule 116 draw of 4 with no Mulligan taken.
  */
 export function createGame(options: CreateGameOptions): ReduceResult {
   const playerCount = options.decks.length;
@@ -122,7 +127,8 @@ export function createGame(options: CreateGameOptions): ReduceResult {
     };
   }
 
-  const battlefields = placeBattlefields(options.decks, config.battlefieldCount);
+  const battlefields = placeBattlefields(options.decks, config.battlefieldCount, rng);
+  // Rule 115: turn order is determined by any fair random method.
   const startingPlayer = playerId(rng.nextInt(playerCount));
 
   let state: GameState = {
@@ -130,6 +136,7 @@ export function createGame(options: CreateGameOptions): ReduceResult {
     rng: rng.state,
     turn: 1,
     activePlayer: startingPlayer,
+    firstPlayer: startingPlayer,
     phase: 'awaken',
     players,
     battlefields,
@@ -159,33 +166,34 @@ export function createGame(options: CreateGameOptions): ReduceResult {
 }
 
 /**
- * Choose the Battlefields contested this game, round-robin across seats.
+ * Choose the Battlefields contested this game.
  *
- * UNVERIFIED: each deck contains 3 Battlefields, but how many end up in play
- * and who picks them is not established by the sources used. This takes them in
- * seat order until `battlefieldCount` is filled.
+ * Rule 485.5: each player randomly selects one of their three Battlefields; the
+ * others are removed for the game, and the selected ones are placed
+ * simultaneously in the Battlefield Zone. The sanctioned modes all place
+ * exactly one Battlefield per player, which is why `battlefieldCount` defaults
+ * to the player count.
+ *
+ * Rule 483.4.b allows a mode to use fewer Battlefields than there are players.
+ * No sanctioned mode does, and the rules do not say who would be left out, so
+ * rather than invent a rule this refuses the configuration.
  */
 function placeBattlefields(
   decks: readonly DeckList[],
   battlefieldCount: number,
+  rng: Rng,
 ): BattlefieldState[] {
-  const battlefields: BattlefieldState[] = [];
-  const rounds = Math.max(...decks.map((deck) => deck.battlefields.length));
-
-  for (let round = 0; round < rounds && battlefields.length < battlefieldCount; round += 1) {
-    for (let seat = 0; seat < decks.length && battlefields.length < battlefieldCount; seat += 1) {
-      const card = (decks[seat] as DeckList).battlefields[round];
-      if (card !== undefined) {
-        battlefields.push({ card, controller: null, units: [] });
-      }
-    }
-  }
-
-  if (battlefields.length < battlefieldCount) {
+  if (battlefieldCount !== decks.length) {
     throw new Error(
-      `Need ${battlefieldCount} Battlefields in play but the decks supply only ${battlefields.length}`,
+      `Battlefield placement is defined as one per player (rule 485.5), but the config asks ` +
+        `for ${battlefieldCount} Battlefields across ${decks.length} players`,
     );
   }
 
-  return battlefields;
+  return decks.map((deck, seat) => {
+    if (deck.battlefields.length === 0) {
+      throw new Error(`Player ${seat} brought no Battlefields`);
+    }
+    return { card: rng.pick(deck.battlefields), controller: null, units: [], scoredBy: [] };
+  });
 }

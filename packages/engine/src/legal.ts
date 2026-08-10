@@ -19,7 +19,7 @@ export function legalActions(state: GameState, player: PlayerId): readonly Actio
   if (player !== state.activePlayer) {
     return [];
   }
-  return state.phase === 'action' ? [{ type: 'endTurn' }] : [{ type: 'resolvePhase' }];
+  return state.phase === 'main' ? [{ type: 'endTurn' }] : [{ type: 'resolvePhase' }];
 }
 
 /** Convenience wrapper for the common case. */

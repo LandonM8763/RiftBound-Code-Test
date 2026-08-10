@@ -85,20 +85,33 @@ export interface PlayerState {
 
 export interface BattlefieldState {
   readonly card: CardId;
-  /** `null` while uncontrolled — moving in is an Open Showdown. */
+  /** `null` while Uncontrolled (rule 466.5.b). */
   readonly controller: PlayerId | null;
   readonly units: readonly EntityId[];
+  /**
+   * Players who have already Scored this Battlefield this turn.
+   *
+   * Rule 470: a player may only Score a given Battlefield once per turn, by
+   * either method, so Conquering a Battlefield you already Held this turn
+   * scores nothing.
+   */
+  readonly scoredBy: readonly PlayerId[];
 }
 
 /**
- * Turn phases A/B/C/D, then the action phase.
+ * The phases of a turn (rule 314).
  *
- * A — Awaken:    ready all your cards, including Runes.
- * B — Beginning: score for each Battlefield you are Holding.
- * C — Channel:   Channel Runes from your Rune deck.
- * D — Draw:      draw from your main deck.
+ * Start of Turn is four phases:
+ *   Awaken    — ready everything you control (315.1)
+ *   Beginning — Hold every Battlefield you Control (315.2)
+ *   Channel   — Channel 2 Runes (315.3)
+ *   Draw      — draw 1 (315.4)
+ * then the Main Phase (316), then the Ending Phase (317).
+ *
+ * The A/B/C/D naming used by community guides maps onto the four Start of Turn
+ * phases; the rulebook names them, and the rulebook is the naming authority.
  */
-export const PHASES = ['awaken', 'beginning', 'channel', 'draw', 'action'] as const;
+export const PHASES = ['awaken', 'beginning', 'channel', 'draw', 'main', 'ending'] as const;
 
 export type Phase = (typeof PHASES)[number];
 
@@ -107,43 +120,55 @@ export type Outcome =
   | { readonly kind: 'draw'; readonly reason: string };
 
 /**
- * Tunable rule quantities.
+ * The variables a Mode of Play must define (rule 483), plus one harness guard.
  *
- * Values marked UNVERIFIED are placeholders that community sources did not
- * settle. They are configuration rather than constants precisely so that
- * checking them against the official rulebook is a one-line change and not an
- * engine edit. See the open questions in CLAUDE.md.
+ * Defaults are the sanctioned 1v1 Duel mode (rule 485). Every value here is
+ * taken from the official Core Rules, RUP4 of 2026-07-16, with the rule number
+ * cited; none of them is a guess any more.
  */
 export interface GameConfig {
+  /** Rule 483.1. */
   readonly playerCount: number;
-  /** Points needed to win. */
-  readonly pointsToWin: number;
-  /**
-   * Battlefields contested in a game. UNVERIFIED: decks contain 3 Battlefields,
-   * but how many are in play at once is not established by the sources used.
-   * The phrase "conquering both battlefields" implies 2 in a 1v1.
-   */
+  /** Rule 483.3 / 485.3: the point total needed to win. 8 in the Duel mode. */
+  readonly victoryScore: number;
+  /** Rule 483.4 / 485.4: Battlefields in play. 2 in the Duel mode. */
   readonly battlefieldCount: number;
-  /** Runes Channelled during phase C. */
+  /** Rule 485.4.a: Battlefields each player brings, of which one is used. */
+  readonly battlefieldsPerPlayer: number;
+  /** Rule 315.3.b: the Turn Player Channels 2 Runes in the Channel Phase. */
   readonly channelPerTurn: number;
-  /** Cards drawn during phase D. */
+  /** Rule 315.4.b: the Turn Player draws 1 in the Draw Phase. */
   readonly drawPerTurn: number;
-  /** UNVERIFIED: opening hand size is not established by the sources used. */
+  /** Rule 116: each player draws 4. */
   readonly openingHandSize: number;
+  /** Rule 117.1: a player may set aside up to 2 cards when they Mulligan. */
+  readonly mulliganLimit: number;
+  /**
+   * Rule 485.7: the player going second Channels this many extra Runes during
+   * their first Channel Phase of the game.
+   */
+  readonly secondPlayerBonusRunes: number;
   /**
    * Harness guard, NOT a Riftbound rule. Fuzzing must not hang, so a game that
    * exceeds this many turns ends in a draw. Raise it for real simulations.
+   *
+   * Real games terminate on their own: an empty Main Deck causes a Burn Out
+   * (rule 431), which hands an opponent a point, repeatedly, until someone
+   * reaches the Victory Score.
    */
   readonly maxTurns: number;
 }
 
 export const DEFAULT_CONFIG: GameConfig = {
   playerCount: 2,
-  pointsToWin: 8,
+  victoryScore: 8,
   battlefieldCount: 2,
+  battlefieldsPerPlayer: 3,
   channelPerTurn: 2,
   drawPerTurn: 1,
-  openingHandSize: 5,
+  openingHandSize: 4,
+  mulliganLimit: 2,
+  secondPlayerBonusRunes: 1,
   maxTurns: 200,
 };
 
@@ -160,6 +185,8 @@ export interface GameState {
   /** 1-based; increments each time the active player changes. */
   readonly turn: number;
   readonly activePlayer: PlayerId;
+  /** Rule 115.1.b.1: the player who became the Turn Player first. */
+  readonly firstPlayer: PlayerId;
   readonly phase: Phase;
   readonly players: readonly PlayerState[];
   readonly battlefields: readonly BattlefieldState[];

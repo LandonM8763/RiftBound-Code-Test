@@ -7,10 +7,10 @@ import { atLeast, mean } from './hypergeometric.js';
 /**
  * How many cards and Runes a player has seen by a given turn.
  *
- * Every quantity here is one the engine also owns, and several are still
- * UNVERIFIED. Deriving the model from `GameConfig` keeps a single source of
- * truth: correcting the opening hand size against the rulebook fixes the engine
- * and these statistics together, instead of leaving them silently disagreeing.
+ * Every quantity here is one the engine also owns. Deriving the model from
+ * `GameConfig` keeps a single source of truth: when the opening hand size was
+ * corrected from 5 to 4 against rule 116, every figure here moved with it and
+ * only the test literals needed updating.
  */
 export interface DrawModel {
   readonly openingHandSize: number;
@@ -19,8 +19,10 @@ export interface DrawModel {
   /**
    * Whether a player draws on their own first turn.
    *
-   * UNVERIFIED, like the engine's matching assumption: many card games skip the
-   * first draw for whoever goes first, and this one may too.
+   * True in Riftbound: rule 315.4 has the Turn Player draw every turn, and the
+   * only first-turn adjustment in the sanctioned 1v1 mode is the extra Rune the
+   * second player Channels (485.7) — the Draw Phase is untouched. Kept as a
+   * parameter because other Modes of Play may adjust it (483.7).
    */
   readonly drawsOnFirstTurn: boolean;
 }

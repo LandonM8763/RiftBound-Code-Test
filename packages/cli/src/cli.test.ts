@@ -220,7 +220,7 @@ describe('analyze', () => {
   });
 
   it('reports opening hand expectations', () => {
-    expect(report).toMatch(/Opening hand \(5 cards\)/);
+    expect(report).toMatch(/Opening hand \(4 cards\)/);
     expect(report).toMatch(/unit/);
   });
 

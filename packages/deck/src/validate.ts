@@ -51,6 +51,7 @@ export function validateDeck(
   const identity = checkLegendAndChampion(deck, registry, error);
   checkPileTypes(deck, registry, error);
   checkCopyLimit(deck, format, error);
+  checkDistinctBattlefields(deck, registry, error);
 
   if (identity !== undefined) {
     checkDomainIdentity(deck, registry, identity, error);
@@ -62,11 +63,12 @@ export function validateDeck(
 type Report = (code: string, message: string, cards?: readonly CardId[]) => void;
 
 function checkSizes(deck: Deck, format: Format, error: Report): void {
+  // Rule 103.2: "A Main Deck of at least 40 cards" — a floor, not an exact size.
   const main = totalCount(deck.main);
-  if (main !== format.mainDeckSize) {
+  if (main < format.mainDeckMinimum) {
     error(
       'main-deck-size',
-      `Main deck has ${main} cards; ${format.name} requires exactly ${format.mainDeckSize}`,
+      `Main deck has ${main} cards; ${format.name} requires at least ${format.mainDeckMinimum}`,
     );
   }
 
@@ -153,15 +155,14 @@ function checkPileTypes(deck: Deck, registry: CardRegistry, error: Report): void
 }
 
 /**
- * At most `maxCopies` of any unique card, counting the Chosen Champion.
+ * Rule 103.2.b: at most 3 copies of the same named card in the Main Deck,
+ * counting the Chosen Champion (103.2.b.1).
  *
- * Runes are exempt: a 12-card Rune deck of two Domains necessarily runs far
- * more than three copies of a Rune.
+ * Runes are exempt: rule 103.3 sets no copy limit on the Rune Deck, and a
+ * 12-card Rune Deck across two Domains necessarily runs more than three of one.
  *
- * UNVERIFIED: whether the sideboard shares the limit with the main deck (as in
- * most trading card games) or is counted separately. Shared is assumed here.
- *
- * UNVERIFIED: whether the three Battlefields must be distinct. Not enforced.
+ * The sideboard is not in the Core Rules at all, so whether it shares this
+ * limit is unknown. Shared is assumed, matching the convention elsewhere.
  */
 function checkCopyLimit(deck: Deck, format: Format, error: Report): void {
   const copies = new Map<CardId, number>();
@@ -187,10 +188,49 @@ function checkCopyLimit(deck: Deck, format: Format, error: Report): void {
 }
 
 /**
- * Every card must sit inside the Legend's Domain Identity.
+ * Rule 103.4.c: a deck cannot include more than one Battlefield of the same
+ * name when it is required to bring more than one.
  *
- * UNVERIFIED: whether Battlefields are constrained by Domain Identity. They are
- * not checked here.
+ * Checked by name rather than by card id, because two printings of the same
+ * Battlefield share a name and are the same card for this rule.
+ */
+function checkDistinctBattlefields(deck: Deck, registry: CardRegistry, error: Report): void {
+  const seen = new Map<string, CardId>();
+
+  for (const entry of deck.battlefields) {
+    if (entry.count > 1) {
+      error(
+        'duplicate-battlefield',
+        `${registry.get(entry.card)?.name ?? entry.card} appears ${entry.count} times; ` +
+          'a deck may include only one Battlefield of a given name',
+        [entry.card],
+      );
+      continue;
+    }
+    const name = registry.get(entry.card)?.name;
+    if (name === undefined) {
+      continue;
+    }
+    const existing = seen.get(name);
+    if (existing !== undefined) {
+      error(
+        'duplicate-battlefield',
+        `Two Battlefields named "${name}"; a deck may include only one of a given name`,
+        [existing, entry.card],
+      );
+      continue;
+    }
+    seen.set(name, entry.card);
+  }
+}
+
+/**
+ * Rule 103.1.b.1: cards in the deck must abide by the Domain Identity, which
+ * 103.1.b.2 takes from the Champion Legend.
+ *
+ * Rule 103.4.b makes Battlefields "subject to Domain Identity if applicable".
+ * The qualifier is not defined anywhere in the Core Rules, so Battlefields are
+ * left unchecked rather than guessed at.
  */
 function checkDomainIdentity(
   deck: Deck,

@@ -7,9 +7,9 @@ Guidance for Claude Code and other AI assistants working in this repository.
 A **deck testing application for Riftbound** (Riot Games' League of Legends trading
 card game). The application has four capabilities:
 
-1. **Deck list ingest** — accept a full deck list (Legend, Champion, 40-card main
-   deck, 12-card rune deck, 3 battlefields, optional 8-card sideboard), parse it,
-   and validate it for format legality.
+1. **Deck list ingest** — accept a full deck list (Champion Legend, Chosen
+   Champion, a main deck of at least 40 cards, a 12-card Rune deck, 3
+   Battlefields), parse it, and validate it for format legality.
 2. **Deck suggestions** — propose edits to a deck: cuts, additions, ratio changes,
    and consistency fixes, with a stated reason for each suggestion.
 3. **Performance statistics** — quantify how a deck is expected to perform: cost
@@ -30,12 +30,13 @@ What is built:
   definition types (Legend, Unit, Spell, Gear, Rune, Battlefield), and a
   duplicate-rejecting `CardRegistry`. No real card data yet.
 - **`@riftbound/deck`** — the deck model, a plain-text deck list parser behind a
-  pluggable importer interface, and format legality validation (40-card main deck,
-  12 Runes, 3 Battlefields, the 3-copy limit including the Chosen Champion, Domain
-  Identity, and the best-of-three sideboard).
+  pluggable importer interface, and format legality validation (main deck minimum
+  of 40, 12 Runes, 3 distinct Battlefields, the 3-copy limit including the Chosen
+  Champion, and Domain Identity).
 - **`@riftbound/engine`** — a deterministic seeded PRNG, the game state model,
-  the A/B/C/D turn phase machine, first-class legal action generation, per-player
-  observable views, and a structural invariant checker.
+  the full turn phase machine (Awaken, Beginning, Channel, Draw, Main, Ending),
+  Scoring by Hold, Burn Out, the win condition, first-class legal action
+  generation, per-player observable views, and a structural invariant checker.
 - **`@riftbound/ai`** — the `Agent` interface, a seeded random legal agent, and a
   single-game runner that keeps agents honest.
 - **`@riftbound/analysis`** — the analytic statistics: a hypergeometric core
@@ -48,14 +49,22 @@ What is built:
   legal deck list so the tool runs today, and the suite reads them so a broken
   example fails CI.
 
-What is deliberately **not** built, and why: playing cards, moving Units,
-Showdowns, and combat. Those depend on rules not yet verified against the official
-rulebook. Guessing them would bake wrong behaviour into the layer every statistic
-this application reports is measured against. See [Open questions](#open-questions).
+**The engine is now reconciled against the official Core Rules** (RUP4,
+2026-07-16), and there are no `UNVERIFIED` placeholders left in it. Every rule
+quantity in `GameConfig` cites its rule number.
 
-Anything in the code marked `UNVERIFIED` is a placeholder chosen so the engine can
-run, not a rule that has been confirmed. Most are `GameConfig` fields rather than
-constants, so correcting them is a one-line change.
+What is **not** built yet, in rough dependency order:
+
+1. **The Chain, Priority and Focus** (rules 307-313, 327) — the substrate
+   everything interactive needs.
+2. **Playing cards and paying costs** — Rune Pools, exhausting for Energy,
+   recycling for Power.
+3. **Movement, Showdowns and Combat** (rules 341, 445, 459-466), and with them
+   Scoring by Conquer and the Final Point restriction.
+4. **The Mulligan** (rule 117) — verified but unimplemented: it is a player
+   choice, so it needs a setup-time decision point rather than a config value.
+5. **Signature card limits and champion tag matching** (103.2.a.2, 103.2.d) —
+   both need card data that carries champion tags.
 
 ## Development
 
@@ -116,97 +125,157 @@ consumer of it.
 This section exists so an assistant can reason about the code without reading a
 rulebook first. It is a summary, not a specification.
 
-> **⚠️ Accuracy warning — read before encoding any of this.**
-> The official rules site (`playriftbound.com`) is blocked by this environment's
-> network egress proxy, so the rules below were assembled from **community
-> sources** (see [Reference sources](#reference-sources)) and cross-checked
-> between them. They are directionally right but **not authoritative**. Before
-> implementing any rule, verify it against the official comprehensive rulebook and
-> cite the rule number in the test. Do not treat this section as a spec, and do not
-> let an AI assistant's training recollection of Riftbound override the official
-> document.
+> **Source: the official Riftbound Core Rules, RUP4, last updated 2026-07-16.**
+> The PDF is committed at the repository root (split in two parts) and a plain
+> text extraction makes it greppable. Cite rule numbers when you encode a rule,
+> and check the rulebook rather than this summary for anything load-bearing —
+> this section is a map, not the territory.
+>
+> Community guides got several things wrong that are corrected below. Do not
+> reintroduce them, and do not let a model's training recollection of Riftbound
+> override the rulebook.
 
 ### Win condition
 
-Score **8 points** to win. Points come from controlling and holding battlefields.
-The final point cannot be scored by any means — it must come from *holding* a
-battlefield or from conquering both battlefields in the same turn; otherwise the
-player draws a card instead of winning. **Verify this edge case carefully**, it is
-exactly the kind of rule that a naive engine gets wrong.
+Rule 323.1 / 472: **at a Cleanup, a player with points greater than or equal to
+the Victory Score _and more points than any opponent_ wins.** The Victory Score
+is 8 by default (194.3) and is set by the Mode of Play (483.3).
 
-### Deck construction
+The "more than any opponent" clause is load-bearing: reaching 8 while tied does
+not win, and 194.2.b has play continue until someone is ahead in a Cleanup.
 
-| Component | Requirement |
-|---|---|
-| Legend | 1, occupies the Legend Zone all game, never leaves |
-| Champion Unit | Starts in the Champion Zone |
-| Main deck | Exactly 40 cards, max 3 copies of any unique card |
-| Rune deck | Exactly 12 cards, must match the Legend's Domain Identity |
-| Battlefields | 3 |
-| Sideboard | 8 cards, best-of-three only, same construction constraints |
+### Scoring (rules 467-471)
 
-The Legend defines the **Domain Identity** — the two domains the deck may use — and
-grants a Legend Ability. The Chosen Champion counts toward the 3-copy limit for that
-card (so up to two additional copies may be added).
+A player Scores by one of exactly two methods:
+
+- **Conquer** (469.1) — gaining Control of a Battlefield not yet Scored this turn.
+- **Hold** (469.2) — keeping Control, during your Beginning Phase, of a
+  Battlefield not yet Scored this turn.
+
+Rule 470: **a player may Score a given Battlefield only once per turn**, by
+either method.
+
+**The Final Point restriction applies only to Conquer.** Rule 471.1.a.1 says
+points gained from sources that are not Conquer are not beholden to it. Rule
+471.1.b: when a player would Conquer while already within one point of the
+Victory Score, they gain the point only if they have Scored *every* Battlefield
+this turn; otherwise **they draw a card instead**. A Hold has no such condition
+and can take a player to 8 on its own.
+
+### Deck construction (rules 101-103)
+
+| Component | Requirement | Rule |
+|---|---|---|
+| Champion Legend | 1, in the Legend Zone all game; sets Domain Identity | 103.1 |
+| Chosen Champion | A Champion Unit whose champion tag matches the Legend's | 103.2.a.2 |
+| Main deck | **At least 40 cards** — a floor, not an exact size | 103.2 |
+| Copy limit | At most 3 of a given card *name*, Chosen Champion included | 103.2.b |
+| Signature cards | At most 3 in total, all matching the Legend's champion tag | 103.2.d |
+| Rune deck | Exactly 12, all within the Domain Identity | 103.3 |
+| Battlefields | Count set by the Mode of Play; all names distinct | 103.4 |
+
+Cards with more than one Domain are legal only in an identity containing *all*
+of them (103.1.b.4).
+
+**The Core Rules describe no sideboard.** Rule 486 defines the best-of-three
+Match without one. The 8-card sideboard this codebase validates comes from
+community sources and is presumably a tournament rule in a document we have not
+seen — treat that number as unverified.
+
+### Setup (rules 110-118)
+
+Legend to the Legend Zone, Chosen Champion to the Champion Zone, Battlefields set
+aside, both decks shuffled separately, turn order by any fair random method, then
+**each player draws 4** (116) and takes a **Mulligan** (117): set aside up to 2
+cards, draw that many, then Recycle the set-aside cards to the bottom of the deck.
+
+### Modes of Play (rules 481-486)
+
+A Mode defines player count, Victory Score, Battlefield Count, setup, format and
+first-turn adjustments (483). The sanctioned **1v1 Duel** (485):
+
+- 2 players, Victory Score 8, **Battlefield Count 2**
+- Each player brings 3 Battlefields and **randomly selects one** at setup; the
+  other two are removed (485.5). One Battlefield per player ends up in play.
+- **The player going second Channels one extra Rune during their first Channel
+  Phase** (485.7).
 
 ### Domains
 
-Six: **Fury, Calm, Mind, Body, Chaos, Order.** A deck's legal card pool is
-constrained by its Legend's two-domain identity.
+Six: **Fury, Calm, Mind, Body, Chaos, Order.**
 
 ### Resources
 
-Two distinct resources, both mediated by the rune deck — model them separately:
+Two distinct resources, both mediated by the Rune deck — model them separately:
 
-- **Energy** — the general cost resource. Paid by **exhausting** runes (turning
-  them sideways).
-- **Power** — the domain-specific resource for stronger effects. Paid by
-  **recycling** runes (putting them on the bottom of the rune deck).
+- **Energy** — the generic cost resource, paid by **exhausting** Runes (414).
+- **Power** — Domain-specific, paid by **recycling** Runes to the bottom of the
+  Rune deck (416).
 
-A card's cost may require both. This dual system is central to deck consistency
-analysis: a deck can be "on curve" for Energy and still fail on Power of the right
-domain.
+Rune Pools empty at the start of the Main Phase (316.3) and again in the Ending
+Phase (317.2.e); unspent Energy and Power are lost.
 
-### Turn structure
+### Turn structure (rules 314-317)
 
-Phases **A / B / C / D**, then the action phase:
+Start of Turn is four phases, then the Main Phase, then the Ending Phase:
 
-- **A — Awaken:** turn player readies all cards, including runes.
-- **B — Beginning:** if holding a battlefield, score a point.
-- **C — Channeling:** channel 2 runes from the rune deck.
-- **D — Draw:** draw 1 card from the main deck.
+- **Awaken** (315.1) — the Turn Player readies everything they control.
+- **Beginning** (315.2) — Beginning Step, then Scoring Step: the Turn Player
+  **Holds every Battlefield they Control**.
+- **Channel** (315.3) — Channel 2 Runes; fewer than 2 left means Channel as many
+  as possible, which is *not* a Burn Out.
+- **Draw** (315.4) — draw 1. An empty Main Deck is a **Burn Out**.
+- **Main** (316) — no defined structure; the Turn Player takes Discretionary
+  Actions until they end the turn.
+- **Ending** (317) — end-of-turn effects, then heal all Units and expire every
+  "this turn" effect.
 
-### Board and combat
+### Burn Out (rules 413.4, 431)
 
-The board is **positional**: units occupy a player's base or one of the
-battlefields, and players move units between them. Over-committing to one
-battlefield can win short-term points while leaving others open — positional
-evaluation is a real part of AI quality, not an afterthought.
+Attempting to move more cards out of the Main Deck than it holds causes a Burn
+Out: do as much as possible, **Recycle your trash into your Main Deck randomised**,
+**choose an opponent to gain 1 point**, then finish the original action.
 
-Moving units to a battlefield begins a **Showdown**:
+This is what makes real games terminate. A player with an empty deck and empty
+trash burns out every turn, handing a point away each time, until someone reaches
+the Victory Score (431.3.a).
 
-- **Open Showdown** — moving onto an uncontrolled battlefield takes control
-  immediately, with no Might comparison.
-- **Combat Showdown** — moving onto an opponent-controlled battlefield triggers the
-  comparison.
+### Combat and Showdowns (rules 341, 459-466)
 
-**Units have Might**, a single stat serving as both damage dealt and damage
-sustained (a 5-Might unit hits for 5 and dies to 5). Combat sequence: both players
-may play spells before comparison → Might is summed → lethal damage is assigned
-**simultaneously** → higher total wins → healing → claim. **A tie destroys all units
-on both sides.** Simultaneity and the tie rule matter — an engine that resolves
-sequentially will produce subtly wrong results.
+**Community summaries get this badly wrong. There is no "compare total Might,
+higher total wins" step, and no "a tie destroys everything" rule.** What actually
+happens:
 
-Control vs. holding: destroying all defenders claims the battlefield; still
-controlling it at the start of your next turn is **holding**, which scores.
+1. **Combat Showdown Step** (464) — establish Attacker (whoever applied Contested
+   to the Battlefield) and Defender; the Attacker gains Focus; triggered abilities
+   go on the Chain.
+2. **Combat Damage Step** (465) — sum each side's Might, then **each player
+   assigns damage equal to their summed Might among the *other* side's Units**.
+   Assignment must give a Unit lethal damage before moving to the next (465.2.c.3)
+   and may not overkill while other Units remain (465.2.c.4). Assignment is not
+   dealing: **all assigned damage is dealt simultaneously** (465.2.c.1.a).
+3. **Resolution Step** (466) — a Combat Cleanup heals all Units and **Recalls
+   surviving Attackers if any Defender is still present** (466.1.a.2). The result
+   is then decided by *who has Units remaining*, not by Might totals: you win if
+   you are the only player with Units there, lose if you are the only one without,
+   and it is **No Result** if both or neither have Units left, or Attackers were
+   Recalled (466.3). Establishing Control then produces a **Conquer** if that
+   Battlefield has not been Scored by that player this turn (466.5.d).
 
-### Timing
+A Showdown at an *empty* Battlefield is a **Non-Combat Showdown** and a
+stand-alone phase; it becomes a Combat Showdown if an opposing Unit arrives
+(316.8.b.1).
 
-**Actions** may be played during your action phase or during combat/showdowns.
-**Reactions** may additionally be played in response to spells or abilities, and
-resolve *before* the thing they respond to. This implies a **chain/stack structure**
-with priority passing — build it into the engine from the start rather than
-retrofitting it.
+### Timing, the Chain, Priority and Focus (rules 307-313, 327)
+
+The turn is always in one of four states (310): Neutral/Showdown crossed with
+Open/Closed. A Chain existing makes the state Closed, where **only Reaction
+cards may be played** (309.1.a); a Showdown in progress restricts play to
+**Action or Reaction** (308.1.a).
+
+**Priority** is the exclusive right to take Discretionary Actions (312).
+**Focus** is the permission to act during a Showdown Open state (313); gaining
+Focus also grants Priority, and passing Priority retains Focus.
 
 ## Proposed architecture
 
@@ -341,9 +410,10 @@ strict flags in `tsconfig.base.json` include `noUncheckedIndexedAccess` and
 
 Until real code establishes precedent, follow these:
 
-- **Test the rules against the rulebook.** Engine tests should cite the specific
-  rule they encode. Prioritize the fiddly cases: simultaneous damage, the tie rule,
-  reaction ordering, the final-point restriction.
+- **Test the rules against the rulebook.** Engine tests cite the specific rule
+  they encode, in the `describe` name or a comment. Prioritize the fiddly cases:
+  simultaneous damage assignment, Recalls, reaction ordering, the Conquer-only
+  Final Point restriction, and the "more points than any opponent" clause.
 - **Fuzz continuously.** Run random-agent games in CI; any crash, illegal state, or
   non-terminating game is a bug. This catches more than hand-written tests.
 - **Golden-game regression tests.** Store seed + action sequence + expected final
@@ -372,60 +442,70 @@ and update cadence for new sets all matter):
   candidate for the canonical import format
 - Riftseer API — used by community tooling for card data and images
 
-Rules references used to write the domain primer above (community-sourced,
-**secondary**): learnriftbound.gg, riftboundfaq.com, riftbound.zone, runesandrift.com,
-riftbound.gg, riftmana.com, mobalytics.gg, riftboundguide.com.
+### The rulebook
 
-**The official rulebook at `playriftbound.com` is the authority and is currently
-egress-blocked in this environment.** Obtaining it — or a local copy — is a
-prerequisite for engine work.
+**`Riftbound-Core-Rules-RUP4-July-16-2026-compressed-{1,2}.pdf` at the repository
+root is the authority.** It is the official Core Rules, split across two files,
+120 pages, rules 000-829, with a real text layer.
+
+`playriftbound.com` is egress-blocked in this environment, so work from the
+committed PDF. To grep it, extract the text first:
+
+```bash
+pip install pypdf cffi   # the image's cryptography package is broken without cffi
+python3 -c "
+from pypdf import PdfReader; import glob
+print(''.join(p.extract_text() or '' for f in sorted(glob.glob('*.pdf')) for p in PdfReader(f).pages))
+" > /tmp/rules.txt
+```
+
+Community rules sites (learnriftbound.gg, riftboundfaq.com, riftbound.zone,
+runesandrift.com, riftbound.gg, riftmana.com, mobalytics.gg, riftboundguide.com)
+are **secondary and demonstrably unreliable** — see the correction table under
+[Open questions](#open-questions). Do not encode a rule from them.
 
 ## Open questions
 
-Resolve these and record the answers here.
+The rulebook resolved the ones that were blocking. What remains:
 
-1. **Obtain the official comprehensive rulebook** and reconcile it against the
-   domain primer. Highest priority — everything else depends on it. The official
-   site is blocked by this environment's egress proxy; a local copy works just as
-   well.
-2. **Choose a card data source** and pin a set/version. Which sets must be supported?
-3. **Define the deck list input format(s).** Partly answered: importers are
-   pluggable via `DeckImporter`, and a plain-text importer exists that reads
-   `<count> <card id>` lines under section headers. Still open — is a Piltover
-   Archive URL or export the canonical import format, and should card *names* be
-   accepted? Name resolution needs card data, so it waits on question 2.
-4. **Player count.** Riftbound supports 2–4 players; the engine's state model is
-   materially simpler if scoped to 1v1. Assume **1v1 unless told otherwise**, but do
-   not hard-code a two-player assumption where a list would do. The current code
-   keeps players in a list and takes `playerCount` from the deck list count.
-5. **What "suggest edits" should optimize for** — raw win rate against a fixed AI, a
-   specific matchup, or consistency metrics? This determines whether the suggestion
-   engine needs simulation in the loop.
+1. **Choose a card data source** and pin a set/version. Which sets must be
+   supported? Every hosted API in [Reference sources](#reference-sources) is
+   blocked by this environment's egress proxy; only `raw.githubusercontent.com`
+   is reachable, so a GitHub-hosted dataset is currently the only open route.
+2. **Find the tournament/competitive rules document.** The Core Rules describe no
+   sideboard, so the 8-card sideboard this codebase validates is unverified.
+3. **Is the deck list format canonical?** Importers are pluggable via
+   `DeckImporter` and a plain-text one exists that reads `<count> <card id>`
+   lines under section headers. Whether a Piltover Archive URL or export should
+   be the canonical format, and whether card *names* should be accepted, both
+   wait on question 1.
+4. **What "suggest edits" should optimize for** — raw win rate against a fixed
+   AI, a specific matchup, or consistency metrics? This determines whether the
+   suggestion engine needs simulation in the loop.
+5. **Rule 103.4.b** makes Battlefields "subject to Domain Identity if
+   applicable". The qualifier is not defined anywhere in the Core Rules, so
+   validation leaves Battlefields unchecked rather than guessing.
+6. **Burn Out beneficiary with 3+ players.** Rule 431.2.c has the burning player
+   *choose* which opponent gains the point. The engine takes the next player in
+   turn order, which is forced in 1v1 but a real decision in FFA3 and needs a
+   choice point.
 
-### Rules the code currently guesses
+### What the rulebook corrected
 
-Each of these is marked `UNVERIFIED` at its definition. They are the first things
-to check against the rulebook, roughly in order of how much damage a wrong answer
-does.
+Worth recording, because community sources are confidently wrong about all of
+these and a future session may be tempted to "fix" the code back:
 
-| Question | Current placeholder | Where |
-|---|---|---|
-| Can the final (8th) point be scored by any means? | Not implemented — 8 points simply wins | `reduce.ts`, `beginning` |
-| Is Beginning-phase scoring one point per Battlefield held, or one total? | One per Battlefield | `reduce.ts`, `beginning` |
-| How many Battlefields are contested at once? | `battlefieldCount: 2` | `state.ts`, `DEFAULT_CONFIG` |
-| How are the Battlefields in play chosen from the players' three each? | Round-robin by seat | `setup.ts`, `placeBattlefields` |
-| Opening hand size, and whether a mulligan exists | `openingHandSize: 5`, no mulligan | `state.ts`, `DEFAULT_CONFIG` |
-| What happens on an empty main deck | Emits `mainDeckEmpty`, game continues | `reduce.ts`, `draw` |
-| Who takes the first turn, and does turn 1 skip anything? | Random, no first-turn adjustment | `setup.ts`, `createGame` |
-| Does the sideboard share the 3-copy limit with the main deck? | Yes, shared | `deck/validate.ts`, `checkCopyLimit` |
-| Must the three Battlefields be distinct? | Not enforced | `deck/validate.ts`, `checkCopyLimit` |
-| Are Battlefields constrained by Domain Identity? | Not enforced | `deck/validate.ts`, `checkDomainIdentity` |
-
-`maxTurns` is *not* in this table: it is an explicit harness guard so fuzzing
-terminates, not a rule, and real simulations should raise it.
-
-Deck construction quantities — 40, 12, 3 Battlefields, 3 copies, 8 sideboard — are
-**not** in this table. Multiple community sources agree on them.
+| Community claim | What the rules actually say |
+|---|---|
+| Main deck is exactly 40 | **At least** 40 (103.2) |
+| Opening hand of 5, no mulligan | Draw 4 (116), then a mulligan of up to 2 (117) |
+| Reaching 8 points wins | 8 **and more than any opponent**, at a Cleanup (323.1) |
+| The final point can never be scored by any means | The restriction applies **only to Conquer** (471.1.a.1) |
+| Combat: sum Might, higher total wins | No comparison step; damage is assigned and dealt, and the result is who has Units left (465-466) |
+| A tie destroys all units on both sides | No such rule; surviving Attackers are Recalled if any Defender lives (466.1.a.2) |
+| Battlefields: 3 per deck, all in play | 3 per deck, **one chosen at random** per player, 2 in play in 1v1 (485.4, 485.5) |
+| Nothing special about the first turn | The player going second Channels an extra Rune (485.7) |
+| An empty deck does nothing in particular | Burn Out: recycle trash, **give an opponent a point** (431) |
 
 ## Maintaining this file
 

@@ -87,7 +87,7 @@ describe('observe', () => {
   it('reveals public zones to everyone', () => {
     let state = game();
     // Channel a rune into play, then confirm the opponent can see it.
-    while (state.phase !== 'action' && !isOver(state)) {
+    while (state.phase !== 'main' && !isOver(state)) {
       state = reduce(state, currentLegalActions(state)[0]!).state;
     }
     const active = state.activePlayer;
