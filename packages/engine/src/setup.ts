@@ -172,6 +172,7 @@ export function createGame(options: CreateGameOptions): ReduceResult {
     chain: [],
     // Rule 312.2.a: Priority is granted on entering the Main Phase.
     priority: null,
+    showdown: null,
     passes: 0,
     outcome: null,
   };

@@ -18,6 +18,7 @@ export {
   entityCard,
   isClosed,
   isOver,
+  isShowdown,
   nextPlayer,
   powerIn,
   playerId,
@@ -40,6 +41,7 @@ export type {
   PlayerZone,
   PowerPool,
   RunePool,
+  ShowdownState,
 } from './state.js';
 
 export { IllegalActionError } from './actions.js';

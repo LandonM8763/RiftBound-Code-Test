@@ -60,20 +60,27 @@ export function validUnitLocations(state: GameState, player: PlayerId): Location
 }
 
 /**
- * Can this card be played right now, ignoring cost?
+ * Can this card be played right now, ignoring cost? (rule 358.4)
  *
- * Rule 358.4 checks timing permissions. In a Closed State only Reactions may be
- * played (309.1.a); in an Open Neutral State the Turn Player may play anything
- * (310.1.a).
+ * The four states of rule 310 give three distinct permissions:
+ * - Closed, either kind: only Reactions (309.1.a).
+ * - Showdown Open: only Actions or Reactions (308.1.a).
+ * - Neutral Open: anything (310.1.a).
  */
-export function timingAllows(card: CardDefinition, closed: boolean): boolean {
+export function timingAllows(
+  card: CardDefinition,
+  state: { readonly closed: boolean; readonly showdown: boolean },
+): boolean {
   if (!isPlayable(card)) {
     return false;
   }
-  if (!closed) {
-    return true;
+  if (state.closed) {
+    return card.type === 'spell' && card.timing === 'reaction';
   }
-  return card.type === 'spell' && card.timing === 'reaction';
+  if (state.showdown) {
+    return card.type === 'spell';
+  }
+  return true;
 }
 
 export interface PlayableCheck {
@@ -85,14 +92,14 @@ export interface PlayableCheck {
 export function playableFromHand(
   state: GameState,
   player: PlayerId,
-  closed: boolean,
+  timing: { readonly closed: boolean; readonly showdown: boolean },
 ): { readonly entity: Entity; readonly check: PlayableCheck }[] {
   const pool = getPlayer(state, player).pool;
   const results: { entity: Entity; check: PlayableCheck }[] = [];
 
   for (const id of getPlayer(state, player).zones.hand) {
     const card = entityCard(state, id);
-    if (!timingAllows(card, closed)) {
+    if (!timingAllows(card, timing)) {
       continue;
     }
     const cost = totalCost(card);

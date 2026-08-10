@@ -143,6 +143,26 @@ export interface ChainItem {
   readonly pending: boolean;
 }
 
+/**
+ * An open Showdown (rule 341).
+ *
+ * A Showdown is a Window of Opportunity: players act in an alternating fashion,
+ * passing Focus rather than Priority, until everyone passes in sequence (347.2)
+ * and it Closes (348).
+ */
+export interface ShowdownState {
+  readonly battlefield: number;
+  /** Rule 345: the player who applied Contested status gains Focus first. */
+  readonly focus: PlayerId;
+  /** Consecutive Focus passes; equal to the player count ends the Showdown. */
+  readonly passes: number;
+  /**
+   * Rule 344.1: a Showdown with opposing Units present is a Combat Showdown and
+   * runs the Steps of Combat instead. Not implemented — see CLAUDE.md.
+   */
+  readonly combat: boolean;
+}
+
 export interface BattlefieldState {
   readonly card: CardId;
   /** `null` while Uncontrolled (rule 466.5.b). */
@@ -279,6 +299,8 @@ export interface GameState {
   readonly chain: readonly ChainItem[];
   /** Who may take Discretionary Actions right now (rule 312). */
   readonly priority: PlayerId | null;
+  /** The open Showdown, if any (rule 341). */
+  readonly showdown: ShowdownState | null;
   /** Consecutive passes since the last Chain item was added or resolved. */
   readonly passes: number;
   /** `null` while the game is still running. */
@@ -288,6 +310,11 @@ export interface GameState {
 /** Rule 331: a Chain existing puts the turn in a Closed State. */
 export function isClosed(state: GameState): boolean {
   return state.chain.length > 0;
+}
+
+/** Rule 343.1: a Showdown or Combat in progress puts the turn in a Showdown State. */
+export function isShowdown(state: GameState): boolean {
+  return state.showdown !== null;
 }
 
 export function definitionOf(state: GameState, card: CardId): CardDefinition {

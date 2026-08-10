@@ -71,6 +71,22 @@ export type GameEvent =
       readonly battlefield: number;
       readonly player: PlayerId;
     }
+  /** Rule 344: a Showdown opened at a Battlefield. */
+  | { readonly type: 'showdownOpened'; readonly battlefield: number; readonly focus: PlayerId }
+  /** Rule 348: every player passed Focus and the Showdown Closed. */
+  | { readonly type: 'showdownClosed'; readonly battlefield: number }
+  /** Rule 348.2.a: a player established Control of a Battlefield. */
+  | {
+      readonly type: 'controlEstablished';
+      readonly battlefield: number;
+      readonly player: PlayerId;
+    }
+  /** Rule 471.1.b.1: a Conquer could not take the Final Point, so a card was drawn. */
+  | {
+      readonly type: 'finalPointDenied';
+      readonly player: PlayerId;
+      readonly battlefield: number;
+    }
   /** Rule 190.4.c: a player lost Control of a Battlefield. */
   | {
       readonly type: 'controlLost';

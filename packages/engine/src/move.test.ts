@@ -89,6 +89,20 @@ function withReadyUnit(state: GameState): [GameState, EntityId] {
   return [moveEntity(state, card, playerLocation(player, 'base')), card];
 }
 
+/** Close the Showdown a move opened, handing Control to `player`. */
+function settleShowdown(state: GameState, player: number): GameState {
+  return {
+    ...state,
+    showdown: null,
+    priority: state.activePlayer,
+    battlefields: state.battlefields.map((battlefield, index) =>
+      index === 0
+        ? { ...battlefield, controller: playerId(player), contestedBy: null }
+        : battlefield,
+    ),
+  };
+}
+
 describe('the Standard Move (rule 144)', () => {
   it('moves a Unit from its Base to a Battlefield (rule 144.4.a)', () => {
     const [state, unit] = withReadyUnit(inMainPhase());
@@ -127,14 +141,11 @@ describe('the Standard Move (rule 144)', () => {
     const player = start.activePlayer;
     let state = reduce(start, { type: 'moveUnits', units: [unit], to: battlefieldLocation(0) }).state;
 
-    // Settle the Showdown the move staged — nothing may move while a
-    // Battlefield is Contested (144.1.c) — and ready the Unit so it can pay
-    // the cost a second time.
+    // Settle the Showdown the move opened — nothing may move during one
+    // (144.1.c) — and ready the Unit so it can pay the cost a second time.
+    state = settleShowdown(state, player);
     state = {
       ...state,
-      battlefields: state.battlefields.map((battlefield, index) =>
-        index === 0 ? { ...battlefield, controller: player, contestedBy: null } : battlefield,
-      ),
       entities: { ...state.entities, [unit]: { ...state.entities[unit]!, exhausted: false } },
     };
 
@@ -153,7 +164,7 @@ describe('the Standard Move (rule 144)', () => {
     const moved = reduce(start, { type: 'moveUnits', units: [unit], to: battlefieldLocation(0) })
       .state;
     const state: GameState = {
-      ...moved,
+      ...settleShowdown(moved, moved.activePlayer),
       entities: { ...moved.entities, [unit]: { ...moved.entities[unit]!, exhausted: false } },
     };
 
@@ -311,11 +322,9 @@ describe('Control cleanup (rule 190.4.c)', () => {
 
     // A Battlefield this player controls, with their Unit standing on it.
     let state = reduce(start, { type: 'moveUnits', units: [unit], to: battlefieldLocation(0) }).state;
+    state = settleShowdown(state, player);
     state = {
       ...state,
-      battlefields: state.battlefields.map((battlefield, index) =>
-        index === 0 ? { ...battlefield, controller: player, contestedBy: null } : battlefield,
-      ),
       entities: { ...state.entities, [unit]: { ...state.entities[unit]!, exhausted: false } },
     };
 
@@ -337,11 +346,9 @@ describe('Control cleanup (rule 190.4.c)', () => {
     const player = state.activePlayer;
 
     state = reduce(state, { type: 'moveUnits', units: [one, two], to: battlefieldLocation(0) }).state;
+    state = settleShowdown(state, player);
     state = {
       ...state,
-      battlefields: state.battlefields.map((battlefield, index) =>
-        index === 0 ? { ...battlefield, controller: player, contestedBy: null } : battlefield,
-      ),
       entities: { ...state.entities, [one]: { ...state.entities[one]!, exhausted: false } },
     };
 

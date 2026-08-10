@@ -45,6 +45,13 @@ export function standardMoveDestinations(state: GameState, unit: EntityId): Loca
  * Rule 449.2 / 144.4.a.1: a Unit cannot move to a Battlefield that already has
  * Units belonging to two *other* players. With two players this never bites,
  * but the rule is about seats rather than about 1v1.
+ *
+ * ENGINE LIMIT, not a rule: a destination holding *any* other player's Units is
+ * refused, because moving in would open a Combat Showdown (344.1) and the Steps
+ * of Combat are not implemented. `legalActions` promises every action it offers
+ * is one `reduce` accepts, so the restriction has to live here rather than
+ * surfacing as a failure part-way through a move. Delete this branch when
+ * Combat lands.
  */
 function isValidDestination(
   state: GameState,
@@ -58,7 +65,7 @@ function isValidDestination(
       others.add(controller);
     }
   }
-  return others.size < 2;
+  return others.size === 0;
 }
 
 /**
@@ -95,7 +102,10 @@ export function canStandardMove(state: GameState, unit: EntityId): boolean {
  * meantime, and the hook they will replace.
  */
 export function showdownInProgress(state: GameState): boolean {
-  return state.battlefields.some((battlefield) => battlefield.contestedBy !== null);
+  return (
+    state.showdown !== null ||
+    state.battlefields.some((battlefield) => battlefield.contestedBy !== null)
+  );
 }
 
 /** Every Unit `player` could move right now, with where it could go. */

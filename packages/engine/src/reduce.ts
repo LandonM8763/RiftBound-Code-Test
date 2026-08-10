@@ -29,6 +29,7 @@ import {
   getPlayer,
   isClosed,
   isOver,
+  isShowdown,
   nextPlayer,
   playerLocation,
   sameLocation,
@@ -143,9 +144,11 @@ function playCard(state: GameState, card: EntityId, location: Location | undefin
   }
 
   const definition = entityCard(state, card);
-  if (!timingAllows(definition, isClosed(state))) {
+  const timing = { closed: isClosed(state), showdown: isShowdown(state) };
+  if (!timingAllows(definition, timing)) {
     throw new IllegalActionError(
-      `${definition.name} cannot be played while the turn is ${isClosed(state) ? 'Closed' : 'Open'}`,
+      `${definition.name} cannot be played in a ${timing.showdown ? 'Showdown' : 'Neutral'} ` +
+        `${timing.closed ? 'Closed' : 'Open'} state`,
     );
   }
 
@@ -173,6 +176,8 @@ function playCard(state: GameState, card: EntityId, location: Location | undefin
       chain: [...next.chain, { entity: card, controller: player, pending: false }],
       passes: 0,
       priority: player,
+      // 347.1: acting resets the sequence of passes that would end a Showdown.
+      ...(next.showdown === null ? {} : { showdown: { ...next.showdown, passes: 0 } }),
     };
     events.push(
       { type: 'cardPlayed', player, entity: card, onChain: true },
@@ -224,6 +229,28 @@ function resolvePermanentLocation(
  */
 function pass(state: GameState): ReduceResult {
   const player = requirePriority(state);
+
+  // Rule 347.2: with a Showdown open and no Chain, passing passes Focus.
+  if (!isClosed(state) && state.showdown !== null) {
+    const events: GameEvent[] = [{ type: 'priorityPassed', player }];
+    const passes = state.showdown.passes + 1;
+
+    // 347.2.a: everyone having passed once in sequence ends the Showdown.
+    if (passes >= state.players.length) {
+      return closeShowdown(state, events);
+    }
+
+    const nextFocus = nextPlayer(state, player);
+    return {
+      state: {
+        ...state,
+        showdown: { ...state.showdown, focus: nextFocus, passes },
+        priority: nextFocus,
+      },
+      events,
+    };
+  }
+
   if (!isClosed(state)) {
     throw new IllegalActionError('There is nothing to pass Priority on: the Chain is empty');
   }
@@ -249,14 +276,27 @@ function pass(state: GameState): ReduceResult {
   const chain = state.chain.slice(0, -1);
   const nextTop = chain[chain.length - 1];
 
-  next = {
-    ...next,
-    chain,
-    passes: 0,
-    // 312.2.c: Priority goes to the controller of the next item; with an empty
-    // Chain the state Opens and the Turn Player acts again (312.2.a).
-    priority: nextTop === undefined ? state.activePlayer : nextTop.controller,
-  };
+  if (nextTop === undefined && state.showdown !== null) {
+    // 346: when the last Chain item resolves during a Showdown, Focus passes
+    // and the next player gains both Focus and Priority.
+    const nextFocus = nextPlayer(state, state.showdown.focus);
+    next = {
+      ...next,
+      chain,
+      passes: 0,
+      showdown: { ...state.showdown, focus: nextFocus, passes: 0 },
+      priority: nextFocus,
+    };
+  } else {
+    next = {
+      ...next,
+      chain,
+      passes: 0,
+      // 312.2.c: Priority goes to the controller of the next item; with an empty
+      // Chain the state Opens and the Turn Player acts again (312.2.a).
+      priority: nextTop === undefined ? state.activePlayer : nextTop.controller,
+    };
+  }
 
   events.push({ type: 'chainItemResolved', entity: top.entity });
   return { state: next, events };
@@ -331,7 +371,156 @@ function moveUnits(
     }
   });
 
+  // 344.2: a Contested Battlefield with only one player's Units present opens a
+  // Showdown in the next Cleanup.
+  next = openShowdown(next, events);
+
   return { state: next, events };
+}
+
+/**
+ * Open a Non-Combat Showdown if one is due (rule 344).
+ *
+ * 344.2: Control is Contested, there are no Units from different players, and
+ * the turn is Neutral Open. 345: the contesting player gains Focus.
+ */
+function openShowdown(state: GameState, events: GameEvent[]): GameState {
+  if (state.showdown !== null || isClosed(state)) {
+    return state;
+  }
+
+  const index = state.battlefields.findIndex((battlefield) => battlefield.contestedBy !== null);
+  if (index < 0) {
+    return state;
+  }
+  const battlefield = state.battlefields[index] as BattlefieldState;
+  const contestedBy = battlefield.contestedBy as PlayerId;
+
+  const controllers = new Set(
+    battlefield.units.map((unit) => getEntity(state, unit).controller),
+  );
+  // 344.1: opposing Units make this a Combat Showdown, which runs the Steps of
+  // Combat. Not implemented, so refuse rather than resolve it wrongly.
+  const combat = controllers.size > 1;
+  if (combat) {
+    throw new IllegalActionError(
+      'Combat Showdowns are not implemented yet (rules 344.1, 459-466)',
+    );
+  }
+
+  events.push({ type: 'showdownOpened', battlefield: index, focus: contestedBy });
+
+  return {
+    ...state,
+    showdown: { battlefield: index, focus: contestedBy, passes: 0, combat },
+    priority: contestedBy,
+    passes: 0,
+  };
+}
+
+/**
+ * Close a Non-Combat Showdown (rule 348.2).
+ *
+ * If exactly one player's Units remain and they do not already Control the
+ * Battlefield, they establish Control — which is a Conquer if they have not yet
+ * Scored it this turn (348.2.a.1).
+ */
+function closeShowdown(state: GameState, events: GameEvent[]): ReduceResult {
+  const showdown = state.showdown;
+  if (showdown === null) {
+    return { state, events };
+  }
+
+  const index = showdown.battlefield;
+  const battlefield = state.battlefields[index] as BattlefieldState;
+  const controllers = new Set(
+    battlefield.units.map((unit) => getEntity(state, unit).controller),
+  );
+
+  let next: GameState = { ...state, showdown: null, priority: state.activePlayer, passes: 0 };
+  events.push({ type: 'showdownClosed', battlefield: index });
+
+  const claimant = controllers.size === 1 ? [...controllers][0] : undefined;
+  if (claimant === undefined || battlefield.controller === claimant) {
+    // Nobody establishes Control; the Contested status lifts in the Cleanup.
+    return { state: cleanupControl(next), events };
+  }
+
+  next = withBattlefield(next, index, (current) => ({
+    ...current,
+    controller: claimant,
+    contestedBy: null,
+  }));
+  events.push({ type: 'controlEstablished', battlefield: index, player: claimant });
+
+  return conquer(next, index, claimant, events);
+}
+
+/**
+ * Scoring by Conquer (rules 469.1, 471).
+ *
+ * 470: at most one Score per Battlefield per turn.
+ * 471.1.b: a Conquer that would take a player to the Victory Score only scores
+ * if they have Scored *every* Battlefield this turn; otherwise they draw a card
+ * instead. This restriction applies to Conquer alone — 471.1.a.1 exempts points
+ * from every other source, which is why a Hold has no such condition.
+ */
+function conquer(
+  state: GameState,
+  index: number,
+  player: PlayerId,
+  events: GameEvent[],
+): ReduceResult {
+  const battlefield = state.battlefields[index] as BattlefieldState;
+  if (battlefield.scoredBy.includes(player)) {
+    return { state, events };
+  }
+
+  let next = markScored(state, index, player);
+
+  const onTheBrink = getPlayer(next, player).points >= next.config.victoryScore - 1;
+  const scoredEverywhere = next.battlefields.every((candidate) =>
+    candidate.scoredBy.includes(player),
+  );
+
+  if (onTheBrink && !scoredEverywhere) {
+    // 471.1.b.1: no point; the player draws a card instead.
+    events.push({ type: 'finalPointDenied', player, battlefield: index });
+    const drawn = drawCards(next, player, 1, events);
+    if (drawn.outcome !== null) {
+      events.push({ type: 'gameEnded', outcome: drawn.outcome });
+      return { state: { ...drawn.state, outcome: drawn.outcome }, events };
+    }
+    return { state: drawn.state, events };
+  }
+
+  next = addPoints(next, player, 1);
+  events.push({
+    type: 'pointsScored',
+    player,
+    battlefield: index,
+    amount: 1,
+    total: getPlayer(next, player).points,
+    method: 'conquer',
+  });
+
+  const won = checkVictory(next);
+  if (won !== null) {
+    events.push({ type: 'gameEnded', outcome: won });
+    return { state: { ...next, outcome: won }, events };
+  }
+
+  return { state: next, events };
+}
+
+function withBattlefield(
+  state: GameState,
+  index: number,
+  update: (battlefield: BattlefieldState) => BattlefieldState,
+): GameState {
+  const battlefields = state.battlefields.slice();
+  battlefields[index] = update(battlefields[index] as BattlefieldState);
+  return { ...state, battlefields };
 }
 
 function requirePriority(state: GameState): PlayerId {
@@ -463,11 +652,32 @@ function channel(state: GameState): ReduceResult {
  * out of cards hands away a point every turn until someone wins.
  */
 function draw(state: GameState): ReduceResult {
-  const player = state.activePlayer;
   const events: GameEvent[] = [];
+  const drawn = drawCards(state, state.activePlayer, state.config.drawPerTurn, events);
+
+  if (drawn.outcome !== null) {
+    events.push({ type: 'gameEnded', outcome: drawn.outcome });
+    return { state: { ...drawn.state, outcome: drawn.outcome }, events };
+  }
+
+  return enterMain(drawn.state, events);
+}
+
+/**
+ * Draw `count` cards, Burning Out as needed (rules 413.4, 431).
+ *
+ * Returns an outcome when a Burn Out handed someone the game, since Burn Out
+ * points can win outright (431.3.c).
+ */
+function drawCards(
+  state: GameState,
+  player: PlayerId,
+  count: number,
+  events: GameEvent[],
+): { readonly state: GameState; readonly outcome: Outcome | null } {
   let next = state;
 
-  for (let i = 0; i < state.config.drawPerTurn; i += 1) {
+  for (let i = 0; i < count; i += 1) {
     if (zoneOf(next, player, 'mainDeck').length === 0) {
       const burned = burnOut(next, player);
       next = burned.state;
@@ -475,8 +685,7 @@ function draw(state: GameState): ReduceResult {
 
       const won = checkVictory(next);
       if (won !== null) {
-        events.push({ type: 'gameEnded', outcome: won });
-        return { state: { ...next, outcome: won }, events };
+        return { state: next, outcome: won };
       }
     }
 
@@ -490,7 +699,7 @@ function draw(state: GameState): ReduceResult {
     events.push({ type: 'cardDrawn', player, entity: top });
   }
 
-  return enterMain(next, events);
+  return { state: next, outcome: null };
 }
 
 /**

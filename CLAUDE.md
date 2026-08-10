@@ -36,9 +36,10 @@ What is built:
 - **`@riftbound/engine`** — a deterministic seeded PRNG, the game state model,
   the full turn phase machine (Awaken, Beginning, Channel, Draw, Main, Ending),
   Scoring by Hold, Burn Out, the win condition, Rune Pools, the Chain with
-  Priority, the Process of Play, **the Standard Move and Contested status**,
-  first-class legal action generation, per-player observable views, and a
-  structural invariant checker.
+  Priority, the Process of Play, the Standard Move and Contested status,
+  **Non-Combat Showdowns with Focus, and Scoring by Conquer including the Final
+  Point restriction**, first-class legal action generation, per-player
+  observable views, and a structural invariant checker.
 - **`@riftbound/ai`** — the `Agent` interface, a seeded random legal agent, and a
   single-game runner that keeps agents honest.
 - **`@riftbound/analysis`** — the analytic statistics: a hypergeometric core
@@ -57,13 +58,14 @@ quantity in `GameConfig` cites its rule number.
 
 What is **not** built yet, in rough dependency order:
 
-1. **Showdowns and Combat** (rules 341, 459-466), and with them Scoring by
-   Conquer and the Final Point restriction. Movement is done and already applies
-   Contested status (450), which is exactly the trigger Showdowns hang off
-   (190.3.c) — `showdownInProgress` in `move.ts` is the placeholder they replace.
-   Note that establishing Control happens at the *end* of a Showdown (190.4), so
-   until they exist, moving onto an empty Battlefield leaves it Contested and
-   nobody ever takes Control.
+1. **Combat** (rules 459-466), and with it the Combat Showdown. Non-Combat
+   Showdowns are done — moving onto an *empty* Battlefield opens one, Focus
+   passes until everyone passes in sequence, and Control is established with a
+   Conquer. Moving onto a Battlefield an opponent has Units at is the Combat
+   case, and is currently refused: `isValidDestination` in `move.ts` excludes
+   those destinations so `legalActions` never offers a move the engine cannot
+   finish, and `openShowdown` throws as a backstop. Delete both when Combat
+   lands.
 2. **Card effects.** Cards currently have costs and types but no rules text
    behaviour, so a Spell resolving off the Chain simply goes to the trash. The
    seams are `totalCost` in `play.ts` (rule 356's cost modification layers) and

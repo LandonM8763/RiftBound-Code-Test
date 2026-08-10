@@ -2,7 +2,7 @@ import type { Action } from './actions.js';
 import { standardMoves } from './move.js';
 import { playableFromHand, validUnitLocations } from './play.js';
 import type { GameState, PlayerId } from './state.js';
-import { entityCard, getPlayer, isClosed, isOver } from './state.js';
+import { entityCard, getPlayer, isClosed, isOver, isShowdown } from './state.js';
 
 /**
  * Every action `player` may legally take right now.
@@ -26,6 +26,7 @@ export function legalActions(state: GameState, player: PlayerId): readonly Actio
   }
 
   const closed = isClosed(state);
+  const showdown = isShowdown(state);
   const actions: Action[] = [];
 
   // Rule 164.2: a Basic Rune's two Add abilities are Reactions, so they are
@@ -45,7 +46,7 @@ export function legalActions(state: GameState, player: PlayerId): readonly Actio
 
   // Rule 358.4: timing permissions. `playableFromHand` filters to cards this
   // player can both legally play now and afford.
-  for (const { entity, check } of playableFromHand(state, player, closed)) {
+  for (const { entity, check } of playableFromHand(state, player, { closed, showdown })) {
     if (check.card.type === 'unit') {
       for (const location of validUnitLocations(state, player)) {
         actions.push({ type: 'playCard', card: entity.id, location });
@@ -65,9 +66,9 @@ export function legalActions(state: GameState, player: PlayerId): readonly Actio
     }
   }
 
-  if (closed) {
-    // Rule 312.2.d: with a Chain, passing is always available and is how items
-    // eventually resolve.
+  if (closed || showdown) {
+    // Rule 312.2.d with a Chain; rule 347.2 during a Showdown. Passing is
+    // always available and is how both eventually resolve.
     actions.push({ type: 'pass' });
   } else if (player === state.activePlayer && state.phase === 'main') {
     actions.push({ type: 'endTurn' });

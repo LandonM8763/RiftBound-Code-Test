@@ -81,7 +81,10 @@ export function playGame(options: MatchOptions): MatchResult {
       );
     }
 
-    const seat = state.activePlayer;
+    // Whoever may act, not necessarily the Turn Player: during a Showdown the
+    // opponent holds Focus and Priority (rules 345-347), and the Chain passes
+    // Priority around the table (312.2.d).
+    const seat = state.priority ?? state.activePlayer;
     const offered = legalActions(state, seat);
     if (offered.length === 0) {
       throw new Error(
