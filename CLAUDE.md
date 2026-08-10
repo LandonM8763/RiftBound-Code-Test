@@ -70,9 +70,7 @@ What is **not** built yet, in rough dependency order:
    behaviour, so a Spell resolving off the Chain simply goes to the trash. The
    seams are `totalCost` in `play.ts` (rule 356's cost modification layers) and
    the resolution branch of `pass` in `reduce.ts`.
-3. **Focus** (rule 313) — only meaningful once Showdowns exist; `priority` is
-   implemented, `focus` is not.
-4. **The Mulligan** (rule 117) — verified but unimplemented: it is a player
+3. **The Mulligan** (rule 117) — verified but unimplemented: it is a player
    choice, so it needs a setup-time decision point rather than a config value.
 5. **Signature card limits and champion tag matching** (103.2.a.2, 103.2.d) —
    both need card data that carries champion tags.
