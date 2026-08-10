@@ -29,9 +29,15 @@ What is built:
 - **`@riftbound/cards`** — the six Domains, the Energy/Power `Cost` model, card
   definition types (Legend, Unit, Spell, Gear, Rune, Battlefield), and a
   duplicate-rejecting `CardRegistry`. No real card data yet.
+- **`@riftbound/deck`** — the deck model, a plain-text deck list parser behind a
+  pluggable importer interface, and format legality validation (40-card main deck,
+  12 Runes, 3 Battlefields, the 3-copy limit including the Chosen Champion, Domain
+  Identity, and the best-of-three sideboard).
 - **`@riftbound/engine`** — a deterministic seeded PRNG, the game state model,
   the A/B/C/D turn phase machine, first-class legal action generation, per-player
   observable views, and a structural invariant checker.
+- **`@riftbound/ai`** — the `Agent` interface, a seeded random legal agent, and a
+  single-game runner that keeps agents honest.
 
 What is deliberately **not** built, and why: playing cards, moving Units,
 Showdowns, and combat. Those depend on rules not yet verified against the official
@@ -183,9 +189,9 @@ those above it):
 ```
 packages/
   cards/      EXISTS  Card definition schema, Domains, cost model, registry
-  deck/       planned Deck list parsing, deck model, format legality validation
+  deck/       EXISTS  Deck list parsing, deck model, format legality validation
   engine/     EXISTS  The rules engine: state, legal actions, resolution
-  ai/         planned Agents (random → heuristic → search-based)
+  ai/         EXISTS  Agents (random → heuristic → search-based)
   analysis/   planned Statistics: curve, consistency, draw probabilities, win rates
   suggest/    planned Deck edit recommendations
   sim/        planned Batch simulation harness
@@ -195,6 +201,15 @@ packages/
 Deck *construction* rules (40 cards, 12 Runes, the 3-copy limit, Domain Identity)
 belong to `deck/`, not `engine/`. The engine deliberately accepts any deck list so
 that its own tests can use three-card decks.
+
+`deck/` does not import `engine/`. `toCardLists` returns a `CardLists` that is
+structurally identical to the engine's `DeckList`, so it can be handed straight to
+`createGame` with no dependency between the two — keep it that way.
+
+Batch simulation and the statistics that go with it belong in the planned `sim/`
+package. `ai/` runs single games only; `playGame` is there to exercise an agent,
+not to produce win rates. Win rates are meaningless until cards can be played —
+every game currently ends in the `maxTurns` draw.
 
 ### Engine map
 
@@ -335,8 +350,11 @@ Resolve these and record the answers here.
    site is blocked by this environment's egress proxy; a local copy works just as
    well.
 2. **Choose a card data source** and pin a set/version. Which sets must be supported?
-3. **Define the deck list input format(s).** Plain text? Piltover Archive URL or
-   export? Multiple importers behind one interface?
+3. **Define the deck list input format(s).** Partly answered: importers are
+   pluggable via `DeckImporter`, and a plain-text importer exists that reads
+   `<count> <card id>` lines under section headers. Still open — is a Piltover
+   Archive URL or export the canonical import format, and should card *names* be
+   accepted? Name resolution needs card data, so it waits on question 2.
 4. **Player count.** Riftbound supports 2–4 players; the engine's state model is
    materially simpler if scoped to 1v1. Assume **1v1 unless told otherwise**, but do
    not hard-code a two-player assumption where a list would do. The current code
@@ -360,9 +378,15 @@ does.
 | Opening hand size, and whether a mulligan exists | `openingHandSize: 5`, no mulligan | `state.ts`, `DEFAULT_CONFIG` |
 | What happens on an empty main deck | Emits `mainDeckEmpty`, game continues | `reduce.ts`, `draw` |
 | Who takes the first turn, and does turn 1 skip anything? | Random, no first-turn adjustment | `setup.ts`, `createGame` |
+| Does the sideboard share the 3-copy limit with the main deck? | Yes, shared | `deck/validate.ts`, `checkCopyLimit` |
+| Must the three Battlefields be distinct? | Not enforced | `deck/validate.ts`, `checkCopyLimit` |
+| Are Battlefields constrained by Domain Identity? | Not enforced | `deck/validate.ts`, `checkDomainIdentity` |
 
 `maxTurns` is *not* in this table: it is an explicit harness guard so fuzzing
 terminates, not a rule, and real simulations should raise it.
+
+Deck construction quantities — 40, 12, 3 Battlefields, 3 copies, 8 sideboard — are
+**not** in this table. Multiple community sources agree on them.
 
 ## Maintaining this file
 

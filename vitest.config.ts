@@ -12,7 +12,9 @@ export default defineConfig({
     alias: [
       { find: '@riftbound/cards/testing', replacement: src('cards', 'testing.ts') },
       { find: '@riftbound/cards', replacement: src('cards', 'index.ts') },
+      { find: '@riftbound/deck', replacement: src('deck', 'index.ts') },
       { find: '@riftbound/engine', replacement: src('engine', 'index.ts') },
+      { find: '@riftbound/ai', replacement: src('ai', 'index.ts') },
     ],
   },
   test: {

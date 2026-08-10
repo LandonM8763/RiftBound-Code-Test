@@ -8,6 +8,7 @@
 import type {
   BattlefieldCard,
   CardId,
+  GearCard,
   LegendCard,
   RuneCard,
   SpellCard,
@@ -76,6 +77,21 @@ export function makeSpell(
     type: 'spell',
     cost: overrides.cost ?? FREE,
     timing: overrides.timing ?? 'action',
+  };
+}
+
+export function makeGear(
+  domains: readonly Domain[],
+  overrides: Partial<Omit<GearCard, 'type' | 'domains'>> = {},
+): GearCard {
+  return {
+    id: overrides.id ?? nextCardId('GER'),
+    name: overrides.name ?? 'Test Gear',
+    domains,
+    text: overrides.text ?? '',
+    tags: overrides.tags ?? [],
+    type: 'gear',
+    cost: overrides.cost ?? FREE,
   };
 }
 

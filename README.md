@@ -22,10 +22,12 @@ Requires Node 22 or newer.
 | Package | What it does |
 |---|---|
 | `@riftbound/cards` | Card definition schema, Domains, the Energy/Power cost model, card registry |
+| `@riftbound/deck` | Deck model, deck list parsing, format legality validation |
 | `@riftbound/engine` | Rules engine: seeded RNG, game state, turn phases, legal action generation, observable views |
+| `@riftbound/ai` | Agent interface, random legal agent, single-game runner |
 
-More packages (deck parsing, AI agents, analysis, suggestions, simulation harness)
-are planned; see `CLAUDE.md` for the architecture and phasing.
+More packages (analysis, suggestions, batch simulation harness) are planned; see
+`CLAUDE.md` for the architecture and phasing.
 
 ## Contributing notes
 
