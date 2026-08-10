@@ -72,8 +72,13 @@ What is **not** built yet, in rough dependency order:
    the resolution branch of `pass` in `reduce.ts`.
 3. **The Mulligan** (rule 117) — verified but unimplemented: it is a player
    choice, so it needs a setup-time decision point rather than a config value.
-5. **Signature card limits and champion tag matching** (103.2.a.2, 103.2.d) —
+4. **Signature card limits and champion tag matching** (103.2.a.2, 103.2.d) —
    both need card data that carries champion tags.
+
+Focus (rule 313) *is* implemented, as part of Non-Combat Showdowns: granted to
+the contesting player (345), passing on a pass (347.2.b) and when the last Chain
+item resolves (346). What is still missing there is the Combat Showdown's
+handling of it (464.2.c.1.a-b).
 
 ### Simplifications in the Process of Play
 
