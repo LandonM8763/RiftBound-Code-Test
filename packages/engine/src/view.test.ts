@@ -5,7 +5,14 @@ import { describe, expect, it } from 'vitest';
 import { currentLegalActions } from './legal.js';
 import { reduce } from './reduce.js';
 import { createGame, type DeckList } from './setup.js';
-import { type GameState, isOver, playerId, playerLocation } from './state.js';
+import {
+  battlefieldLocation,
+  definitionOf,
+  type GameState,
+  isOver,
+  playerId,
+  playerLocation,
+} from './state.js';
 import { moveEntity } from './mutate.js';
 import { knownCardCount, observe, opponentsOf, pointsOf } from './view.js';
 
@@ -74,6 +81,76 @@ describe('observe', () => {
     const serialized = JSON.stringify(observe(state, SEAT_0));
     for (const card of hidden) {
       expect(serialized).not.toContain(card);
+    }
+  });
+
+  it('withholds Might for a card it withholds the identity of', () => {
+    // Might rides on card identity: reporting it for a hidden card would leak
+    // exactly what the redaction exists to prevent.
+    const view = observe(game(), SEAT_0);
+    for (const card of view.players[SEAT_1]!.hand) {
+      expect(card.card).toBeNull();
+      expect(card.might).toBeNull();
+    }
+  });
+
+  it('reports effective Might for a Unit both players can see', () => {
+    // Printed on the card, so public (rules 465-466 decide Combat with it).
+    let state = game();
+    const unit = state.players[SEAT_0]!.zones.hand.find(
+      (id) => definitionOf(state, state.entities[id]!.card).type === 'unit',
+    );
+    expect(unit).toBeDefined();
+    state = moveEntity(state, unit!, battlefieldLocation(0));
+
+    for (const seat of [SEAT_0, SEAT_1]) {
+      const seen = observe(state, seat).battlefields[0]!.units.find((u) => u.id === unit);
+      expect(seen?.might).toBe(2);
+    }
+  });
+
+  it('adds Might modifiers into the reported value (rule 143.2.b)', () => {
+    let state = game();
+    const unit = state.players[SEAT_0]!.zones.hand[0]!;
+    state = moveEntity(state, unit, battlefieldLocation(0));
+    state = {
+      ...state,
+      entities: { ...state.entities, [unit]: { ...state.entities[unit]!, mightBonus: 3 } },
+    };
+
+    const seen = observe(state, SEAT_1).battlefields[0]!.units[0];
+    expect(seen?.might).toBe(5);
+  });
+
+  it('exposes the Showdown and Contested status, which are public', () => {
+    const state = game();
+    expect(observe(state, SEAT_0).showdown).toBeNull();
+
+    const contested: GameState = {
+      ...state,
+      showdown: {
+        battlefield: 0,
+        focus: SEAT_1,
+        passes: 0,
+        combat: true,
+        attacker: SEAT_1,
+        defender: SEAT_0,
+      },
+      battlefields: state.battlefields.map((battlefield, index) =>
+        index === 0 ? { ...battlefield, contestedBy: SEAT_1 } : battlefield,
+      ),
+    };
+
+    for (const seat of [SEAT_0, SEAT_1]) {
+      const view = observe(contested, seat);
+      expect(view.showdown).toEqual({
+        battlefield: 0,
+        focus: SEAT_1,
+        combat: true,
+        attacker: SEAT_1,
+        defender: SEAT_0,
+      });
+      expect(view.battlefields[0]?.contestedBy).toBe(SEAT_1);
     }
   });
 

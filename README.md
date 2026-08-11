@@ -24,7 +24,7 @@ Requires Node 22 or newer.
 | `@riftbound/cards` | Card definition schema, Domains, the Energy/Power cost model, card registry |
 | `@riftbound/deck` | Deck model, deck list parsing, format legality validation |
 | `@riftbound/engine` | Rules engine: seeded RNG, game state, turn phases, legal action generation, observable views |
-| `@riftbound/ai` | Agent interface, random legal agent, single-game runner |
+| `@riftbound/ai` | Agent interface, random and heuristic agents, single-game runner |
 | `@riftbound/analysis` | Cost curve, draw probabilities, Domain/Power consistency, castability |
 | `@riftbound/ingest` | Card data source adapters: normalize a raw export, report what it is missing |
 | `@riftbound/cli` | `riftbound analyze` / `validate` / `ingest` |

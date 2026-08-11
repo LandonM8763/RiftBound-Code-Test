@@ -9,7 +9,7 @@ import type {
   PlayerId,
   RunePool,
 } from './state.js';
-import { getEntity, getPlayer, isClosed } from './state.js';
+import { definitionOf, getEntity, getPlayer, isClosed } from './state.js';
 
 /**
  * Hidden information is modelled explicitly.
@@ -25,6 +25,16 @@ export interface EntityView {
   readonly controller: PlayerId;
   readonly exhausted: boolean;
   readonly damage: number;
+  /**
+   * Effective Might, modifiers included (rule 143.2.b), or `null` when this is
+   * not a Unit or the viewer cannot see the card.
+   *
+   * Printed on the card and therefore public, but derived rather than printed:
+   * it is `might + mightBonus`, which is the number Combat actually uses
+   * (465-466). Exposed so an agent evaluating a board does not have to
+   * reimplement `mightOf` against a card registry and get it subtly wrong.
+   */
+  readonly might: number | null;
 }
 
 export interface PlayerView {
@@ -52,6 +62,25 @@ export interface BattlefieldView {
   readonly card: CardId;
   readonly controller: PlayerId | null;
   readonly units: readonly EntityView[];
+  /** Rule 190.3.a: who applied Contested status, if anyone. Public. */
+  readonly contestedBy: PlayerId | null;
+  /** Rule 470: players who have already Scored here this turn. */
+  readonly scoredBy: readonly PlayerId[];
+}
+
+/**
+ * The open Showdown (rule 341), which is public in its entirety.
+ *
+ * Agents need it to tell a Combat Showdown from a Non-Combat one and to know
+ * which side of it they are on; none of it is hidden from either player.
+ */
+export interface ShowdownView {
+  readonly battlefield: number;
+  readonly focus: PlayerId;
+  /** Rule 344.1: opposing Units are present, so this resolves as Combat. */
+  readonly combat: boolean;
+  readonly attacker: PlayerId | null;
+  readonly defender: PlayerId | null;
 }
 
 export interface GameView {
@@ -67,18 +96,24 @@ export interface GameView {
   /** Rule 331: a Chain existing means the turn is in a Closed State. */
   readonly closed: boolean;
   readonly priority: PlayerId | null;
+  /** Rule 341: the Showdown in progress, or `null` in a Neutral State. */
+  readonly showdown: ShowdownView | null;
 }
 
 /** What `viewer` is entitled to know about the current state. */
 export function observe(state: GameState, viewer: PlayerId): GameView {
   const reveal = (id: EntityId, visible: boolean): EntityView => {
     const entity = getEntity(state, id);
+    // Might rides on card identity: revealing it for a face-down card would
+    // leak exactly what `visible` exists to withhold.
+    const card = visible ? definitionOf(state, entity.card) : undefined;
     return {
       id: entity.id,
       card: visible ? entity.card : null,
       controller: entity.controller,
       exhausted: entity.exhausted,
       damage: entity.damage,
+      might: card?.type === 'unit' ? Math.max(0, card.might + entity.mightBonus) : null,
     };
   };
 
@@ -107,8 +142,12 @@ export function observe(state: GameState, viewer: PlayerId): GameView {
       card: battlefield.card,
       controller: battlefield.controller,
       units: revealAll(battlefield.units),
+      contestedBy: battlefield.contestedBy,
+      scoredBy: [...battlefield.scoredBy],
     }),
   );
+
+  const showdown = state.showdown;
 
   return {
     viewer,
@@ -121,6 +160,16 @@ export function observe(state: GameState, viewer: PlayerId): GameView {
     chain: state.chain.map((item) => reveal(item.entity, true)),
     closed: isClosed(state),
     priority: state.priority,
+    showdown:
+      showdown === null
+        ? null
+        : {
+            battlefield: showdown.battlefield,
+            focus: showdown.focus,
+            combat: showdown.combat,
+            attacker: showdown.attacker,
+            defender: showdown.defender,
+          },
   };
 }
 

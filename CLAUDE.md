@@ -48,8 +48,11 @@ What is built:
 
   With Combat in, the engine can play a complete game of Riftbound with vanilla
   cards: contest a Battlefield, fight over it, take Control, and score to 8.
-- **`@riftbound/ai`** — the `Agent` interface, a seeded random legal agent, and a
-  single-game runner that keeps agents honest.
+- **`@riftbound/ai`** — the `Agent` interface, a seeded random legal agent, a
+  **heuristic agent**, and a single-game runner that keeps agents honest. The
+  heuristic wins **~85% against random over 120 alternating-seat games**; the
+  random-vs-random control measures ~50%, which is what says the harness is not
+  just reporting first-player advantage.
 - **`@riftbound/analysis`** — the analytic statistics: a hypergeometric core
   (including the multivariate case), cost curve, draw probabilities by turn,
   Domain/Power consistency, and per-card castability. No engine, no agent, no
@@ -413,6 +416,13 @@ every game currently ends in the `maxTurns` draw.
 | `invariants.ts` | `checkInvariants(state)`, run after every action when fuzzing |
 | `setup.ts` | `createGame` — entity creation, shuffles, opening hands, opens in the Mulligan |
 
+The view exposes **effective Might, the Showdown, Contested status and
+per-turn Scoring** because all of it is public at the table — a Unit's Might is
+printed on its card and a Showdown happens in the open. `might` is `null`
+exactly when `card` is, so redaction stays a single decision rather than two
+that can drift apart. It is derived (`might + mightBonus`, floored at 0 per
+143.2.b) so agents do not reimplement `mightOf` and get Combat subtly wrong.
+
 ### Engine design principles
 
 These are the decisions most expensive to reverse later. Follow them.
@@ -448,13 +458,31 @@ baselines:
 
 1. **Random legal agent** — the fuzz-testing workhorse. Invaluable for finding
    illegal states and engine crashes long before it is a useful opponent.
-2. **Heuristic agent** — scripted evaluation (tempo, board presence, battlefield
-   position, points).
+2. **Heuristic agent** — BUILT. `HeuristicAgent` scores the position from a
+   `GameView` and adds a per-action bonus for what the action achieves.
 3. **Search agent** — MCTS or similar with determinization over hidden information.
 
 A new agent must beat the previous tier convincingly over a large sample, or it is
 not an improvement. Agents implement a common interface and must never access state
 outside their observable view.
+
+**The heuristic cannot look ahead, and that is deliberate.** It is handed a
+`GameView`, not a `GameState`, so it cannot call `reduce` to see where an action
+leads — widening that signature is how an agent starts cheating. It therefore
+scores the *current* position and adds a bonus per action type. Real lookahead
+is the search agent's job, and it needs to hold its own determinized state.
+
+Its weights live in one `HeuristicWeights` struct rather than scattered through
+the scoring code, because every one of them is a guess a win rate can falsify.
+Tune them by playing tiers against each other, not by intuition. Ties are broken
+with the agent's own seeded RNG, never by list order: `legalActions` enumerates
+in a fixed order, so taking the first would make the agent replay one rut and
+hide bugs on the paths it never walks.
+
+The head-to-head loop lives in `heuristic.test.ts`, not in `ai/` — `playGame`
+runs one game, and batch simulation belongs to the planned `sim` package. It
+alternates seats, because the player going second Channels an extra Rune (485.7)
+and a fixed seating would measure that alongside the agents.
 
 ### Statistics
 
