@@ -5,12 +5,33 @@
  * a new primitive means a case here and a variant there — not a new code path
  * per card, which is the whole point of the data-driven design.
  */
-import type { CardEffect, Effect, TargetSpec } from '@riftbound/cards';
+import type { CardEffect, DestinationSpec, Effect, TargetSpec } from '@riftbound/cards';
 
 import type { GameEvent } from './events.js';
 import { moveEntity, withEntity, withPlayer } from './mutate.js';
-import type { EntityId, GameState, PlayerId } from './state.js';
-import { addEnergyTo, addPowerTo, entityCard, getEntity, getPlayer, playerLocation } from './state.js';
+import type { EntityId, GameState, Location, PlayerId } from './state.js';
+import {
+  addEnergyTo,
+  addPowerTo,
+  battlefieldLocation,
+  entityCard,
+  getEntity,
+  getPlayer,
+  playerLocation,
+  sameLocation,
+} from './state.js';
+
+/**
+ * The choices a card's controller made when playing it (rule 355.8).
+ *
+ * Bundled rather than passed one by one so adding a third kind of choice does
+ * not ripple through every caller.
+ */
+export interface EffectChoices {
+  readonly target?: EntityId | undefined;
+  /** Where a `move` effect sends its target. */
+  readonly destination?: Location | undefined;
+}
 
 /**
  * What the interpreter needs from the reducer.
@@ -30,6 +51,18 @@ export interface EffectContext {
   /** 428.1.a.1.b: queue each dying Unit's own death triggers, before it moves. */
   readonly queueDeaths: (
     state: GameState,
+    units: readonly EntityId[],
+    events: GameEvent[],
+  ) => GameState;
+  /**
+   * Rules 450-453: Contest the Destination, run the Cleanup, and open a
+   * Showdown if one is due. The same tail the Standard Move runs, which is why
+   * it is supplied rather than reimplemented here.
+   */
+  readonly afterMove: (
+    state: GameState,
+    player: PlayerId,
+    to: Location,
     units: readonly EntityId[],
     events: GameEvent[],
   ) => GameState;
@@ -106,13 +139,13 @@ export function executeEffect(
   state: GameState,
   controller: PlayerId,
   effect: CardEffect,
-  target: EntityId | undefined,
+  choices: EffectChoices,
   events: GameEvent[],
   context: EffectContext,
 ): GameState {
   let next = state;
   for (const step of effect.effects) {
-    next = applyEffect(next, controller, step, target, events, context);
+    next = applyEffect(next, controller, step, choices, events, context);
   }
   return next;
 }
@@ -121,10 +154,11 @@ function applyEffect(
   state: GameState,
   controller: PlayerId,
   effect: Effect,
-  target: EntityId | undefined,
+  choices: EffectChoices,
   events: GameEvent[],
   context: EffectContext,
 ): GameState {
+  const target = choices.target;
   switch (effect.kind) {
     case 'draw':
       return context.drawCards(state, controller, effect.count, events);
@@ -320,6 +354,28 @@ function applyEffect(
       return next;
     }
 
+    // 449: an effect-driven Move. Unlike the Standard Move it costs no exhaust
+    // (420.3.a is the Standard Move's price), but the tail is identical: the
+    // Destination is Contested (450), a Cleanup follows (453), and a Showdown
+    // or Combat may open (451-452).
+    case 'move': {
+      const destination = choices.destination;
+      if (target === undefined || destination === undefined || !onBoard(state, target)) {
+        return state;
+      }
+      if (sameLocation(getEntity(state, target).location, destination)) {
+        return state;
+      }
+      const moved = moveEntity(state, target, destination);
+      events.push({
+        type: 'unitsMoved',
+        player: controller,
+        units: [target],
+        battlefield: destination.kind === 'battlefield' ? destination.index : null,
+      });
+      return context.afterMove(moved, controller, destination, [target], events);
+    }
+
     default: {
       const exhaustive: never = effect;
       throw new Error(`Unknown effect: ${JSON.stringify(exhaustive)}`);
@@ -331,6 +387,27 @@ function applyEffect(
 function onBoard(state: GameState, unit: EntityId): boolean {
   const location = getEntity(state, unit).location;
   return location.kind === 'battlefield' || location.zone === 'base';
+}
+
+/**
+ * Locations a `move` on this card may send its target to (rule 449.1).
+ *
+ * Enumerated for the same reason targets are: rule 355.8 needs every choice
+ * settled before the card goes on the Chain, so `legalActions` offers one
+ * action per destination rather than asking mid-resolution.
+ */
+export function legalDestinations(
+  state: GameState,
+  controller: PlayerId,
+  spec: DestinationSpec | undefined,
+): Location[] {
+  if (spec === undefined) {
+    return [];
+  }
+  if (spec.kind === 'base') {
+    return [playerLocation(controller, 'base')];
+  }
+  return state.battlefields.map((_battlefield, index) => battlefieldLocation(index));
 }
 
 /**

@@ -178,6 +178,11 @@ export interface ChainItem {
    */
   readonly target: EntityId | null;
   /**
+   * The Destination chosen for a `move` effect (449.1), carried alongside the
+   * target for the same reason. `null` when the card moves nothing.
+   */
+  readonly destination: Location | null;
+  /**
    * Which ability this item is, or `null` when the item is a played card.
    *
    * Rule 377.3.a.1: an ability on the Chain "has no card to represent it", so

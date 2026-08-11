@@ -34,8 +34,11 @@ export type Action =
   | {
       readonly type: 'playCard';
       readonly card: EntityId;
+      /** Where a Unit enters the Board (359.2.c). Entering is not a Move. */
       readonly location?: Location;
       readonly target?: EntityId;
+      /** Where a `move` effect on the card sends its target (rule 449.1). */
+      readonly destination?: Location;
     }
   /** Pass Priority (rule 312.2.d). Resolves the Chain once everyone passes. */
   | { readonly type: 'pass' }
@@ -49,6 +52,7 @@ export type Action =
       readonly source: EntityId;
       readonly index: number;
       readonly target?: EntityId;
+      readonly destination?: Location;
     }
   /**
    * Rule 383.3.a: a "you may" Triggered Ability is performed or declined by its

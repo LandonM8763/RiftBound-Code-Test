@@ -33,6 +33,20 @@ export type TargetSpec =
       readonly atBattlefield?: boolean | undefined;
     };
 
+/**
+ * Where a `move` effect sends its target (rule 449.1).
+ *
+ * A second choice alongside `target`, made at the same time and for the same
+ * reason — rule 355.8 wants every choice settled before the card reaches the
+ * Chain. `base` needs no choice at all; `battlefield` is enumerated the way
+ * targets are, one action per legal destination.
+ */
+export type DestinationSpec =
+  /** Any Battlefield the Unit may legally reach. */
+  | { readonly kind: 'battlefield' }
+  /** The controller's own Base. */
+  | { readonly kind: 'base' };
+
 /** A single thing a card does. */
 export type Effect =
   | { readonly kind: 'draw'; readonly count: number }
@@ -92,22 +106,28 @@ export type Effect =
    * Too few Runes means channelling as many as possible (430.3) — deliberately
    * *not* a Burn Out, which is what an empty Main Deck causes (431).
    */
-  | { readonly kind: 'channel'; readonly count: number; readonly exhausted?: boolean | undefined };
-
-/*
- * Deliberately absent: `move` (rule 420).
- *
- * A Move needs two choices — which Game Object, and which Location it goes to —
- * and `CardEffect` carries exactly one target. Supporting it means letting a
- * target spec name a Location and letting an effect ask for more than one
- * choice, which is the sub-action protocol that trigger ordering and Combat
- * damage assignment also want. `recall` covers the case with no destination to
- * choose, since a Recall always goes to the controller's Base.
- */
+  | { readonly kind: 'channel'; readonly count: number; readonly exhausted?: boolean | undefined }
+  /**
+   * Rules 420, 445-453: move the target to the card's chosen Destination.
+   *
+   * A real Move, unlike `recall`: it Contests the Destination (450), can open
+   * a Showdown or a Combat (451-452), and is followed by a Cleanup (453). It
+   * costs no exhaust — that is the Standard Move's price (420.3.a), not this
+   * one's. The Destination comes from `CardEffect.destination`.
+   */
+  | { readonly kind: 'move' };
 
 /** The rules text of a card: what it targets, and what it then does. */
 export interface CardEffect {
   readonly target: TargetSpec;
+  /**
+   * Where a `move` effect on this card sends its target (rule 449.1).
+   *
+   * One per card rather than one per effect, matching `target`: a card that
+   * moves something twice to two separately chosen places would need the
+   * general sub-action protocol, and none of that exists yet.
+   */
+  readonly destination?: DestinationSpec | undefined;
   /** Executed in order, which is how rule 359.2.b reads a card top to bottom. */
   readonly effects: readonly Effect[];
 }
@@ -117,4 +137,9 @@ export const NO_TARGET: TargetSpec = { kind: 'none' };
 /** True when playing this card requires the player to choose a target. */
 export function needsTarget(effect: CardEffect | undefined): boolean {
   return effect !== undefined && effect.target.kind !== 'none';
+}
+
+/** True when playing this card requires the player to choose a Destination. */
+export function needsDestination(effect: CardEffect | undefined): boolean {
+  return effect?.destination?.kind === 'battlefield';
 }

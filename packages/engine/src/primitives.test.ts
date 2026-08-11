@@ -34,6 +34,7 @@ import {
   zoneOf,
   type EntityId,
   type GameState,
+  type Location,
 } from './state.js';
 
 const LEGEND = makeLegend(['fury'], { id: cardId('P-000') });
@@ -53,6 +54,30 @@ const DEATHKNELL = makeUnit(2, ['fury'], {
     ],
   },
 });
+/**
+ * "[1]: Move a friendly unit to a battlefield."
+ *
+ * An *Activated* ability rather than a Play Effect, because a Triggered
+ * Ability's target is not chosen on the way onto the Chain — see the note in
+ * `queueTriggers`. Activation is where both choices are made.
+ */
+const MOVER = makeUnit(2, ['fury'], {
+  id: cardId('P-012'),
+  name: 'Mover',
+  cost: cost(1),
+  abilities: {
+    activated: [
+      {
+        cost: cost(1),
+        effect: {
+          target: { kind: 'unit', scope: 'friendly' },
+          destination: { kind: 'battlefield' },
+          effects: [{ kind: 'move' }],
+        },
+      },
+    ],
+  },
+});
 const RUNE = makeRune('fury', { id: cardId('P-100') });
 const BATTLEFIELDS = Array.from({ length: 3 }, (_, i) =>
   makeBattlefield({ id: cardId(`P-20${i}`) }),
@@ -63,6 +88,7 @@ const REGISTRY = CardRegistry.from([
   CHAMPION,
   UNIT,
   DEATHKNELL,
+  MOVER,
   RUNE,
   ...BATTLEFIELDS,
 ] as CardDefinition[]);
@@ -130,6 +156,7 @@ function run(
   state: GameState,
   effects: readonly Effect[],
   target?: EntityId,
+  destination?: Location,
 ): { state: GameState; events: GameEvent[] } {
   const events: GameEvent[] = [];
   const effect: CardEffect = {
@@ -148,9 +175,19 @@ function run(
       return next;
     },
     queueDeaths: (current) => current,
+    // The real tail lives in the reducer; these tests exercise the primitive,
+    // and `move` gets its Contest/Cleanup coverage through a played card below.
+    afterMove: (current) => current,
   };
   return {
-    state: executeEffect(state, state.activePlayer, effect, target, events, context),
+    state: executeEffect(
+      state,
+      state.activePlayer,
+      effect,
+      { target, destination },
+      events,
+      context,
+    ),
     events,
   };
 }
@@ -194,12 +231,13 @@ describe('kill (rule 428)', () => {
         sawOnBoard = units.every((id) => zoneOf(current, player, 'base').includes(id));
         return current;
       },
+      afterMove: (current) => current,
     };
     executeEffect(
       state,
       player,
       { target: { kind: 'unit', scope: 'any' }, effects: [{ kind: 'kill' }] },
-      unit,
+      { target: unit },
       [],
       context,
     );
@@ -486,6 +524,127 @@ describe('channel (rule 430)', () => {
   });
 });
 
+describe('move (rules 420, 445-453)', () => {
+  it('relocates the target to the chosen Battlefield', () => {
+    const [state, unit] = withUnit(inMainPhase());
+    const { state: after } = run(state, [{ kind: 'move' }], unit, battlefieldLocation(1));
+
+    expect(after.battlefields[1]?.units).toContain(unit);
+    expect(zoneOf(after, after.activePlayer, 'base')).not.toContain(unit);
+    checkInvariants(after);
+  });
+
+  it('does not exhaust the target, unlike the Standard Move (420.3.a)', () => {
+    // Exhausting is the Standard Move's cost; an instructed Move is free.
+    const [state, unit] = withUnit(inMainPhase());
+    const { state: after } = run(state, [{ kind: 'move' }], unit, battlefieldLocation(0));
+    expect(getEntity(after, unit).exhausted).toBe(false);
+  });
+
+  it('does nothing when the target is already there', () => {
+    const [placed, unit] = withUnit(inMainPhase());
+    const state = moveEntity(placed, unit, battlefieldLocation(0));
+    const { state: after, events } = run(state, [{ kind: 'move' }], unit, battlefieldLocation(0));
+
+    expect(after.battlefields[0]?.units).toContain(unit);
+    expect(events).toEqual([]);
+  });
+
+  it('does nothing without a Destination', () => {
+    const [state, unit] = withUnit(inMainPhase());
+    const { state: after } = run(state, [{ kind: 'move' }], unit);
+    expect(zoneOf(after, after.activePlayer, 'base')).toContain(unit);
+  });
+
+  it('Contests the Destination and runs the Cleanup (450, 453)', () => {
+    // Through a real played card, so the reducer's Move tail runs rather than
+    // the stub the direct-effect harness uses.
+    let state = createGame({
+      decks: [deck(), deck()],
+      registry: REGISTRY,
+      seed: 'move-contest',
+    }).state;
+    while (state.phase === 'mulligan') {
+      state = reduce(state, { type: 'mulligan', cards: [] }).state;
+    }
+    while (state.phase !== 'main') {
+      state = reduce(state, { type: 'resolvePhase' }).state;
+    }
+    const player = state.activePlayer;
+
+    // A friendly Unit in the Base to move, and the Mover on the Board.
+    const [withTarget, victim] = withUnit(state, UNIT.id);
+    const [ready, source] = withUnit(withTarget, MOVER.id);
+    let next: GameState = {
+      ...ready,
+      players: ready.players.map((seat) =>
+        seat.id === player ? { ...seat, pool: { energy: 5, power: seat.pool.power } } : seat,
+      ),
+    };
+
+    next = reduce(next, {
+      type: 'activateAbility',
+      source,
+      index: 0,
+      target: victim,
+      destination: battlefieldLocation(0),
+    }).state;
+    let guard = 0;
+    while (next.chain.length > 0) {
+      if (guard++ > 20) throw new Error('Chain did not resolve');
+      next = reduce(next, { type: 'pass' }).state;
+    }
+
+    expect(next.battlefields[0]?.units).toContain(victim);
+    // 450: an Uncontested Battlefield the mover does not control becomes
+    // Contested.
+    expect(next.battlefields[0]?.contestedBy).toBe(player);
+
+    // 344.2 opens a Showdown only in a Neutral Open state, so the one owed for
+    // this Move could not open while the Chain was still up. It opens as the
+    // Chain empties, and Control follows when it closes (348.2.a).
+    expect(next.showdown?.battlefield).toBe(0);
+    while (next.showdown !== null) {
+      if (guard++ > 20) throw new Error('Showdown did not close');
+      next = reduce(next, { type: 'pass' }).state;
+    }
+    expect(next.battlefields[0]?.controller).toBe(player);
+    checkInvariants(next);
+  });
+
+  it('offers one action per Destination and reduce accepts each (355.8)', () => {
+    let state = createGame({ decks: [deck(), deck()], registry: REGISTRY, seed: 'move-legal' }).state;
+    while (state.phase === 'mulligan') {
+      state = reduce(state, { type: 'mulligan', cards: [] }).state;
+    }
+    while (state.phase !== 'main') {
+      state = reduce(state, { type: 'resolvePhase' }).state;
+    }
+    const player = state.activePlayer;
+
+    const [withTarget] = withUnit(state, UNIT.id);
+    const [ready, source] = withUnit(withTarget, MOVER.id);
+    const next: GameState = {
+      ...ready,
+      players: ready.players.map((seat) =>
+        seat.id === player ? { ...seat, pool: { energy: 5, power: seat.pool.power } } : seat,
+      ),
+    };
+
+    const offered = currentLegalActions(next).filter(
+      (action) => action.type === 'activateAbility' && action.source === source,
+    );
+    // One per (target, destination) pair, and every one of them must be a move
+    // `reduce` will accept — the guarantee `legalActions` exists to give.
+    expect(offered.length).toBe(
+      next.battlefields.length * zoneOf(next, player, 'base').length,
+    );
+    for (const action of offered) {
+      expect(() => reduce(next, action)).not.toThrow();
+    }
+  });
+});
+
 describe('effects run in order (359.2.b)', () => {
   it('applies a sequence top to bottom', () => {
     const [state, unit] = withUnit(inMainPhase());
@@ -552,6 +711,40 @@ describe('primitive fuzz', () => {
     unit('P-307', onPlay([{ kind: 'channel', count: 2, exhausted: true }], false)),
     unit('P-308', activated([{ kind: 'ready' }], true)),
     unit('P-309', activated([{ kind: 'exhaust' }], true)),
+    // Moves, which Contest a Battlefield mid-resolution and so can leave a
+    // Showdown owed once the Chain empties.
+    makeUnit(2, ['fury'], {
+      id: cardId('P-310'),
+      cost: cost(1),
+      abilities: {
+        activated: [
+          {
+            cost: cost(1),
+            effect: {
+              target: { kind: 'unit', scope: 'friendly' },
+              destination: { kind: 'battlefield' },
+              effects: [{ kind: 'move' }],
+            },
+          },
+        ],
+      },
+    }),
+    makeUnit(2, ['fury'], {
+      id: cardId('P-311'),
+      cost: cost(1),
+      abilities: {
+        activated: [
+          {
+            cost: cost(1),
+            effect: {
+              target: { kind: 'unit', scope: 'any' },
+              destination: { kind: 'base' },
+              effects: [{ kind: 'move' }],
+            },
+          },
+        ],
+      },
+    }),
   ];
 
   const registry = CardRegistry.from([

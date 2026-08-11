@@ -82,7 +82,7 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     case 'addPower':
       return addPower(state, action.rune);
     case 'playCard':
-      return playCard(state, action.card, action.location, action.target);
+      return playCard(state, action.card, action.location, action.target, action.destination);
     case 'pass':
       return pass(state);
     case 'moveUnits':
@@ -90,7 +90,7 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     case 'mulligan':
       return mulligan(state, action.cards);
     case 'activateAbility':
-      return activateAbility(state, action.source, action.index, action.target);
+      return activateAbility(state, action.source, action.index, action.target, action.destination);
     case 'resolveTrigger':
       return resolveTrigger(state, action.perform);
     default: {
@@ -163,6 +163,7 @@ function playCard(
   card: EntityId,
   location: Location | undefined,
   target: EntityId | undefined,
+  destination: Location | undefined,
 ): ReduceResult {
   const player = requirePriority(state);
   const entity = getEntity(state, card);
@@ -212,7 +213,14 @@ function playCard(
       ...next,
       chain: [
         ...next.chain,
-        { entity: card, controller: player, pending: false, target: target ?? null, ability: null },
+        {
+          entity: card,
+          controller: player,
+          pending: false,
+          target: target ?? null,
+          destination: destination ?? null,
+          ability: null,
+        },
       ],
       passes: 0,
       priority: player,
@@ -227,8 +235,8 @@ function playCard(
   }
 
   // 359.2: a Permanent leaves the Chain and becomes a Game Object at once.
-  const destination = resolvePermanentLocation(next, player, definition, location);
-  next = moveEntity(next, card, destination);
+  const entersAt = resolvePermanentLocation(next, player, definition, location);
+  next = moveEntity(next, card, entersAt);
   // 359.2.c: a Unit enters exhausted; 359.2.d: Gear enters ready at the Base.
   next = withEntity(next, card, (current) => ({
     ...current,
@@ -239,7 +247,7 @@ function playCard(
 
   // 359.2.b: execute all rules text on the card, top to bottom.
   if (effect !== undefined) {
-    next = executeEffect(next, player, effect, target, events, EFFECT_CONTEXT);
+    next = executeEffect(next, player, effect, { target, destination }, events, EFFECT_CONTEXT);
   }
 
   // 383.4.a.2: Play Effects go on the Chain as Pending Items once the Permanent
@@ -261,6 +269,7 @@ function activateAbility(
   source: EntityId,
   index: number,
   target: EntityId | undefined,
+  destination: Location | undefined,
 ): ReduceResult {
   const player = requirePriority(state);
   const available = activatableAbilities(state, player);
@@ -300,6 +309,7 @@ function activateAbility(
         controller: player,
         pending: false,
         target: target ?? null,
+        destination: destination ?? null,
         ability: { kind: 'activated', index },
       },
     ],
@@ -410,6 +420,7 @@ function queueTriggers(
           // Triggered abilities choose their target on resolution rather than
           // on the way onto the Chain, so nothing is carried here yet.
           target: null,
+          destination: null,
           ability: trigger.ability,
         },
       ],
@@ -513,6 +524,7 @@ const EFFECT_CONTEXT: EffectContext = {
   drawCards: (state, player, count, events) => drawCards(state, player, count, events).state,
   queueDeaths: (state, units, events) =>
     queueTriggers(state, triggersFor(state, { kind: 'dies' }, { sources: units }), events),
+  afterMove: (state, player, to, _units, events) => afterMove(state, player, to, events),
 };
 
 function resolvePermanentLocation(
@@ -599,7 +611,7 @@ function pass(state: GameState): ReduceResult {
         next,
         top.controller,
         ability.effect,
-        top.target ?? undefined,
+        { target: top.target ?? undefined, destination: top.destination ?? undefined },
         events,
         EFFECT_CONTEXT,
       );
@@ -617,7 +629,14 @@ function pass(state: GameState): ReduceResult {
     const spell = entityCard(next, top.entity);
     const spellEffect = effectOf(spell);
     if (spellEffect !== undefined) {
-      next = executeEffect(next, top.controller, spellEffect, top.target ?? undefined, events, EFFECT_CONTEXT);
+      next = executeEffect(
+        next,
+        top.controller,
+        spellEffect,
+        { target: top.target ?? undefined, destination: top.destination ?? undefined },
+        events,
+        EFFECT_CONTEXT,
+      );
     }
     next = moveEntity(next, top.entity, playerLocation(top.controller, 'trash'));
   }
@@ -644,6 +663,13 @@ function pass(state: GameState): ReduceResult {
       // Chain the state Opens and the Turn Player acts again (312.2.a).
       priority: nextTop === undefined ? afterChainPriority(state) : nextTop.controller,
     };
+    if (nextTop === undefined) {
+      // 344.2 opens a Showdown only in a Neutral *Open* state, so an effect
+      // that Contested a Battlefield while the Chain was up could not open one
+      // then. The Chain has just emptied, which is that Cleanup: check now, or
+      // the Battlefield stays Contested forever with nobody taking Control.
+      next = openShowdown(next, events);
+    }
   }
 
   events.push({ type: 'chainItemResolved', entity: top.entity });
@@ -700,11 +726,29 @@ function moveUnits(
     },
   ];
 
+  return { state: afterMove(next, player, to, events), events };
+}
+
+/**
+ * Everything a Move does once the Permanents have changed location.
+ *
+ * Shared by the Standard Move and by `move` effects, because rules 450-453
+ * apply to a Move however it was caused (449) and duplicating them is how the
+ * two paths drift apart.
+ */
+function afterMove(
+  state: GameState,
+  player: PlayerId,
+  to: Location,
+  events: GameEvent[],
+): GameState {
+  let next = state;
+
   // 450: the destination becomes Contested if its controller is someone else.
   if (to.kind === 'battlefield') {
-    const before = next.battlefields[to.index]?.contestedBy ?? null;
+    const contestedBefore = next.battlefields[to.index]?.contestedBy ?? null;
     next = applyContested(next, to.index, player);
-    if (before === null && next.battlefields[to.index]?.contestedBy === player) {
+    if (contestedBefore === null && next.battlefields[to.index]?.contestedBy === player) {
       events.push({ type: 'battlefieldContested', battlefield: to.index, player });
     }
   }
@@ -721,9 +765,7 @@ function moveUnits(
 
   // 344.2: a Contested Battlefield with only one player's Units present opens a
   // Showdown in the next Cleanup.
-  next = openShowdown(next, events);
-
-  return { state: next, events };
+  return openShowdown(next, events);
 }
 
 /**

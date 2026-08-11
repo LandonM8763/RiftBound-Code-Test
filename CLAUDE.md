@@ -43,8 +43,8 @@ What is built:
   Priority, the Process of Play, the Standard Move and Contested status,
   Showdowns with Focus, the full Steps of Combat, Scoring by Conquer including
   the Final Point restriction, **data-driven card effects** (draw, damage,
-  heal, Might, resources, kill, recall, ready/exhaust, Buffs, discard, XP,
-  Channel), **the Mulligan**,
+  heal, Might, resources, kill, recall, move, ready/exhaust, Buffs, discard,
+  XP, Channel), **the Mulligan**,
   **Activated and Triggered abilities** on an **interruptible phase machine**,
   **rule 356 cost modification**, first-class legal action generation,
   per-player observable views, and a structural invariant checker.
@@ -93,10 +93,12 @@ What is **not** built yet, in rough dependency order:
    (compare 422.3 for Discard), and the optional form needs a decision point
    during the Announce step (356.2.b.1) because choosing to pay changes the
    total.
-2. **`move` as an effect** (rule 420). A Move needs two choices — which Game
-   Object, and which Location — and `CardEffect` carries exactly one target.
-   It wants the same sub-action protocol as trigger ordering and Combat damage
-   assignment. `recall` covers the case with no destination to choose.
+2. **Choices for Triggered Abilities.** A Triggered Ability's target is not
+   chosen on the way onto the Chain — `queueTriggers` carries `null` — so a
+   trigger whose effect targets currently does nothing. Rule 402.2 makes those
+   choices at the Make Relevant Choices step of resolution, which needs the
+   sub-action protocol. Activated abilities and played cards are unaffected:
+   both choose at play time, as 355.8 requires.
 3. **Real card data.** Every construction rule is now enforced, but the card
    pool is still invented fixtures — see [Open questions](#open-questions).
 
@@ -490,6 +492,11 @@ Four of them encode a rule that is easy to get backwards:
   (317.2.c). Rule 702.3 caps a Unit at one, and a second is silently *not
   placed* (702.3.a) rather than being an error. `checkInvariants` enforces the
   cap. A Unit leaving play loses them (705).
+- **A `move` is a real Move, and a Recall is not.** `move` Contests its
+  Destination (450), can open a Showdown or Combat (451-452), and is followed
+  by a Cleanup (453) — the same tail the Standard Move runs, shared as
+  `afterMove` rather than duplicated. It costs no exhaust: that is the Standard
+  Move's price (420.3.a), not an instructed Move's.
 - **Channelling an empty Rune Deck is not a Burn Out.** Rule 430.3 channels as
   many as possible and stops; 431's Burn Out, and the point it hands an
   opponent, belongs to the *Main* Deck alone.
@@ -499,8 +506,20 @@ says it is not a Game Object and cannot be targeted, readied or exhausted. It
 has no cap (733).
 
 `executeEffect` takes an `EffectContext` rather than reaching for the reducer:
-drawing can cause a Burn Out and killing has to touch the Chain, and both of
-those live above this layer.
+drawing can cause a Burn Out, killing has to touch the Chain, and a Move runs
+the Contest/Cleanup/Showdown tail — all of which live above this layer.
+
+**A `move` needs a second choice, and it is made the same way a target is.**
+`CardEffect.destination` names the kind of Location wanted, `legalActions`
+offers one action per (target, destination) pair, and both ride on the Chain
+item until the effect resolves. Rule 355.8 wants every choice settled before a
+card reaches the Chain, so enumerating beats asking mid-resolution.
+
+**A Showdown owed by an effect opens when the Chain empties.** Rule 344.2 only
+opens one in a Neutral *Open* state, so an effect that Contests a Battlefield
+during Chain resolution cannot open it there. `pass` re-checks once the Chain
+drains — without that the Battlefield stays Contested forever and nobody ever
+takes Control.
 
 ### Cost modification
 

@@ -1,11 +1,11 @@
 import type { Action } from './actions.js';
-import { effectOf } from '@riftbound/cards';
+import { effectOf, type CardEffect } from '@riftbound/cards';
 
 import { activatableAbilities } from './abilities.js';
-import { legalTargets } from './effects.js';
+import { legalDestinations, legalTargets } from './effects.js';
 import { standardMoves } from './move.js';
 import { playableFromHand, validUnitLocations } from './play.js';
-import type { EntityId, GameState, PlayerId } from './state.js';
+import type { EntityId, GameState, Location, PlayerId } from './state.js';
 import { entityCard, getPlayer, isClosed, isOver, isShowdown } from './state.js';
 
 /**
@@ -52,12 +52,18 @@ export function legalActions(state: GameState, player: PlayerId): readonly Actio
   // cards get one — 355.8 needs a valid choice before it can go on the Chain.
   for (const { source, index, ability } of activatableAbilities(state, player)) {
     const spec = ability.effect.target;
-    if (spec.kind === 'none') {
-      actions.push({ type: 'activateAbility', source, index });
-      continue;
-    }
-    for (const target of legalTargets(state, player, spec)) {
-      actions.push({ type: 'activateAbility', source, index, target });
+    const targets =
+      spec.kind === 'none' ? [undefined] : legalTargets(state, player, spec);
+    for (const target of targets) {
+      for (const destination of choicesOfDestination(state, player, ability.effect)) {
+        actions.push({
+          type: 'activateAbility',
+          source,
+          index,
+          ...(target === undefined ? {} : { target }),
+          ...(destination === undefined ? {} : { destination }),
+        });
+      }
     }
   }
 
@@ -88,21 +94,21 @@ export function legalActions(state: GameState, player: PlayerId): readonly Actio
         : legalTargets(state, player, effect.target);
 
     for (const target of targets) {
-      if (check.card.type === 'unit') {
-        for (const location of validUnitLocations(state, player)) {
-          actions.push({
-            type: 'playCard',
-            card: entity.id,
-            location,
-            ...(target === undefined ? {} : { target }),
-          });
-        }
-      } else {
-        actions.push({
-          type: 'playCard',
-          card: entity.id,
+      // A `move` effect needs its Destination chosen now too (449.1), so the
+      // offer is the product of the two choices — the same treatment targets
+      // already get, for the same rule 355.8 reason.
+      for (const destination of choicesOfDestination(state, player, effect)) {
+        const choices = {
           ...(target === undefined ? {} : { target }),
-        });
+          ...(destination === undefined ? {} : { destination }),
+        };
+        if (check.card.type === 'unit') {
+          for (const location of validUnitLocations(state, player)) {
+            actions.push({ type: 'playCard', card: entity.id, location, ...choices });
+          }
+        } else {
+          actions.push({ type: 'playCard', card: entity.id, ...choices });
+        }
       }
     }
   }
@@ -126,6 +132,21 @@ export function legalActions(state: GameState, player: PlayerId): readonly Actio
   }
 
   return actions;
+}
+
+/**
+ * Destinations to enumerate for a card, or `[undefined]` when it moves nothing.
+ *
+ * A card that needs a Destination but has none available offers no actions at
+ * all, which is rule 355.8 again: without a legal choice it cannot be played.
+ */
+function choicesOfDestination(
+  state: GameState,
+  player: PlayerId,
+  effect: CardEffect | undefined,
+): (Location | undefined)[] {
+  const spec = effect?.destination;
+  return spec === undefined ? [undefined] : legalDestinations(state, player, spec);
 }
 
 /**
