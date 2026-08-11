@@ -1,3 +1,4 @@
+export { APITCG_SOURCE, canonicalName, championTagFromName, parseCardType, plainText, timingFromText } from './apitcg.js';
 export { COMMUNITY_SOURCE, stripHtml } from './community.js';
 export { summarizeGaps } from './gaps.js';
 export type { Gap, GapSummary } from './gaps.js';

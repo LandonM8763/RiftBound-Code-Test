@@ -11,7 +11,7 @@ import {
 } from '@riftbound/deck';
 
 import { HeuristicAgent, RandomAgent } from '@riftbound/ai';
-import { COMMUNITY_SOURCE } from '@riftbound/ingest';
+import { APITCG_SOURCE, COMMUNITY_SOURCE, type CardSource } from '@riftbound/ingest';
 import { simulate } from '@riftbound/sim';
 
 import { CardDataError, loadCardRegistry } from './cards-file.js';
@@ -42,7 +42,7 @@ export const USAGE = `riftbound — deck testing tools
 Usage:
   riftbound analyze  <deck-file> --cards <cards.json> [options]
   riftbound validate <deck-file> --cards <cards.json> [options]
-  riftbound ingest   <raw-file> [--json]
+  riftbound ingest   <raw-file> [--source <name>] [--json]
   riftbound sim      <deck-file> --cards <cards.json> [options]
   riftbound help
 
@@ -52,12 +52,15 @@ Options:
   --turn <n>       Turn used for the draw-odds column. Default 3.
   --games <n>      Games to simulate. Default 200.
   --seed <text>    Simulation seed. Default "riftbound".
+  --source <name>  Card data source for ingest: apitcg (default) or community.
   --json           Emit machine-readable JSON instead of a text report.
   -h, --help       Show this help.
 
-ingest normalizes a raw community card export into this project's schema and
-writes it to stdout. It drops any card whose source is missing a field the
-rules need rather than inventing one, and reports every such gap on stderr.
+ingest normalizes a raw card export into this project's schema and writes it to
+stdout. It drops any card whose source is missing a field the rules need rather
+than inventing one, and reports every such gap on stderr. The apitcg source
+carries Might, the supertypes and printed Spell timing; the community source
+carries none of those and yields no Units or Spells at all.
 
 sim plays the deck against itself, heuristic agent versus random, and reports
 win rates with 95% intervals. Seats rotate each game so the result is not
@@ -98,6 +101,12 @@ function resolveFormat(name: string | undefined): Format | undefined {
   }
 }
 
+/** Adapters the CLI can ingest through, by `--source` name. */
+const SOURCES: Readonly<Record<string, CardSource>> = {
+  apitcg: APITCG_SOURCE,
+  community: COMMUNITY_SOURCE,
+};
+
 /**
  * Normalize a raw card export onto stdout, with the gap report on stderr.
  *
@@ -105,7 +114,12 @@ function resolveFormat(name: string | undefined): Format | undefined {
  * usable card data to the file while the operator still sees, on the terminal,
  * exactly which cards the source could not supply and why.
  */
-function runIngest(rawPath: string, readFile: FileReader, asJson: boolean): CliResult {
+function runIngest(
+  rawPath: string,
+  readFile: FileReader,
+  asJson: boolean,
+  source: CardSource,
+): CliResult {
   let text: string;
   try {
     text = readFile(rawPath);
@@ -120,16 +134,16 @@ function runIngest(rawPath: string, readFile: FileReader, asJson: boolean): CliR
     return fail(`"${rawPath}" is not valid JSON: ${messageOf(error)}`, EXIT.input);
   }
 
-  const result = COMMUNITY_SOURCE.normalize(raw);
+  const result = source.normalize(raw);
   if (result.problems.length > 0 && result.cards.length === 0) {
     return fail(`Card data is not usable:\n  ${result.problems.join('\n  ')}`, EXIT.input);
   }
 
   const stdout = asJson
-    ? `${JSON.stringify({ source: COMMUNITY_SOURCE.id, cards: result.cards, gaps: result.gaps }, null, 2)}\n`
+    ? `${JSON.stringify({ source: source.id, cards: result.cards, gaps: result.gaps }, null, 2)}\n`
     : `${JSON.stringify(result.cards, null, 2)}\n`;
 
-  return { stdout, stderr: formatIngest(result, COMMUNITY_SOURCE), code: EXIT.ok };
+  return { stdout, stderr: formatIngest(result, source), code: EXIT.ok };
 }
 
 export function run(argv: readonly string[], readFile: FileReader): CliResult {
@@ -146,6 +160,7 @@ export function run(argv: readonly string[], readFile: FileReader): CliResult {
         turn: { type: 'string' },
         games: { type: 'string' },
         seed: { type: 'string' },
+        source: { type: 'string' },
         json: { type: 'boolean' },
         help: { type: 'boolean', short: 'h' },
       },
@@ -169,7 +184,14 @@ export function run(argv: readonly string[], readFile: FileReader): CliResult {
     if (rawPath === undefined) {
       return usageError('ingest needs a raw card data file.');
     }
-    return runIngest(rawPath, readFile, values['json'] === true);
+    const name = typeof values['source'] === 'string' ? values['source'] : 'apitcg';
+    const source = SOURCES[name];
+    if (source === undefined) {
+      return usageError(
+        `Unknown source "${name}". Use one of: ${Object.keys(SOURCES).join(', ')}.`,
+      );
+    }
+    return runIngest(rawPath, readFile, values['json'] === true, source);
   }
   if (command !== 'analyze' && command !== 'validate' && command !== 'sim') {
     return usageError(`Unknown command "${command}".`);

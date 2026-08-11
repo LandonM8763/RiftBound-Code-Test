@@ -249,7 +249,7 @@ describe('ingest', () => {
   ]);
 
   const ingest = (...args: string[]) =>
-    run(['ingest', 'raw.json', ...args], (path) => {
+    run(['ingest', 'raw.json', '--source', 'community', ...args], (path) => {
       if (path === 'raw.json') return RAW;
       throw new Error(`ENOENT: ${path}`);
     });
@@ -296,14 +296,41 @@ describe('ingest', () => {
     expect(result.stderr).toMatch(/Cannot read card data/);
   });
 
+  it('defaults to the apitcg source, which carries Might', () => {
+    // The one field that decides whether Units survive at all (465-466).
+    const apitcg = JSON.stringify([
+      {
+        id: 'origins-001-298',
+        name: 'Blazing Scorcher',
+        cardType: 'Unit',
+        domain: 'Fury',
+        energyCost: '5',
+        powerCost: '0',
+        might: '5',
+        description: '',
+      },
+    ]);
+    const result = run(['ingest', 'raw.json'], () => apitcg);
+    const cards = JSON.parse(result.stdout) as { type: string; might: number }[];
+
+    expect(result.code).toBe(EXIT.ok);
+    expect(cards[0]).toMatchObject({ type: 'unit', might: 5 });
+  });
+
+  it('rejects an unknown source', () => {
+    const result = run(['ingest', 'raw.json', '--source', 'nope'], () => '[]');
+    expect(result.code).toBe(EXIT.usage);
+    expect(result.stderr).toMatch(/Unknown source "nope"/);
+  });
+
   it('reports input that is not JSON', () => {
-    const result = run(['ingest', 'raw.json'], () => '{ nope');
+    const result = run(['ingest', 'raw.json', '--source', 'community'], () => '{ nope');
     expect(result.code).toBe(EXIT.input);
     expect(result.stderr).toMatch(/not valid JSON/);
   });
 
   it('reports input that is not an array of cards', () => {
-    const result = run(['ingest', 'raw.json'], () => '{"cards":[]}');
+    const result = run(['ingest', 'raw.json', '--source', 'community'], () => '{"cards":[]}');
     expect(result.code).toBe(EXIT.input);
     expect(result.stderr).toMatch(/array of cards/);
   });

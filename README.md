@@ -41,6 +41,13 @@ node packages/cli/dist/main.js analyze packages/cli/examples/deck.txt \
   --cards packages/cli/examples/cards.json
 ```
 
+Real card data can be ingested from `apitcg/riftbound-tcg-data`:
+
+```bash
+curl -sO https://raw.githubusercontent.com/apitcg/riftbound-tcg-data/main/cards/en/origins.json
+node packages/cli/dist/main.js ingest origins.json > cards.json
+```
+
 The example cards are invented placeholders, not real Riftbound cards — see
 `packages/cli/examples/README.md`.
 
