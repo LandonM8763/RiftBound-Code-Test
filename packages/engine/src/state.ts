@@ -360,6 +360,20 @@ export interface GameState {
    * stays JSON-serializable for golden-game tests.
    */
   readonly triggersUsed: Readonly<Record<string, number>>;
+  /**
+   * How far through the current phase's steps the turn has got.
+   *
+   * A phase that puts a Triggered Ability on the Chain cannot simply finish and
+   * advance — the Chain has to drain first, and players may respond while it
+   * does (383.3.c). So a phase runs as a sequence of steps: it does a step's
+   * work, and if that put anything on the Chain it *holds*, recording here
+   * which step to resume from. The phase advances only once its last step has
+   * run with an empty Chain.
+   *
+   * 0 for every phase that has nothing to interrupt, which is all of them
+   * except Beginning (315.2) and Ending (317).
+   */
+  readonly phaseStep: number;
   /** Consecutive passes since the last Chain item was added or resolved. */
   readonly passes: number;
   /** `null` while the game is still running. */

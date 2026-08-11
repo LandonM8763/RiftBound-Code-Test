@@ -95,6 +95,22 @@ const DEATHKNELL = makeUnit(2, ['fury'], {
   abilities: { triggered: [{ condition: { kind: 'dies' }, effect: DRAW_ONE }] },
 });
 
+/** "At the end of your turn, draw 1" (317.1). */
+const CLOSER = makeUnit(2, ['fury'], {
+  id: cardId('A-018'),
+  name: 'Closer',
+  cost: cost(1),
+  abilities: { triggered: [{ condition: { kind: 'endOfTurn' }, effect: DRAW_ONE }] },
+});
+
+/** "At the start of your Beginning Phase, draw 1" (315.2.a). */
+const OPENER = makeUnit(2, ['fury'], {
+  id: cardId('A-019'),
+  name: 'Opener',
+  cost: cost(1),
+  abilities: { triggered: [{ condition: { kind: 'beginningPhase' }, effect: DRAW_ONE }] },
+});
+
 /** "[1]: Deal 2 to a unit" — an Activated Ability that targets (355.8). */
 const SNIPER = makeUnit(2, ['fury'], {
   id: cardId('A-017'),
@@ -118,6 +134,8 @@ const REGISTRY = CardRegistry.from([
   OPTIONAL_GREETER,
   LIMITED,
   DEATHKNELL,
+  CLOSER,
+  OPENER,
   SNIPER,
   RUNE,
   ...BATTLEFIELDS,
@@ -510,6 +528,9 @@ describe('ability fuzz', () => {
         ...Array.from({ length: 3 }, () => LIMITED.id),
         ...Array.from({ length: 3 }, () => DEATHKNELL.id),
         ...Array.from({ length: 3 }, () => SNIPER.id),
+        // The turn-boundary triggers, which hold a phase open mid-resolution.
+        ...Array.from({ length: 3 }, () => CLOSER.id),
+        ...Array.from({ length: 3 }, () => OPENER.id),
       ],
       runes: Array.from({ length: 10 }, () => RUNE.id),
       battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
@@ -565,6 +586,135 @@ describe('ability fuzz', () => {
         expect(state.chain).toEqual([]);
         previousTurn = state.turn;
       }
+    }
+  });
+});
+
+describe('the interruptible phase machine', () => {
+  /** Advance until the phase changes or the Chain opens. */
+  function step(state: GameState): GameState {
+    return reduce(state, { type: 'resolvePhase' }).state;
+  }
+
+  /** Walk the turn cycle round to `player`'s next Beginning Phase. */
+  function untilBeginningOf(state: GameState, player: PlayerId): GameState {
+    let next = state;
+    let guard = 0;
+    while (next.activePlayer !== player || next.phase !== 'beginning') {
+      if (guard++ > 40) throw new Error('never reached the Beginning Phase');
+      // The Main Phase does not resolve on its own (316); it is ended.
+      next = reduce(next, next.phase === 'main' ? { type: 'endTurn' } : { type: 'resolvePhase' })
+        .state;
+      if (next.chain.length > 0) {
+        next = resolveChain(next);
+      }
+    }
+    return next;
+  }
+
+  it('holds the Ending Phase open for an end-of-turn trigger (317.1)', () => {
+    const [state, unit] = withBoardCard(inMainPhase('closer'), CLOSER.id);
+    const player = state.activePlayer;
+    const before = zoneOf(state, player, 'hand').length;
+
+    let next = reduce(state, { type: 'endTurn' }).state;
+    expect(next.phase).toBe('ending');
+
+    // The phase does its first step, puts the trigger on the Chain and stops.
+    next = step(next);
+    expect(next.phase).toBe('ending');
+    expect(next.chain).toHaveLength(1);
+    expect(next.chain[0]?.entity).toBe(unit);
+    expect(next.phaseStep).toBe(1);
+
+    // Once the Chain drains, nobody holds Priority and the phase resumes.
+    next = resolveChain(next);
+    expect(next.phase).toBe('ending');
+    expect(next.priority).toBeNull();
+    expect(zoneOf(next, player, 'hand')).toHaveLength(before + 1);
+
+    // Resuming skips the work already done and finishes the turn.
+    next = step(next);
+    expect(next.phase).toBe('awaken');
+    expect(next.activePlayer).not.toBe(player);
+    expect(next.phaseStep).toBe(0);
+    checkInvariants(next);
+  });
+
+  it('lets the opponent respond while the phase is held', () => {
+    // 383.3.c: a Triggered Ability goes on the Chain in any state on any
+    // player's turn, and the Chain is the response window.
+    const [state] = withBoardCard(inMainPhase('respond'), CLOSER.id);
+    const opponent = playerId((state.activePlayer + 1) % state.players.length);
+
+    let next = step(reduce(state, { type: 'endTurn' }).state);
+    expect(next.chain).toHaveLength(1);
+    // Priority is live during the hold, so passing is a real decision.
+    expect(next.priority).not.toBeNull();
+    next = reduce(next, { type: 'pass' }).state;
+    expect(next.priority).toBe(opponent);
+  });
+
+  it('fires a Beginning Phase trigger before the Scoring Step (315.2)', () => {
+    const [placed, unit] = withBoardCard(inMainPhase('opener'), OPENER.id);
+    const player = placed.activePlayer;
+
+    // Give the player a Battlefield to Hold, so both steps have work to do.
+    const state: GameState = {
+      ...placed,
+      battlefields: placed.battlefields.map((battlefield, index) =>
+        index === 0 ? { ...battlefield, controller: player, scoredBy: [] } : battlefield,
+      ),
+    };
+
+    let next = untilBeginningOf(state, player);
+
+    const pointsBefore = getPlayer(next, player).points;
+    next = step(next);
+
+    // The trigger is on the Chain and the Hold has NOT been scored yet.
+    expect(next.chain).toHaveLength(1);
+    expect(next.chain[0]?.entity).toBe(unit);
+    expect(getPlayer(next, player).points).toBe(pointsBefore);
+
+    next = resolveChain(next);
+    next = step(next);
+    // Now the Scoring Step has run.
+    expect(getPlayer(next, player).points).toBe(pointsBefore + 1);
+    expect(next.phase).toBe('channel');
+  });
+
+  it('does not re-run a step it already completed', () => {
+    // The whole hazard of holding a phase open: resuming must not score twice.
+    const [placed, unit] = withBoardCard(inMainPhase('once'), OPENER.id);
+    const player = placed.activePlayer;
+    const state: GameState = {
+      ...placed,
+      battlefields: placed.battlefields.map((battlefield, index) =>
+        index === 0 ? { ...battlefield, controller: player, scoredBy: [] } : battlefield,
+      ),
+    };
+
+    let next = untilBeginningOf(state, player);
+
+    const pointsBefore = getPlayer(next, player).points;
+    next = resolveChain(step(next));
+    next = step(next);
+    expect(getPlayer(next, player).points).toBe(pointsBefore + 1);
+    expect(unit).toBeGreaterThanOrEqual(0);
+  });
+
+  it('leaves a phase with nothing to interrupt exactly as it was', () => {
+    // Awaken, Channel and Draw have no trigger conditions, so they still
+    // resolve in one action and never leave phaseStep set.
+    let next = inMainPhase('plainphases');
+    next = reduce(next, { type: 'endTurn' }).state;
+    let guard = 0;
+    while (next.phase !== 'main') {
+      if (guard++ > 20) throw new Error('phases did not advance');
+      next = reduce(next, { type: 'resolvePhase' }).state;
+      expect(next.chain).toEqual([]);
+      expect(next.phaseStep).toBe(0);
     }
   });
 });

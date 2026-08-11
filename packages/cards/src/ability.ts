@@ -41,22 +41,16 @@ export type TriggerCondition =
   /** "When I die" — evaluated after the death is processed (383.2.c). */
   | { readonly kind: 'dies' }
   /** "When you conquer here" — Scoring by Conquer (469.1). */
-  | { readonly kind: 'conquer' };
-
-/*
- * Conditions deliberately absent: the turn-boundary ones, "at the end of your
- * turn" (317) and "at the start of your Beginning Phase" (315.2).
- *
- * Every condition above fires during the Main Phase, where the Chain already
- * works — a trigger goes on, players respond, it resolves. The turn-boundary
- * phases instead do their whole job inside one `resolvePhase` action and then
- * advance, so a trigger placed there would have nowhere to wait: the phase
- * would move on before anyone could respond to it. Supporting them means
- * making the phase machine interruptible — resolving the phase's work, then
- * holding the phase open until the Chain empties — which is a change to the
- * phase machine rather than to this union. They are left out rather than
- * stubbed so a card written against them cannot silently do nothing.
- */
+  | { readonly kind: 'conquer' }
+  /**
+   * "At the start of your Beginning Phase" (315.2.a).
+   *
+   * Fires in the Beginning Step, *before* the Scoring Step, so a trigger that
+   * changes who Controls a Battlefield changes what gets Held that turn.
+   */
+  | { readonly kind: 'beginningPhase' }
+  /** "At the end of your turn" — the end-of-turn effects of 317.1. */
+  | { readonly kind: 'endOfTurn' };
 
 export interface TriggeredAbility {
   readonly condition: TriggerCondition;

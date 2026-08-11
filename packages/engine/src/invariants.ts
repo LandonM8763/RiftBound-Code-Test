@@ -94,6 +94,26 @@ export function checkInvariants(state: GameState): void {
     throw new InvariantError(`Active player ${state.activePlayer} is not a seat`);
   }
 
+  // Only Beginning (315.2) and Ending (317) have a step that can be held open;
+  // a non-zero counter anywhere else means a phase resumed into the wrong body.
+  if (state.phaseStep !== 0 && state.phase !== 'beginning' && state.phase !== 'ending') {
+    throw new InvariantError(
+      `Phase ${state.phase} recorded step ${state.phaseStep}, but it has only one step`,
+    );
+  }
+  if (state.phaseStep < 0) {
+    throw new InvariantError(`Negative phase step ${state.phaseStep}`);
+  }
+
+  // A phase held open must have something to wait for. Once the Chain drains,
+  // `resolvePhase` is what resumes it, so nobody may hold Priority meanwhile.
+  if (state.phaseStep > 0 && state.chain.length === 0 && state.priority !== null) {
+    throw new InvariantError(
+      `Phase ${state.phase} is held at step ${state.phaseStep} with an empty Chain, ` +
+        `but player ${state.priority} holds Priority`,
+    );
+  }
+
   for (const battlefield of state.battlefields) {
     const controller = battlefield.controller;
     if (controller !== null && (controller < 0 || controller >= state.players.length)) {

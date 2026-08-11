@@ -43,8 +43,9 @@ What is built:
   Priority, the Process of Play, the Standard Move and Contested status,
   Showdowns with Focus, the full Steps of Combat, Scoring by Conquer including
   the Final Point restriction, **data-driven card effects**, **the Mulligan**,
-  **Activated and Triggered abilities**, first-class legal action generation,
-  per-player observable views, and a structural invariant checker.
+  **Activated and Triggered abilities** on an **interruptible phase machine**,
+  first-class legal action generation, per-player observable views, and a
+  structural invariant checker.
 
   With Combat in, the engine can play a complete game of Riftbound with vanilla
   cards: contest a Battlefield, fight over it, take Control, and score to 8.
@@ -88,20 +89,10 @@ What is **not** built yet, in rough dependency order:
    heal, give Might, and add resources. Adding a primitive is a variant plus a
    case — no new code path per card. Still absent: killing, recalling, moving,
    counters and XP.
-2. **Turn-boundary triggers.** `TriggerCondition` covers `played`, `dies` and
-   `conquer` — every condition that fires during the Main Phase, where the
-   Chain already works. "At the end of your turn" (317) and "at the start of
-   your Beginning Phase" (315.2) are **deliberately absent from the union**
-   rather than stubbed, because those phases do their whole job inside one
-   `resolvePhase` action and then advance: a trigger placed there would have
-   nowhere to wait, and the phase would move on before anyone could respond.
-   Supporting them means making the phase machine interruptible — do the
-   phase's work, then hold the phase open until the Chain empties — which is a
-   change to the phase machine, not to the ability model.
-3. **Cost modification** (rule 356's layers: base-cost replacement, additional
+2. **Cost modification** (rule 356's layers: base-cost replacement, additional
    costs, increases, discounts). `totalCost` in `play.ts` returns the printed
    cost and is the seam.
-4. **Real card data.** Every construction rule is now enforced, but the card
+3. **Real card data.** Every construction rule is now enforced, but the card
    pool is still invented fixtures — see [Open questions](#open-questions).
 
 Focus (rule 313) *is* implemented, as part of Non-Combat Showdowns: granted to
@@ -429,7 +420,7 @@ builds the batch on top of it. Keep that split — a win rate computed inside
 | `state.ts` | Ids, zones, entities, `GameConfig`, `GameState`, accessors |
 | `mutate.ts` | Structural-sharing update helpers; the only place zone lists and `entity.location` are written |
 | `actions.ts` | The `Action` union and `IllegalActionError` |
-| `reduce.ts` | `(state, action) -> { state, events }`, the phase machine |
+| `reduce.ts` | `(state, action) -> { state, events }`, the interruptible phase machine |
 | `abilities.ts` | Activated/Triggered abilities: what may be activated, what a game event triggers |
 | `legal.ts` | `legalActions(state, player)` |
 | `view.ts` | Per-player observable view; redacts hidden zones |
@@ -462,6 +453,40 @@ effect is just an effect.
   the only thing `legalActions` will offer its controller until they answer.
 - **`triggersUsed` counts per-turn limits** (383.3.e), keyed by source and
   ability index and cleared in the Ending Phase.
+
+`TriggerCondition` covers `played` (383.4.a), `dies`, `conquer`,
+`beginningPhase` (315.2.a) and `endOfTurn` (317.1).
+
+### The interruptible phase machine
+
+A phase that puts a Triggered Ability on the Chain cannot just finish and
+advance: the Chain has to drain first, and players may respond while it does
+(383.3.c). So a phase is a **sequence of steps**, and `phaseStep` records how
+far through them the turn has got.
+
+A step does its work and queues its triggers. If that put anything on the
+Chain, the phase **holds** — it returns with `phaseStep` pointing at the step to
+resume from, and the phase does not advance. When the Chain finally empties,
+`afterChainPriority` hands Priority to nobody rather than to the Turn Player,
+because outside the Main Phase nobody holds it (312.2.a); `legalActions` then
+offers `resolvePhase` again, and the phase picks up at the recorded step.
+
+Two steps exist today, both where the rules put a boundary:
+
+| Phase | Step 0 | Step 1 |
+|---|---|---|
+| Beginning (315.2) | Beginning Step: `beginningPhase` triggers | Scoring Step: Hold every Battlefield Controlled |
+| Ending (317) | 317.1 end-of-turn effects | 317.2 Cleanup, then the turn passes |
+
+**The step order is load-bearing in the Beginning Phase**: the trigger resolves
+*before* Scoring, so an ability that takes Control of a Battlefield changes what
+gets Held that turn. Resuming must also not re-run a completed step — scoring
+twice is the exact hazard — which is what `phaseStep` guards and what
+`abilities.test.ts` pins.
+
+Awaken, Channel and Draw have no trigger conditions, so they still resolve in a
+single action and never leave `phaseStep` set; `checkInvariants` enforces that,
+and that a held phase with an empty Chain leaves Priority with nobody.
 
 ### Engine design principles
 

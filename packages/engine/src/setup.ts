@@ -175,6 +175,7 @@ export function createGame(options: CreateGameOptions): ReduceResult {
     showdown: null,
     mulligansTaken: 0,
     triggersUsed: {},
+    phaseStep: 0,
     passes: 0,
     outcome: null,
   };

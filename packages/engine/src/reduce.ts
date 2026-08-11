@@ -356,9 +356,21 @@ function resolveTrigger(state: GameState, perform: boolean): ReduceResult {
 }
 
 /** Priority after an item leaves the Chain (rule 312.2.a, 312.2.c). */
-function chainPriority(state: GameState, chain: readonly ChainItem[]): PlayerId {
+function chainPriority(state: GameState, chain: readonly ChainItem[]): PlayerId | null {
   const top = chain[chain.length - 1];
-  return top === undefined ? state.activePlayer : top.controller;
+  return top === undefined ? afterChainPriority(state) : top.controller;
+}
+
+/**
+ * Who holds Priority once the Chain is empty.
+ *
+ * Normally the Turn Player, the state having Opened (312.2.a). But a phase that
+ * held itself open for a Triggered Ability is now free to finish: nobody has
+ * Priority outside the Main Phase, so handing it back to the phase machine
+ * means handing it to nobody, and `legalActions` offers `resolvePhase` again.
+ */
+function afterChainPriority(state: GameState): PlayerId | null {
+  return state.phase === 'main' ? state.activePlayer : null;
 }
 
 /**
@@ -625,7 +637,7 @@ function pass(state: GameState): ReduceResult {
       passes: 0,
       // 312.2.c: Priority goes to the controller of the next item; with an empty
       // Chain the state Opens and the Turn Player acts again (312.2.a).
-      priority: nextTop === undefined ? state.activePlayer : nextTop.controller,
+      priority: nextTop === undefined ? afterChainPriority(state) : nextTop.controller,
     };
   }
 
@@ -1072,7 +1084,22 @@ function beginning(state: GameState): ReduceResult {
   const events: GameEvent[] = [];
   let next = state;
 
-  state.battlefields.forEach((battlefield, index) => {
+  if (next.phaseStep < 1) {
+    // 315.2.a, the Beginning Step: "at the start of your Beginning Phase".
+    // These resolve before the Scoring Step, so a trigger that takes Control of
+    // a Battlefield changes what is Held below.
+    next = queueTriggers(
+      next,
+      triggersFor(next, { kind: 'beginningPhase' }, { controller: player }),
+      events,
+    );
+    if (next.chain.length > 0) {
+      return { state: { ...next, phaseStep: 1 }, events };
+    }
+  }
+
+  // 315.2.b, the Scoring Step.
+  next.battlefields.forEach((battlefield, index) => {
     if (battlefield.controller !== player || battlefield.scoredBy.includes(player)) {
       return;
     }
@@ -1253,9 +1280,23 @@ function burnOut(state: GameState, player: PlayerId): ReduceResult {
 /** Ending Phase (317): heal every Unit and expire this turn's effects. */
 function ending(state: GameState): ReduceResult {
   let next = state;
+  const preEvents: GameEvent[] = [];
+
+  if (next.phaseStep < 1) {
+    // 317.1: end-of-turn effects, before the 317.2 Cleanup below.
+    next = queueTriggers(
+      next,
+      triggersFor(next, { kind: 'endOfTurn' }, { controller: next.activePlayer }),
+      preEvents,
+    );
+    if (next.chain.length > 0) {
+      return { state: { ...next, phaseStep: 1 }, events: preEvents };
+    }
+  }
+
   const healed: EntityId[] = [];
 
-  for (const entity of Object.values(state.entities)) {
+  for (const entity of Object.values(next.entities)) {
     if (entity.damage > 0) {
       healed.push(entity.id);
       next = withEntity(next, entity.id, (current) => ({ ...current, damage: 0 }));
@@ -1266,7 +1307,10 @@ function ending(state: GameState): ReduceResult {
     }
   }
 
-  const events: GameEvent[] = [{ type: 'turnEnded', player: state.activePlayer }];
+  const events: GameEvent[] = [
+    ...preEvents,
+    { type: 'turnEnded', player: next.activePlayer },
+  ];
   if (healed.length > 0) {
     events.push({ type: 'healed', entities: healed });
   }
@@ -1315,6 +1359,7 @@ function passTurn(state: GameState, events: GameEvent[]): ReduceResult {
       activePlayer: upcoming,
       turn,
       phase: 'awaken',
+      phaseStep: 0,
       battlefields,
       // No player has Priority outside the Main Phase (rule 312.2.a).
       priority: null,
@@ -1373,7 +1418,8 @@ function isFirstTurnFor(state: GameState, player: PlayerId): boolean {
 
 function advance(state: GameState, phase: Phase, events: readonly GameEvent[]): ReduceResult {
   return {
-    state: { ...state, phase },
+    // Entering a phase always starts at its first step.
+    state: { ...state, phase, phaseStep: 0 },
     events: [
       ...events,
       { type: 'phaseEntered', turn: state.turn, player: state.activePlayer, phase },
