@@ -216,6 +216,7 @@ function withBoardCard(
         exhausted: false,
         damage: 0,
         mightBonus: 0,
+        buffs: 0,
       },
     },
     players: state.players.map((seat) =>

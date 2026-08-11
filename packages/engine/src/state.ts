@@ -95,6 +95,16 @@ export interface Entity {
    * where this is cleared. Not a Buff — see the note on `giveMight`.
    */
   readonly mightBonus: number;
+  /**
+   * Buff counters on a Unit (rules 701-705).
+   *
+   * A real counter, unlike `mightBonus`: each Buff contributes +1 Might (703)
+   * and it persists across turns rather than expiring in the Ending Phase.
+   * Rule 702.3 allows at most one at a time, so this is 0 or 1 — kept as a
+   * number because 704 lets effects count them, and a second Buff being
+   * *refused* (702.3.a) is easier to state against a count than a flag.
+   */
+  readonly buffs: number;
 }
 
 /**
@@ -140,6 +150,13 @@ export interface PlayerState {
   /** Ordered entity lists. Order is meaningful for decks. */
   readonly zones: Readonly<Record<PlayerZone, readonly EntityId[]>>;
   readonly pool: RunePool;
+  /**
+   * XP (rules 728-733): a player resource, accrued and spent.
+   *
+   * Not a Game Object (731) — it cannot be targeted, readied or exhausted —
+   * so it lives on the player rather than as an entity. There is no cap (733).
+   */
+  readonly xp: number;
 }
 
 /**

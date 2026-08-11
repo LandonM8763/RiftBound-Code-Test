@@ -115,6 +115,18 @@ export type GameEvent =
       readonly defenderMight: number;
       readonly assigned: readonly { readonly unit: EntityId; readonly damage: number }[];
     }
+  /** Rules 701-702: a Buff counter was placed on a Unit. */
+  | { readonly type: 'buffAdded'; readonly unit: EntityId }
+  /** Rule 702.2.b: a Buff was spent from a Unit. */
+  | { readonly type: 'buffSpent'; readonly unit: EntityId }
+  /** Rule 422: cards went from a hand to its trash. */
+  | {
+      readonly type: 'cardsDiscarded';
+      readonly player: PlayerId;
+      readonly cards: readonly EntityId[];
+    }
+  /** Rules 730: XP was gained (positive) or spent (negative). */
+  | { readonly type: 'xpChanged'; readonly player: PlayerId; readonly amount: number }
   /** Rule 428: Units died. */
   | { readonly type: 'unitsKilled'; readonly units: readonly EntityId[] }
   /** Rule 466.1.a.2: surviving Attackers were Recalled to their Base. */

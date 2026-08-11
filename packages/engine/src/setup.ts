@@ -120,6 +120,7 @@ export function createGame(options: CreateGameOptions): ReduceResult {
       exhausted: false,
       damage: 0,
       mightBonus: 0,
+      buffs: 0,
     };
     return id;
   };
@@ -135,7 +136,7 @@ export function createGame(options: CreateGameOptions): ReduceResult {
     for (const card of deck.runes) {
       zones.runeDeck.push(create(card, id, 'runeDeck'));
     }
-    return { id, points: 0, zones, pool: EMPTY_POOL };
+    return { id, points: 0, zones, pool: EMPTY_POOL, xp: 0 };
   });
 
   for (let seat = 0; seat < playerCount; seat += 1) {

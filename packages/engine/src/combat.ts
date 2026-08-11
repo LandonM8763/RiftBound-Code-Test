@@ -24,8 +24,10 @@ export function mightOf(state: GameState, unit: EntityId): number {
   if (card.type !== 'unit') {
     return 0;
   }
-  // Rule 143.2.b: a Might below 0 counts as 0 when summing for damage.
-  return Math.max(0, card.might + getEntity(state, unit).mightBonus);
+  const entity = getEntity(state, unit);
+  // Rule 703: each Buff contributes +1 Might. 143.2.b: a Might below 0 counts
+  // as 0 when summing for damage.
+  return Math.max(0, card.might + entity.mightBonus + entity.buffs);
 }
 
 export function sumMight(state: GameState, units: readonly EntityId[]): number {

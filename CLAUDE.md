@@ -42,7 +42,9 @@ What is built:
   Scoring by Hold, Burn Out, the win condition, Rune Pools, the Chain with
   Priority, the Process of Play, the Standard Move and Contested status,
   Showdowns with Focus, the full Steps of Combat, Scoring by Conquer including
-  the Final Point restriction, **data-driven card effects**, **the Mulligan**,
+  the Final Point restriction, **data-driven card effects** (draw, damage,
+  heal, Might, resources, kill, recall, ready/exhaust, Buffs, discard, XP,
+  Channel), **the Mulligan**,
   **Activated and Triggered abilities** on an **interruptible phase machine**,
   **rule 356 cost modification**, first-class legal action generation,
   per-player observable views, and a structural invariant checker.
@@ -84,18 +86,17 @@ quantity in `GameConfig` cites its rule number.
 
 What is **not** built yet, in rough dependency order:
 
-1. **More effect primitives.** The effect system exists (`cards/effect.ts` for
-   the data, `engine/effects.ts` for the interpreter) with draw, deal damage,
-   heal, give Might, and add resources. Adding a primitive is a variant plus a
-   case — no new code path per card. Still absent: killing, recalling, moving,
-   counters and XP.
-2. **Additional costs** (rule 356.2), the one layer of cost modification left
-   out. Both the mandatory and optional forms are paid with *non-standard*
-   costs (356.7) — "kill a friendly unit", "discard 1" — and none of those are
-   expressible as effects yet, so an additional cost could be added to a total
-   and then never paid. The optional form also needs a decision point during
-   the Announce step (356.2.b.1), since choosing to pay changes the total. It
-   belongs with the kill/discard primitives, not with the layer machinery.
+1. **Additional costs** (rule 356.2), the one layer of cost modification left
+   out. The non-standard costs it is paid with (356.7) — "kill a friendly
+   unit", "discard 1" — are now expressible, so what remains is the *payment
+   protocol*: a cost has to be provably payable before the card can be played
+   (compare 422.3 for Discard), and the optional form needs a decision point
+   during the Announce step (356.2.b.1) because choosing to pay changes the
+   total.
+2. **`move` as an effect** (rule 420). A Move needs two choices — which Game
+   Object, and which Location — and `CardEffect` carries exactly one target.
+   It wants the same sub-action protocol as trigger ordering and Combat damage
+   assignment. `recall` covers the case with no destination to choose.
 3. **Real card data.** Every construction rule is now enforced, but the card
    pool is still invented fixtures — see [Open questions](#open-questions).
 
@@ -126,6 +127,9 @@ would with the cards that exist today:
   a player order the discounts on a component, and 356.4.e makes that choice
   matter. `costs.ts` applies bounded discounts before unbounded ones, which is
   the player-favourable order in the rulebook's own worked example.
+- **Which cards get discarded is chosen for the player.** Rule 422.1.a lets the
+  discarding player choose, and 422.1.a lets them use Private Information to do
+  it. `effects.ts` takes from the front of the hand instead, deterministically.
 - **Combat damage assignment order is fixed, not chosen.** Rule 465.2.c lets the
   assigning player pick the order, which decides *which* enemy Units die.
   `assignDamage` in `combat.ts` walks the targets in a fixed order instead. Every
@@ -465,6 +469,38 @@ effect is just an effect.
 
 `TriggerCondition` covers `played` (383.4.a), `dies`, `conquer`,
 `beginningPhase` (315.2.a) and `endOfTurn` (317.1).
+
+### Effect primitives
+
+`cards/effect.ts` holds the data, `engine/effects.ts` the interpreter. Adding a
+primitive is a variant plus a case — never a code path per card.
+
+Four of them encode a rule that is easy to get backwards:
+
+- **A Kill Instruction queues the dying Unit's Deathknell *before* it reaches
+  the trash** (428.1.a.1.b), because the trigger has to see it on the Board.
+  Death by lethal damage is a *Passive* Kill (428.1.a.2) and does not follow
+  that rule — combat queues its triggers after the move, the ordinary way of
+  383.2.c. The two paths differ on purpose.
+- **A Recall is not a Move** (456). It triggers nothing that watches Moves,
+  cannot be blocked by anything restricting Movement (456.3), and leaves damage
+  and statuses alone (458.1) — so it is not a heal and not a ready.
+- **A Buff is a counter, not a Might modifier.** Each is +1 Might (703) and
+  persists across turns, where `mightBonus` expires in the Ending Phase
+  (317.2.c). Rule 702.3 caps a Unit at one, and a second is silently *not
+  placed* (702.3.a) rather than being an error. `checkInvariants` enforces the
+  cap. A Unit leaving play loses them (705).
+- **Channelling an empty Rune Deck is not a Burn Out.** Rule 430.3 channels as
+  many as possible and stops; 431's Burn Out, and the point it hands an
+  opponent, belongs to the *Main* Deck alone.
+
+`XP` (728-733) sits on `PlayerState` rather than being an entity, because 731
+says it is not a Game Object and cannot be targeted, readied or exhausted. It
+has no cap (733).
+
+`executeEffect` takes an `EffectContext` rather than reaching for the reducer:
+drawing can cause a Burn Out and killing has to touch the Chain, and both of
+those live above this layer.
 
 ### Cost modification
 

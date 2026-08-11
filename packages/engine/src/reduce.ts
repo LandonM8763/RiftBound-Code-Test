@@ -23,7 +23,7 @@ import {
   triggersFor,
   type PendingTrigger,
 } from './abilities.js';
-import { executeEffect, isValidTarget } from './effects.js';
+import { executeEffect, isValidTarget, type EffectContext } from './effects.js';
 import { totalCost } from './costs.js';
 import { canPay, payFrom, timingAllows, validUnitLocations } from './play.js';
 import { Rng } from './rng.js';
@@ -239,7 +239,7 @@ function playCard(
 
   // 359.2.b: execute all rules text on the card, top to bottom.
   if (effect !== undefined) {
-    next = executeEffect(next, player, effect, target, events, drawFor);
+    next = executeEffect(next, player, effect, target, events, EFFECT_CONTEXT);
   }
 
   // 383.4.a.2: Play Effects go on the Chain as Pending Items once the Permanent
@@ -502,15 +502,18 @@ function mulligan(state: GameState, cards: readonly EntityId[]): ReduceResult {
   };
 }
 
-/** Adapter so `effects.ts` can draw without importing the Burn Out machinery. */
-function drawFor(
-  state: GameState,
-  player: PlayerId,
-  count: number,
-  events: GameEvent[],
-): GameState {
-  return drawCards(state, player, count, events).state;
-}
+/**
+ * What `effects.ts` needs from here.
+ *
+ * Both reach machinery the interpreter deliberately does not import: drawing
+ * can cause a Burn Out (431), and a Kill Instruction has to put the dying
+ * Unit's Deathknell on the Chain while it is still on the Board (428.1.a.1.b).
+ */
+const EFFECT_CONTEXT: EffectContext = {
+  drawCards: (state, player, count, events) => drawCards(state, player, count, events).state,
+  queueDeaths: (state, units, events) =>
+    queueTriggers(state, triggersFor(state, { kind: 'dies' }, { sources: units }), events),
+};
 
 function resolvePermanentLocation(
   state: GameState,
@@ -598,7 +601,7 @@ function pass(state: GameState): ReduceResult {
         ability.effect,
         top.target ?? undefined,
         events,
-        drawFor,
+        EFFECT_CONTEXT,
       );
       if (top.ability.kind === 'triggered') {
         // 383.3.e: count it against any "N times each turn" limit.
@@ -614,7 +617,7 @@ function pass(state: GameState): ReduceResult {
     const spell = entityCard(next, top.entity);
     const spellEffect = effectOf(spell);
     if (spellEffect !== undefined) {
-      next = executeEffect(next, top.controller, spellEffect, top.target ?? undefined, events, drawFor);
+      next = executeEffect(next, top.controller, spellEffect, top.target ?? undefined, events, EFFECT_CONTEXT);
     }
     next = moveEntity(next, top.entity, playerLocation(top.controller, 'trash'));
   }
@@ -950,12 +953,25 @@ function resolveCombat(
   for (const unit of killed) {
     const owner = getEntity(next, unit).owner;
     next = moveEntity(next, unit, playerLocation(owner, 'trash'));
-    next = withEntity(next, unit, (current) => ({ ...current, damage: 0, exhausted: false }));
+    // 705: a Unit leaving play loses its Buffs, along with the damage and the
+    // turn's Might modifiers, none of which mean anything off the Board.
+    next = withEntity(next, unit, (current) => ({
+      ...current,
+      damage: 0,
+      exhausted: false,
+      mightBonus: 0,
+      buffs: 0,
+    }));
   }
   if (killed.length > 0) {
     events.push({ type: 'unitsKilled', units: killed });
     // 383.2.c: a Trigger's Condition is evaluated after the inciting event has
     // been processed, so the deaths are already resolved when these fire.
+    //
+    // Note this is *after* the move to the trash, unlike a Kill Instruction:
+    // 428.1.a.1.b puts the Deathknell on the Chain before the Unit leaves the
+    // Board, but that rule is about Active Kills. Death by lethal damage is a
+    // Passive Kill (428.1.a.2), which 383.2.c handles the ordinary way.
     next = queueTriggers(next, triggersFor(next, { kind: 'dies' }, { sources: killed }), events);
   }
 

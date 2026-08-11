@@ -70,6 +70,7 @@ export {
 export type { PendingTrigger } from './abilities.js';
 
 export { executeEffect, isValidTarget, legalTargets } from './effects.js';
+export type { EffectContext } from './effects.js';
 
 export {
   assignDamage,

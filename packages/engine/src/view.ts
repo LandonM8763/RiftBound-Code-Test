@@ -30,7 +30,7 @@ export interface EntityView {
    * not a Unit or the viewer cannot see the card.
    *
    * Printed on the card and therefore public, but derived rather than printed:
-   * it is `might + mightBonus`, which is the number Combat actually uses
+   * it is `might + mightBonus + buffs` (703), which is what Combat uses
    * (465-466). Exposed so an agent evaluating a board does not have to
    * reimplement `mightOf` against a card registry and get it subtly wrong.
    */
@@ -113,7 +113,10 @@ export function observe(state: GameState, viewer: PlayerId): GameView {
       controller: entity.controller,
       exhausted: entity.exhausted,
       damage: entity.damage,
-      might: card?.type === 'unit' ? Math.max(0, card.might + entity.mightBonus) : null,
+      might:
+        card?.type === 'unit'
+          ? Math.max(0, card.might + entity.mightBonus + entity.buffs)
+          : null,
     };
   };
 

@@ -69,6 +69,12 @@ export function checkInvariants(state: GameState): void {
     if (entity.damage < 0) {
       throw new InvariantError(`Entity ${entity.id} has negative damage`);
     }
+    // Rule 702.3: there can only be one Buff on a Unit at a time.
+    if (entity.buffs < 0 || entity.buffs > 1) {
+      throw new InvariantError(
+        `Entity ${entity.id} carries ${entity.buffs} Buffs; rule 702.3 allows at most one`,
+      );
+    }
     if (entity.id >= state.nextEntityId) {
       throw new InvariantError(`Entity ${entity.id} is at or beyond nextEntityId`);
     }
@@ -87,6 +93,10 @@ export function checkInvariants(state: GameState): void {
     }
     if (player.points < 0) {
       throw new InvariantError(`Player ${player.id} has negative points`);
+    }
+    // Rule 730.2 only ever reduces XP by what is there to spend.
+    if (player.xp < 0) {
+      throw new InvariantError(`Player ${player.id} has negative XP`);
     }
   });
 
