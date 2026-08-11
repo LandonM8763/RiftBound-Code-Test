@@ -5,14 +5,23 @@ import {
   CONSTRUCTED_BO1,
   CONSTRUCTED_BO3,
   parseDeckList,
+  toCardLists,
   validateDeck,
   type Format,
 } from '@riftbound/deck';
 
+import { HeuristicAgent, RandomAgent } from '@riftbound/ai';
 import { COMMUNITY_SOURCE } from '@riftbound/ingest';
+import { simulate } from '@riftbound/sim';
 
 import { CardDataError, loadCardRegistry } from './cards-file.js';
-import { analysisToJson, formatIngest, formatReport, formatValidation } from './report.js';
+import {
+  analysisToJson,
+  formatIngest,
+  formatReport,
+  formatSimulation,
+  formatValidation,
+} from './report.js';
 
 export type FileReader = (path: string) => string;
 
@@ -34,12 +43,15 @@ Usage:
   riftbound analyze  <deck-file> --cards <cards.json> [options]
   riftbound validate <deck-file> --cards <cards.json> [options]
   riftbound ingest   <raw-file> [--json]
+  riftbound sim      <deck-file> --cards <cards.json> [options]
   riftbound help
 
 Options:
   --cards <path>   Card data: a JSON array of card definitions. Required.
   --format <name>  bo1 (default) or bo3. Only bo3 permits a sideboard.
   --turn <n>       Turn used for the draw-odds column. Default 3.
+  --games <n>      Games to simulate. Default 200.
+  --seed <text>    Simulation seed. Default "riftbound".
   --json           Emit machine-readable JSON instead of a text report.
   -h, --help       Show this help.
 
@@ -47,15 +59,20 @@ ingest normalizes a raw community card export into this project's schema and
 writes it to stdout. It drops any card whose source is missing a field the
 rules need rather than inventing one, and reports every such gap on stderr.
 
+sim plays the deck against itself, heuristic agent versus random, and reports
+win rates with 95% intervals. Seats rotate each game so the result is not
+measuring the extra Rune the player going second Channels.
+
 Exit codes:
   0  success
   1  the deck is illegal for the format
   2  bad usage
   3  a file could not be read or parsed
 
-Statistics are analytic: exact, closed-form, and computed without simulating
-a game. Win rates need the engine, an agent, and rules that are not settled
-yet, so they are deliberately absent.
+analyze reports analytic statistics: exact, closed-form, and computed without
+playing a game. sim reports simulated ones, which need the engine and an agent
+and therefore carry a sample size and an interval. The two answer different
+questions; neither replaces the other.
 `;
 
 function fail(message: string, code: number): CliResult {
@@ -127,6 +144,8 @@ export function run(argv: readonly string[], readFile: FileReader): CliResult {
         cards: { type: 'string' },
         format: { type: 'string' },
         turn: { type: 'string' },
+        games: { type: 'string' },
+        seed: { type: 'string' },
         json: { type: 'boolean' },
         help: { type: 'boolean', short: 'h' },
       },
@@ -152,7 +171,7 @@ export function run(argv: readonly string[], readFile: FileReader): CliResult {
     }
     return runIngest(rawPath, readFile, values['json'] === true);
   }
-  if (command !== 'analyze' && command !== 'validate') {
+  if (command !== 'analyze' && command !== 'validate' && command !== 'sim') {
     return usageError(`Unknown command "${command}".`);
   }
 
@@ -175,6 +194,12 @@ export function run(argv: readonly string[], readFile: FileReader): CliResult {
   const turn = Number.parseInt(turnText, 10);
   if (!Number.isInteger(turn) || turn < 0) {
     return usageError(`--turn must be a non-negative integer, got "${turnText}".`);
+  }
+
+  const gamesText = typeof values['games'] === 'string' ? values['games'] : '200';
+  const games = Number.parseInt(gamesText, 10);
+  if (!Number.isInteger(games) || games < 1) {
+    return usageError(`--games must be a positive integer, got "${gamesText}".`);
   }
 
   const asJson = values['json'] === true;
@@ -227,6 +252,29 @@ export function run(argv: readonly string[], readFile: FileReader): CliResult {
       `${formatValidation(validation, format).trimEnd()}\n\nCannot analyse a deck containing unknown cards.`,
       EXIT.illegal,
     );
+  }
+
+  if (command === 'sim') {
+    // A mirror match: the same deck in both seats, so the difference measured
+    // is the agents rather than the decks. Deck-vs-deck needs two lists and is
+    // a separate command when there is a reason to want it.
+    const lists = toCardLists(deck);
+    const result = simulate({
+      decks: [lists, lists],
+      registry,
+      games,
+      seed: typeof values['seed'] === 'string' ? values['seed'] : 'riftbound',
+      entrants: [
+        { name: 'heuristic', create: (agentSeed) => new HeuristicAgent({ seed: agentSeed }) },
+        { name: 'random', create: (agentSeed) => new RandomAgent(agentSeed) },
+      ],
+    });
+
+    return {
+      stdout: asJson ? `${JSON.stringify(result, null, 2)}\n` : formatSimulation(result),
+      stderr: '',
+      code: validation.legal ? EXIT.ok : EXIT.illegal,
+    };
   }
 
   const analysis = analyzeDeck(deck, registry, DEFAULT_DRAW_MODEL);

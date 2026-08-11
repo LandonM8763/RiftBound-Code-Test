@@ -309,6 +309,49 @@ describe('ingest', () => {
   });
 });
 
+describe('sim', () => {
+  const sim = (...args: string[]) =>
+    run(['sim', 'deck.txt', '--cards', 'cards.json', '--games', '30', ...args], files);
+
+  it('reports win rates with a sample size and an interval', () => {
+    const result = sim();
+    expect(result.code).toBe(EXIT.ok);
+    expect(result.stdout).toMatch(/30 games/);
+    expect(result.stdout).toMatch(/heuristic/);
+    expect(result.stdout).toMatch(/95% CI/);
+    // A rate is never printed without its interval.
+    expect(result.stdout).toMatch(/±/);
+  });
+
+  it('is reproducible for a given seed', () => {
+    expect(sim('--seed', 'fixed').stdout).toBe(sim('--seed', 'fixed').stdout);
+  });
+
+  it('gives different seeds different batches', () => {
+    expect(sim('--seed', 'a').stdout).not.toBe(sim('--seed', 'b').stdout);
+  });
+
+  it('emits the full result on --json', () => {
+    const parsed = JSON.parse(sim('--json').stdout) as {
+      games: number;
+      entrants: { name: string; interval: { low: number; high: number } }[];
+    };
+    expect(parsed.games).toBe(30);
+    expect(parsed.entrants[0]?.name).toBe('heuristic');
+    expect(parsed.entrants[0]?.interval.low).toBeLessThanOrEqual(parsed.entrants[0]!.interval.high);
+  });
+
+  it('rejects a non-positive game count', () => {
+    const result = run(['sim', 'deck.txt', '--cards', 'cards.json', '--games', '0'], files);
+    expect(result.code).toBe(EXIT.usage);
+    expect(result.stderr).toMatch(/--games must be a positive integer/);
+  });
+
+  it('needs a deck list', () => {
+    expect(run(['sim'], files).code).toBe(EXIT.usage);
+  });
+});
+
 describe('analyze', () => {
   const report = analyze().stdout;
 

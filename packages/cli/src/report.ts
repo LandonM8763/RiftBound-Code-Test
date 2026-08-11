@@ -2,6 +2,7 @@ import { probabilityOfCard, type DeckAnalysis, type DrawModel } from '@riftbound
 import type { CardId, CardRegistry } from '@riftbound/cards';
 import type { Deck, Format, ValidationResult } from '@riftbound/deck';
 import { summarizeGaps, type CardSource, type IngestResult } from '@riftbound/ingest';
+import { marginOf, type SimulationResult } from '@riftbound/sim';
 
 /**
  * Presentation lives here and nowhere else.
@@ -275,6 +276,54 @@ export function formatIngest(result: IngestResult, source: CardSource): string {
   }
 
   return `${lines.join('\n')}\n`;
+}
+
+/**
+ * Simulated results.
+ *
+ * Every rate is printed with its sample size and its interval, never alone:
+ * "83%" and "83% ± 2.3 over 1000 games" support very different decisions, and
+ * the first one silently invites the wrong one.
+ */
+export function formatSimulation(result: SimulationResult): string {
+  const lines = [
+    `${result.games} games — ${result.decided} decided, ${result.draws} drawn`,
+    '',
+  ];
+
+  const rows = result.entrants.map((entrant) => [
+    entrant.name,
+    String(entrant.wins),
+    percent(entrant.winRate),
+    `± ${percent(marginOf(entrant.interval))}`,
+    `[${percent(entrant.interval.low)}, ${percent(entrant.interval.high)}]`,
+    entrant.points.mean.toFixed(2),
+  ]);
+
+  const level = Math.round(confidenceLevel(result) * 100);
+  lines.push(
+    ...table(
+      ['Agent', 'Wins', 'Rate', '', `${level}% CI`, 'Avg points'],
+      rows,
+      ['left', 'right', 'right', 'right', 'right', 'right'],
+    ).map((row) => `  ${row}`),
+  );
+
+  lines.push('');
+  lines.push(
+    `  Game length: ${result.turns.mean.toFixed(1)} turns on average ` +
+      `(sd ${result.turns.stdev.toFixed(1)}, range ${result.turns.min}-${result.turns.max})`,
+  );
+
+  if (result.decided === 0) {
+    lines.push('', '  No game was decided, so the rates above carry no information.');
+  }
+
+  return `${lines.join('\n')}\n`;
+}
+
+function confidenceLevel(result: SimulationResult): number {
+  return result.entrants[0]?.interval.level ?? 0.95;
 }
 
 function mapToObject<V>(map: ReadonlyMap<string | number, V>): Record<string, V> {

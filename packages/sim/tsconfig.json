@@ -8,10 +8,7 @@
   "exclude": ["src/**/*.test.ts"],
   "references": [
     { "path": "../cards" },
-    { "path": "../deck" },
-    { "path": "../analysis" },
-    { "path": "../ingest" },
-    { "path": "../ai" },
-    { "path": "../sim" }
+    { "path": "../engine" },
+    { "path": "../ai" }
   ]
 }

@@ -21,7 +21,7 @@ card game). The application has four capabilities:
 
 ## Current status
 
-**Phase 1, in progress.** Seven packages exist and are covered by tests; the rest
+**Phase 1, in progress.** Eight packages exist and are covered by tests; the rest
 of the architecture below is still a plan. The engine plays a complete game with
 vanilla cards. **The binding constraint is now card data, not code** — see
 [Card data](#card-data).
@@ -63,7 +63,12 @@ What is built:
   something the rules need is dropped and recorded, because card data that
   looks complete and is not produces statistics that are plausible and wrong.
   See [Card data](#card-data) for what that costs today.
-- **`@riftbound/cli`** — `riftbound analyze|validate <deck> --cards <cards.json>`
+- **`@riftbound/sim`** — batch simulation. `simulate` plays N games, rotates
+  entrants through the seats and reports per-entrant win rates as **Wilson
+  score intervals**, plus game-length and points summaries. Reproducible: each
+  game's seed derives from the batch seed, so any single game replays on its
+  own with `playGame`.
+- **`@riftbound/cli`** — `riftbound analyze|validate|sim <deck> --cards <cards.json>`
   and `riftbound ingest <raw> > cards.json`, with text or `--json` output.
   Ingest writes cards to stdout and its gap report to stderr, so the redirect
   above yields data while the shortfall stays visible. This is where
@@ -385,7 +390,7 @@ packages/
   analysis/   EXISTS  Statistics: curve, consistency, draw probabilities
   ingest/     EXISTS  Card data source adapters: normalize and report gaps
   suggest/    planned Deck edit recommendations
-  sim/        planned Batch simulation harness
+  sim/        EXISTS  Batch simulation: win rates with intervals
   cli/        EXISTS  Developer-facing entry point until the UI exists
 ```
 
@@ -397,10 +402,10 @@ that its own tests can use three-card decks.
 structurally identical to the engine's `DeckList`, so it can be handed straight to
 `createGame` with no dependency between the two — keep it that way.
 
-Batch simulation and the statistics that go with it belong in the planned `sim/`
-package. `ai/` runs single games only; `playGame` is there to exercise an agent,
-not to produce win rates. Win rates are meaningless until cards can be played —
-every game currently ends in the `maxTurns` draw.
+Batch simulation and the statistics that go with it live in `sim/`. `ai/` runs
+single games only; `playGame` is there to exercise an agent, and `simulate`
+builds the batch on top of it. Keep that split — a win rate computed inside
+`ai/` would put the statistics next to the thing being measured.
 
 ### Engine map
 
@@ -496,6 +501,25 @@ Two distinct kinds — do not conflate them:
   iterations for meaningful confidence intervals. **Always report the sample size
   and an uncertainty measure** — a win rate with no confidence interval is not a
   statistic.
+
+The simulated side is `sim/`. Three decisions in it are load-bearing:
+
+- **Intervals are Wilson score, not `p ± z·√(p(1-p)/n)`.** The normal
+  approximation fails exactly where simulation results live: near 0 or 1 it
+  puts bounds outside [0, 1], and at exactly 0 or 1 it collapses to zero width
+  and claims certainty. An agent that wins 40 of 40 is not 100% ± 0%.
+- **Entrants rotate through the seats**, because 485.7 gives the player going
+  second an extra Rune and a fixed seating measures that alongside the agents.
+  Turn rotation off only to measure the seat advantage itself.
+- **Agents come from a factory, not an instance.** They carry RNG state, so
+  reusing one makes game N depend on game N-1 and a single game stops being
+  reproducible from its seed — which is most of what a batch run is for. Each
+  game's seed derives from the batch seed, so `onGame` hands back something
+  `playGame` can replay on its own.
+
+Draws are reported but never counted as half a win: the win rate's denominator
+is decided games only, and no decided games yields the whole [0, 1] interval
+rather than a 0% that looks like evidence.
 
 The analytic side is built in `analysis/`. Two things to know before extending it:
 
