@@ -6,10 +6,5 @@
   },
   "include": ["src/**/*"],
   "exclude": ["src/**/*.test.ts"],
-  "references": [
-    { "path": "../cards" },
-    { "path": "../deck" },
-    { "path": "../analysis" },
-    { "path": "../ingest" }
-  ]
+  "references": [{ "path": "../cards" }]
 }

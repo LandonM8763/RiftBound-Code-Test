@@ -1,6 +1,7 @@
 import { probabilityOfCard, type DeckAnalysis, type DrawModel } from '@riftbound/analysis';
 import type { CardId, CardRegistry } from '@riftbound/cards';
 import type { Deck, Format, ValidationResult } from '@riftbound/deck';
+import { summarizeGaps, type CardSource, type IngestResult } from '@riftbound/ingest';
 
 /**
  * Presentation lives here and nowhere else.
@@ -223,6 +224,56 @@ export function formatValidation(validation: ValidationResult, format: Format): 
     lines.push('  Warnings:');
     lines.push(...warnings.map((issue) => `  [${issue.code}] ${issue.message}`));
   }
+  return `${lines.join('\n')}\n`;
+}
+
+/**
+ * The ingest gap report.
+ *
+ * Deliberately loud. A card data file that silently covers 30% of the pool
+ * looks exactly like one that covers all of it, right up until a deck fails to
+ * build for reasons nobody can see — so the shortfall is stated in cards, by
+ * field, with the reason attached.
+ */
+export function formatIngest(result: IngestResult, source: CardSource): string {
+  const total = result.cards.length + result.dropped;
+  const summary = summarizeGaps(result.gaps);
+  const lines = [
+    `Ingested ${result.cards.length} of ${total} cards from ${source.id}.`,
+  ];
+
+  if (result.problems.length > 0) {
+    lines.push('', `Malformed source records (${result.problems.length}):`);
+    lines.push(...result.problems.slice(0, 10).map((problem) => `  ${problem}`));
+    if (result.problems.length > 10) {
+      lines.push(`  ... and ${result.problems.length - 10} more`);
+    }
+  }
+
+  if (result.dropped > 0) {
+    lines.push('', `Dropped ${result.dropped} cards the source cannot describe:`);
+    for (const { field, count } of summary.byField) {
+      const example = result.gaps.find((gap) => gap.field === field);
+      if (example?.severity !== 'blocking') {
+        continue;
+      }
+      lines.push(`  ${field} (${count}) — ${example.reason}`);
+    }
+  }
+
+  const degraded = summary.byField.filter(({ field }) =>
+    result.gaps.some((gap) => gap.field === field && gap.severity === 'degraded'),
+  );
+  if (degraded.length > 0) {
+    lines.push('', 'Kept, but with a rule left unchecked:');
+    for (const { field, count } of degraded) {
+      const example = result.gaps.find(
+        (gap) => gap.field === field && gap.severity === 'degraded',
+      );
+      lines.push(`  ${field} (${count}) — ${example?.reason ?? ''}`);
+    }
+  }
+
   return `${lines.join('\n')}\n`;
 }
 

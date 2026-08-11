@@ -21,8 +21,10 @@ card game). The application has four capabilities:
 
 ## Current status
 
-**Phase 1, in progress.** Two packages exist and are covered by tests; the rest of
-the architecture below is still a plan.
+**Phase 1, in progress.** Seven packages exist and are covered by tests; the rest
+of the architecture below is still a plan. The engine plays a complete game with
+vanilla cards. **The binding constraint is now card data, not code** — see
+[Card data](#card-data).
 
 What is built:
 
@@ -52,8 +54,17 @@ What is built:
   (including the multivariate case), cost curve, draw probabilities by turn,
   Domain/Power consistency, and per-card castability. No engine, no agent, no
   randomness — closed-form and exact.
-- **`@riftbound/cli`** — `riftbound analyze|validate <deck> --cards <cards.json>`,
-  with text or `--json` output. This is where presentation lives; nothing below
+- **`@riftbound/ingest`** — card data source adapters behind a `CardSource`
+  interface, plus the gap model. One adapter exists, for the community JSON
+  export. It **never invents a missing field**: a card whose source lacks
+  something the rules need is dropped and recorded, because card data that
+  looks complete and is not produces statistics that are plausible and wrong.
+  See [Card data](#card-data) for what that costs today.
+- **`@riftbound/cli`** — `riftbound analyze|validate <deck> --cards <cards.json>`
+  and `riftbound ingest <raw> > cards.json`, with text or `--json` output.
+  Ingest writes cards to stdout and its gap report to stderr, so the redirect
+  above yields data while the shortfall stays visible. This is where
+  presentation lives; nothing below
   it formats anything. `packages/cli/examples/` holds invented sample cards and a
   legal deck list so the tool runs today, and the suite reads them so a broken
   example fails CI.
@@ -369,6 +380,7 @@ packages/
   engine/     EXISTS  The rules engine: state, legal actions, resolution
   ai/         EXISTS  Agents (random → heuristic → search-based)
   analysis/   EXISTS  Statistics: curve, consistency, draw probabilities
+  ingest/     EXISTS  Card data source adapters: normalize and report gaps
   suggest/    planned Deck edit recommendations
   sim/        planned Batch simulation harness
   cli/        EXISTS  Developer-facing entry point until the UI exists
@@ -508,19 +520,67 @@ Until real code establishes precedent, follow these:
   Channel, Recycle, Exhaust, Hold, Conquer, Domain, Legend) in code. Do not invent
   synonyms; the rulebook is the naming authority.
 
-## Reference sources
+## Card data
 
-Card and deck data (evaluate before committing to one — licensing, completeness,
-and update cadence for new sets all matter):
+**No complete card data source is reachable from this environment.** This was
+measured, not assumed, and it is the single thing blocking real card data. Do
+not re-run the survey without reading this first.
 
-- Scrydex API — Riftbound card endpoints, card IDs of the form `OGN-296`
-- `riftbound-api.com` — REST/JSON card API
-- API TCG (`apitcg.com`) — open-source multi-TCG database including Riftbound
-- `vikkumar2021/RiftboundCardDatabase` (GitHub) — card fetch scripts emitting
-  `cards.json` / `cards_full.json`
+### What is reachable
+
+| Host | Result |
+|---|---|
+| `raw.githubusercontent.com` | **reachable** — the only open card host |
+| `riftbound.leagueoflegends.com` (official gallery) | 403 CONNECT, policy denial |
+| `cmsassets.rgpub.io` (official card images) | 403 |
+| `playriftbound.com` | 403 |
+| `gist.githubusercontent.com` | 403 — note this differs from `raw.` |
+| `api.scrydex.com`, `riftbound-api.com`, `apitcg.com` | 403 |
+| `api.riftseer.com`, `api.riftcodex.com` | 403 |
+
+The community tooling ecosystem converges on one file: a JSON export published
+as a GitHub **gist** (`gist.githubusercontent.com/OwenMelbz/…/riftbound.json`),
+which is blocked. `oriondean/Rifty` commits a mirror of it at
+`src/assets/origins-set.json`, which is reachable — that is the source
+`packages/ingest` adapts, and the only one currently usable.
+
+`vikkumar2021/RiftboundCardDatabase` does **not** commit its `cards.json`; it
+ships a fetcher that generates it from the official gallery endpoint, which is
+blocked. Its README documents the richer upstream schema, including `might` and
+`tags` — worth reading when a second adapter is written.
+
+### What the reachable source costs
+
+394 cards in, 118 out. The export omits fields the rules need:
+
+| Missing | Cards lost | Why it is fatal |
+|---|---|---|
+| `might` | 182 (every Unit) | Might is both the damage a Unit deals and the damage it survives (465-466) |
+| `timing` | 93 (every Spell) | Action vs Reaction (358.4); defaulting to Action makes a Reaction unplayable exactly when it matters |
+| Power pip Domains | 1 | `power` is published as a pip *count*, so a multi-Domain card's cost is ambiguous |
+| tags / supertypes | 0 dropped, 45 degraded | No Champion Tags or Signature flag, so 103.2.a.2 and 103.2.d go unchecked |
+
+**Zero Units and zero Spells survive, so no legal deck can be built from it.**
+What does survive is Legends, Runes, Gear and Battlefields — real ids, names,
+Domains, and costs, which is enough to exercise the pipeline and nothing more.
+
+Two inferences the adapter *does* make, both forced rather than guessed: a
+Legend's printed Domains are its Domain Identity (103.1.b.2), and a
+single-Domain card's Power pips must be of that Domain.
+
+### Unblocking it
+
+One of: open egress to a card API; commit a complete export to this repository,
+as was done for the rulebook PDFs; or find a GitHub-hosted dataset that commits
+Might and timing. The ingest adapter is a small file — a new source is a new
+`CardSource`, not a change to anything downstream.
+
+### Other sources
+
 - Piltover Archive — community deckbuilder; its deck URL/list format is a strong
-  candidate for the canonical import format
-- Riftseer API — used by community tooling for card data and images
+  candidate for the canonical import format (blocked here)
+- `andreyfsr/riftscraper`, `guygir/RifTrade` — both wrap the Riftcodex API
+  (`api.riftcodex.com`), blocked here
 
 ### The rulebook
 
@@ -548,14 +608,12 @@ are **secondary and demonstrably unreliable** — see the correction table under
 
 The rulebook resolved the ones that were blocking. What remains:
 
-1. **Choose a card data source** and pin a set/version. Which sets must be
-   supported? Every hosted API in [Reference sources](#reference-sources) is
-   blocked by this environment's egress proxy; only `raw.githubusercontent.com`
-   is reachable, so a GitHub-hosted dataset is currently the only open route.
-   Whichever source is chosen must carry **Champion Tags and the Signature
-   supertype**, or rules 103.2.a.2 and 103.2.d degrade to warnings — the
-   validator says so per deck rather than passing silently, but the rules go
-   unchecked either way. Worth confirming before pinning a source.
+1. **Get a complete card data source.** This is the top blocker and it needs a
+   decision from the project owner — see [Card data](#card-data) for the
+   measured reachability map and exactly what the one reachable source is
+   missing. The ingest pipeline is built and tested; it has nothing complete to
+   consume. Whichever source is chosen must carry **Might**, **Spell timing**,
+   and ideally **Champion Tags and the Signature supertype**.
 2. **Find the tournament/competitive rules document.** The Core Rules describe no
    sideboard, so the 8-card sideboard this codebase validates is unverified.
 3. **Is the deck list format canonical?** Importers are pluggable via

@@ -9,8 +9,10 @@ import {
   type Format,
 } from '@riftbound/deck';
 
+import { COMMUNITY_SOURCE } from '@riftbound/ingest';
+
 import { CardDataError, loadCardRegistry } from './cards-file.js';
-import { analysisToJson, formatReport, formatValidation } from './report.js';
+import { analysisToJson, formatIngest, formatReport, formatValidation } from './report.js';
 
 export type FileReader = (path: string) => string;
 
@@ -31,6 +33,7 @@ export const USAGE = `riftbound — deck testing tools
 Usage:
   riftbound analyze  <deck-file> --cards <cards.json> [options]
   riftbound validate <deck-file> --cards <cards.json> [options]
+  riftbound ingest   <raw-file> [--json]
   riftbound help
 
 Options:
@@ -39,6 +42,10 @@ Options:
   --turn <n>       Turn used for the draw-odds column. Default 3.
   --json           Emit machine-readable JSON instead of a text report.
   -h, --help       Show this help.
+
+ingest normalizes a raw community card export into this project's schema and
+writes it to stdout. It drops any card whose source is missing a field the
+rules need rather than inventing one, and reports every such gap on stderr.
 
 Exit codes:
   0  success
@@ -74,6 +81,40 @@ function resolveFormat(name: string | undefined): Format | undefined {
   }
 }
 
+/**
+ * Normalize a raw card export onto stdout, with the gap report on stderr.
+ *
+ * Split that way on purpose: `riftbound ingest raw.json > cards.json` writes
+ * usable card data to the file while the operator still sees, on the terminal,
+ * exactly which cards the source could not supply and why.
+ */
+function runIngest(rawPath: string, readFile: FileReader, asJson: boolean): CliResult {
+  let text: string;
+  try {
+    text = readFile(rawPath);
+  } catch (error) {
+    return fail(`Cannot read card data "${rawPath}": ${messageOf(error)}`, EXIT.input);
+  }
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch (error) {
+    return fail(`"${rawPath}" is not valid JSON: ${messageOf(error)}`, EXIT.input);
+  }
+
+  const result = COMMUNITY_SOURCE.normalize(raw);
+  if (result.problems.length > 0 && result.cards.length === 0) {
+    return fail(`Card data is not usable:\n  ${result.problems.join('\n  ')}`, EXIT.input);
+  }
+
+  const stdout = asJson
+    ? `${JSON.stringify({ source: COMMUNITY_SOURCE.id, cards: result.cards, gaps: result.gaps }, null, 2)}\n`
+    : `${JSON.stringify(result.cards, null, 2)}\n`;
+
+  return { stdout, stderr: formatIngest(result, COMMUNITY_SOURCE), code: EXIT.ok };
+}
+
 export function run(argv: readonly string[], readFile: FileReader): CliResult {
   let values: Record<string, string | boolean | undefined>;
   let positionals: string[];
@@ -103,6 +144,13 @@ export function run(argv: readonly string[], readFile: FileReader): CliResult {
   }
   if (command === undefined) {
     return usageError('No command given.');
+  }
+  if (command === 'ingest') {
+    const rawPath = positionals[1];
+    if (rawPath === undefined) {
+      return usageError('ingest needs a raw card data file.');
+    }
+    return runIngest(rawPath, readFile, values['json'] === true);
   }
   if (command !== 'analyze' && command !== 'validate') {
     return usageError(`Unknown command "${command}".`);

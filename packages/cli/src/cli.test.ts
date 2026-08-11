@@ -228,6 +228,87 @@ describe('validate', () => {
   });
 });
 
+describe('ingest', () => {
+  /** Two cards in the community export's shape: one usable, one not. */
+  const RAW = JSON.stringify([
+    {
+      publicCode: 'OGN-275/298',
+      name: 'Altar to Unity',
+      domains: [{ id: 'colorless', label: 'Colorless' }],
+      cardType: [{ id: 'battlefield', label: 'Battlefield' }],
+      text: '<p>When you hold here, play a unit token.</p>',
+    },
+    {
+      publicCode: 'OGN-001/298',
+      name: 'Blazing Scorcher',
+      domains: [{ id: 'fury', label: 'Fury' }],
+      cardType: [{ id: 'unit', label: 'Unit' }],
+      text: '<p>[Accelerate]</p>',
+      energy: 5,
+    },
+  ]);
+
+  const ingest = (...args: string[]) =>
+    run(['ingest', 'raw.json', ...args], (path) => {
+      if (path === 'raw.json') return RAW;
+      throw new Error(`ENOENT: ${path}`);
+    });
+
+  it('writes normalized cards to stdout', () => {
+    const result = ingest();
+    const cards = JSON.parse(result.stdout) as { id: string; type: string }[];
+
+    expect(result.code).toBe(EXIT.ok);
+    expect(cards).toHaveLength(1);
+    expect(cards[0]?.id).toBe('OGN-275');
+    expect(cards[0]?.type).toBe('battlefield');
+  });
+
+  it('reports the dropped cards on stderr, not stdout', () => {
+    // stdout has to stay pipeable into a cards.json file.
+    const result = ingest();
+    expect(result.stderr).toMatch(/Ingested 1 of 2 cards/);
+    expect(result.stderr).toMatch(/might \(1\)/);
+    expect(() => JSON.parse(result.stdout)).not.toThrow();
+  });
+
+  it('emits the gaps alongside the cards in JSON mode', () => {
+    const result = ingest('--json');
+    const parsed = JSON.parse(result.stdout) as { source: string; gaps: { field: string }[] };
+
+    expect(parsed.source).toBe('community-json');
+    expect(parsed.gaps.map((gap) => gap.field)).toContain('might');
+  });
+
+  it('produces card data the loader accepts', () => {
+    // The two ends of the pipeline have to agree on the schema.
+    const cards = parseCardsJson(ingest().stdout);
+    expect(cards[0]?.name).toBe('Altar to Unity');
+  });
+
+  it('needs a file to read', () => {
+    expect(run(['ingest'], files).code).toBe(EXIT.usage);
+  });
+
+  it('reports a file it cannot read', () => {
+    const result = run(['ingest', 'missing.json'], files);
+    expect(result.code).toBe(EXIT.input);
+    expect(result.stderr).toMatch(/Cannot read card data/);
+  });
+
+  it('reports input that is not JSON', () => {
+    const result = run(['ingest', 'raw.json'], () => '{ nope');
+    expect(result.code).toBe(EXIT.input);
+    expect(result.stderr).toMatch(/not valid JSON/);
+  });
+
+  it('reports input that is not an array of cards', () => {
+    const result = run(['ingest', 'raw.json'], () => '{"cards":[]}');
+    expect(result.code).toBe(EXIT.input);
+    expect(result.stderr).toMatch(/array of cards/);
+  });
+});
+
 describe('analyze', () => {
   const report = analyze().stdout;
 

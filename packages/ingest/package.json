@@ -1,13 +1,10 @@
 {
-  "name": "@riftbound/cli",
+  "name": "@riftbound/ingest",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "bin": {
-    "riftbound": "./dist/main.js"
-  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -15,10 +12,7 @@
     }
   },
   "dependencies": {
-    "@riftbound/analysis": "*",
-    "@riftbound/cards": "*",
-    "@riftbound/deck": "*",
-    "@riftbound/ingest": "*"
+    "@riftbound/cards": "*"
   },
   "scripts": {
     "build": "tsc --build"

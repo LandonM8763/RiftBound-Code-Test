@@ -26,7 +26,8 @@ Requires Node 22 or newer.
 | `@riftbound/engine` | Rules engine: seeded RNG, game state, turn phases, legal action generation, observable views |
 | `@riftbound/ai` | Agent interface, random legal agent, single-game runner |
 | `@riftbound/analysis` | Cost curve, draw probabilities, Domain/Power consistency, castability |
-| `@riftbound/cli` | `riftbound analyze` / `validate` for a deck list file |
+| `@riftbound/ingest` | Card data source adapters: normalize a raw export, report what it is missing |
+| `@riftbound/cli` | `riftbound analyze` / `validate` / `ingest` |
 
 More packages (suggestions, batch simulation harness) are planned; see `CLAUDE.md`
 for the architecture and phasing.

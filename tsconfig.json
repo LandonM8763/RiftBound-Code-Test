@@ -3,6 +3,7 @@
   "references": [
     { "path": "./packages/cards" },
     { "path": "./packages/deck" },
+    { "path": "./packages/ingest" },
     { "path": "./packages/engine" },
     { "path": "./packages/ai" },
     { "path": "./packages/analysis" },
