@@ -27,6 +27,7 @@ import {
 
 import type { Gap } from './gaps.js';
 import type { CardSource, IngestResult } from './source.js';
+import { parseCardText } from './text.js';
 
 /** The source's name for "no Domain", which is the absence of one. */
 const NO_DOMAIN = 'None';
@@ -207,6 +208,14 @@ function normalizeCard(
 
   const description = plainText(text(raw['description']));
   const championTag = championTagFromName(rawName);
+
+  // The printed text becomes the effect model where the grammar covers it.
+  // All-or-nothing per card: a partially understood card would play, look
+  // right and be wrong, so anything left over leaves the card vanilla and is
+  // recorded instead. See `text.ts`.
+  const parsed = parseCardText(description);
+  const understood = parsed.unparsed.length === 0;
+
   const base = {
     id,
     name,
@@ -215,7 +224,18 @@ function normalizeCard(
     tags: [] as readonly string[],
     signature: info.signature,
     ...(championTag === undefined ? {} : { championTag }),
+    ...(understood && parsed.abilities !== undefined ? { abilities: parsed.abilities } : {}),
   };
+  const cardEffect = understood ? parsed.effect : undefined;
+
+  if (!understood) {
+    gap(
+      'text',
+      `Rules text not covered by the effect grammar, so the card plays as vanilla: ` +
+        parsed.unparsed.map((clause) => `"${clause}"`).join('; '),
+      'degraded',
+    );
+  }
 
   // 103.2.d.2 needs every Signature card's tag, and this export names those
   // cards for their effect rather than their Champion, so it cannot be read.
@@ -266,7 +286,17 @@ function normalizeCard(
       const cost = costOf();
       return cost === undefined
         ? { gaps }
-        : { card: { ...base, type: 'unit', cost, might, champion: info.champion }, gaps };
+        : {
+            card: {
+              ...base,
+              type: 'unit',
+              cost,
+              might,
+              champion: info.champion,
+              ...(cardEffect === undefined ? {} : { effect: cardEffect }),
+            },
+            gaps,
+          };
     }
     case 'spell': {
       const timing = timingFromText(description);
@@ -280,11 +310,32 @@ function normalizeCard(
         return { gaps };
       }
       const cost = costOf();
-      return cost === undefined ? { gaps } : { card: { ...base, type: 'spell', cost, timing }, gaps };
+      return cost === undefined
+        ? { gaps }
+        : {
+            card: {
+              ...base,
+              type: 'spell',
+              cost,
+              timing,
+              ...(cardEffect === undefined ? {} : { effect: cardEffect }),
+            },
+            gaps,
+          };
     }
     case 'gear': {
       const cost = costOf();
-      return cost === undefined ? { gaps } : { card: { ...base, type: 'gear', cost }, gaps };
+      return cost === undefined
+        ? { gaps }
+        : {
+            card: {
+              ...base,
+              type: 'gear',
+              cost,
+              ...(cardEffect === undefined ? {} : { effect: cardEffect }),
+            },
+            gaps,
+          };
     }
     case 'rune': {
       const domain = domains[0];
@@ -323,7 +374,14 @@ export const APITCG_SOURCE: CardSource = {
 
     raw.forEach((entry, index) => {
       const result = normalizeCard(entry, index, problems);
-      gaps.push(...result.gaps);
+      // A card that is dropped does not "play as vanilla" — it does not play at
+      // all — so its unmodelled-text gap would be noise on top of the reason it
+      // was actually dropped.
+      gaps.push(
+        ...(result.card === undefined
+          ? result.gaps.filter((entry_) => entry_.field !== 'text')
+          : result.gaps),
+      );
       if (result.card === undefined) {
         // Only count it as dropped if something was actually missing; sealed
         // products are simply not cards.

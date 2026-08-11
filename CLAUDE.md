@@ -23,9 +23,11 @@ card game). The application has four capabilities:
 
 **Phase 1, in progress.** Eight packages exist and are covered by tests; the rest
 of the architecture below is still a plan. **The engine plays complete games
-with real Riftbound card data** — 479 cards ingested, a legal deck validated
-from them, 300 games simulated. What those cards do not yet have is their rules
-text turned into effects: they play as vanilla. See [Card data](#card-data).
+with real Riftbound card data, including cards whose printed text is modelled**
+— 479 cards ingested, a legal deck validated from them, 300 games simulated
+with damage spells, draw and Play Effects firing. Only 22 of the 468 cards with
+text are covered so far, and [Card data](#card-data) explains why that number
+is a statement about the engine's mechanics rather than about the parser.
 
 What is built:
 
@@ -50,8 +52,8 @@ What is built:
   **rule 356 cost modification**, first-class legal action generation,
   per-player observable views, and a structural invariant checker.
 
-  With Combat in, the engine can play a complete game of Riftbound with vanilla
-  cards: contest a Battlefield, fight over it, take Control, and score to 8.
+  With Combat in, the engine can play a complete game of Riftbound: contest a
+  Battlefield, fight over it, take Control, and score to 8.
 - **`@riftbound/ai`** — the `Agent` interface, a seeded random legal agent, a
   **heuristic agent**, and a single-game runner that keeps agents honest. The
   heuristic wins **~85% against random over 120 alternating-seat games**; the
@@ -62,7 +64,8 @@ What is built:
   Domain/Power consistency, and per-card castability. No engine, no agent, no
   randomness — closed-form and exact.
 - **`@riftbound/ingest`** — card data source adapters behind a `CardSource`
-  interface, plus the gap model. Two exist: **`APITCG_SOURCE`** (the default,
+  interface, a **card-text parser** that turns printed text into the effect
+  model, plus the gap model. Two exist: **`APITCG_SOURCE`** (the default,
   and the one that works) and `COMMUNITY_SOURCE`. Neither **ever invents a
   missing field**: a card whose source lacks something the rules need is
   dropped and recorded, because card data that looks complete and is not
@@ -101,11 +104,12 @@ What is **not** built yet, in rough dependency order:
    choices at the Make Relevant Choices step of resolution, which needs the
    sub-action protocol. Activated abilities and played cards are unaffected:
    both choose at play time, as 355.8 requires.
-3. **Card text as effects.** Ingested cards carry their printed text but no
-   `effect`, `abilities` or `costModifiers`, so a real pool plays as vanilla
-   cards. This is now the largest gap between the engine's capabilities and
-   what real cards do — everything the primitives, abilities and cost modifiers
-   can express is unreachable from data until the text is parsed into them.
+3. **Mechanics real cards need.** Text is now parsed into the effect model
+   where the grammar reaches (see [Card data](#card-data)), and what that
+   measurement shows is that the engine, not the parser, is the constraint:
+   keywords (Accelerate, Tank, Shield, Deflect, …), static/passive abilities,
+   conditional and modal effects, and self-targeting are what the corpus is
+   actually made of.
 
 Focus (rule 313) *is* implemented, as part of Non-Combat Showdowns: granted to
 the contesting player (345), passing on a pass (347.2.b) and when the last Chain
@@ -785,11 +789,52 @@ number*, so `id` is not unique across it. Rule 103.2.b.2 makes same-named cards
 the same card, so one printing is kept per name. Note `(Signature)` there is a
 printing, unrelated to the Signature supertype, which comes from `cardType`.
 
-**The rules text is captured but not parsed.** Cards arrive with their printed
-text in `text` and no `effect`, `abilities` or `costModifiers` — so an ingested
-pool plays as vanilla cards. Turning text into the effect model is the next
-large piece of work, and it is what makes the primitives, abilities and cost
-modifiers actually reachable from real cards.
+### Turning text into effects
+
+`ingest/text.ts` parses printed text into the effect model over a known
+grammar. **The parse is all-or-nothing per card**: if every clause is
+understood the card gets its effect and abilities, and if one clause is not the
+card stays vanilla and the clause is recorded as a `text` gap. A partial parse
+would be worse than none — "Deal 6 to it unless its controller has you draw 2"
+reduced to "deal 6" is a card that plays, looks right, and is wrong.
+
+It covers `Draw N`, `Deal N to a unit [at a battlefield]`, `Give a unit +N
+Might this turn`, `Kill`, `Ready`, `Buff`, `Heal`, `Discard N`, `Channel N
+rune(s) [exhausted]`, `ADD` resources and `Gain N XP`; sequences joined by
+"then"; the five `TriggerCondition` wordings with their optional "you may"; and
+Activated abilities written `[N,] Exhaust: <effects>`.
+
+**Coverage is 22 of the 468 cards that have text, and that number is the
+finding, not a shortfall to grind away at.** Measured on the corpus:
+
+| | Cards |
+|---|---|
+| With printed text | 468 |
+| Carrying a keyword the engine does not model | 180 |
+| Addressable (no keyword at all) | 288 |
+| Fully parsed | 22 |
+
+Within that addressable set the unparsed tail is **flat** — the most common
+clause the grammar misses appears 3 times, everything else once or twice. There
+is no head to attack, so more regexes buy roughly one card each.
+
+What the corpus is actually blocked on, in order:
+
+1. **Keywords** — Accelerate, Tank, Shield N, Assault N, Deflect, Hidden,
+   Ganking, Weaponmaster, Legion, Vision, Equip, Repeat. These are rules the
+   *engine* does not model; a card carrying one is deliberately refused rather
+   than parsed as though the keyword were absent.
+2. **Static/passive abilities** — "Units here have +1 Might", "I enter ready",
+   "My Might is increased by your points". `CostModifier` is the only passive
+   the model has.
+3. **Conditional and modal effects** — "if this kills it", "unless its
+   controller…", "choose one •…", "for each…". The effect model has no
+   conditions, no counting and no modes.
+4. **Self-targeting** — "ready me", "give me +2 Might". `TargetSpec` can name a
+   Unit but not *this* Unit, and threading the effect's own source through
+   `executeEffect` is the change that would fix it.
+
+So the next investment is engine mechanics, not parser rules.
 
 ### What is reachable
 

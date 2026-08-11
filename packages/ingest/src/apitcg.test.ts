@@ -114,7 +114,7 @@ describe('Champion Tags', () => {
       raw({ cardType: 'Signature Spell', name: 'Icathian Rain', description: 'ACTION' }),
     ]);
     expect(cards).toHaveLength(1);
-    expect(gaps[0]).toMatchObject({ field: 'championTag', severity: 'degraded' });
+    expect(gaps.find((gap) => gap.field === 'championTag')).toMatchObject({ severity: 'degraded' });
   });
 });
 
@@ -162,7 +162,7 @@ describe('Spell timing (rule 358.4)', () => {
       raw({ cardType: 'Spell', name: 'Charm', description: 'Move an enemy unit.' }),
     ]);
     expect(cards).toEqual([]);
-    expect(gaps[0]).toMatchObject({ field: 'timing', severity: 'blocking' });
+    expect(gaps.find((gap) => gap.field === 'timing')).toMatchObject({ severity: 'blocking' });
   });
 
   it('keeps a Spell whose timing is printed', () => {
@@ -182,7 +182,7 @@ describe('costs and Domains', () => {
   it('drops a multi-Domain card with Power rather than guessing the split', () => {
     const { cards, gaps } = run([raw({ domain: 'Fury;Chaos', energyCost: '8', powerCost: '2' })]);
     expect(cards).toEqual([]);
-    expect(gaps[0]).toMatchObject({ field: 'cost.power', severity: 'blocking' });
+    expect(gaps.find((gap) => gap.field === 'cost.power')).toMatchObject({ severity: 'blocking' });
   });
 
   it('keeps a multi-Domain card that costs no Power', () => {
@@ -211,7 +211,7 @@ describe('Might', () => {
   it('drops a Unit that has none (rules 465-466)', () => {
     const { cards, gaps } = run([raw({ might: null })]);
     expect(cards).toEqual([]);
-    expect(gaps[0]).toMatchObject({ field: 'might', severity: 'blocking' });
+    expect(gaps.find((gap) => gap.field === 'might')).toMatchObject({ severity: 'blocking' });
   });
 });
 
@@ -266,6 +266,6 @@ describe('output shape', () => {
       raw({ id: 'b', cardType: 'Spell', name: 'B', description: 'no marker' }),
       raw({ id: 'c', might: null, name: 'C' }),
     ]);
-    expect(summarizeGaps(gaps).byField[0]).toEqual({ field: 'timing', count: 2 });
+    expect(summarizeGaps(gaps).byField).toContainEqual({ field: 'timing', count: 2 });
   });
 });
