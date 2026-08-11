@@ -32,7 +32,12 @@ function testDeck(): DeckList {
 
 function game(seed = 'view'): GameState {
   const decks = [testDeck(), testDeck()];
-  return createGame({ decks, registry: registryFor(), seed }).state;
+  let state = createGame({ decks, registry: registryFor(), seed }).state;
+  // Take the empty Mulligan for both players (rule 117).
+  while (state.phase === 'mulligan') {
+    state = reduce(state, { type: 'mulligan', cards: [] }).state;
+  }
+  return state;
 }
 
 const SEAT_0 = playerId(0);

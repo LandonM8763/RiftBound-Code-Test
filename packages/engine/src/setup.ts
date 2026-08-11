@@ -85,9 +85,8 @@ function emptyZones(): Record<PlayerZone, EntityId[]> {
  * Battlefields, then determine turn order. Changing that order changes every
  * existing seed's game and invalidates stored golden games.
  *
- * Rule 117's Mulligan is NOT implemented: it is a player choice, so it needs a
- * setup-time decision point rather than a config value. Opening hands here are
- * the rule 116 draw of 4 with no Mulligan taken.
+ * Players are dealt their rule 116 hand of 4 and the game opens in the Mulligan
+ * phase (117), where each in turn order chooses what to set aside.
  */
 export function createGame(options: CreateGameOptions): ReduceResult {
   const playerCount = options.decks.length;
@@ -164,16 +163,17 @@ export function createGame(options: CreateGameOptions): ReduceResult {
     turn: 1,
     activePlayer: startingPlayer,
     firstPlayer: startingPlayer,
-    phase: 'awaken',
+    phase: 'mulligan',
     players,
     battlefields,
     entities,
     nextEntityId,
     definitions,
     chain: [],
-    // Rule 312.2.a: Priority is granted on entering the Main Phase.
-    priority: null,
+    // The Mulligan is a choice, so the First Player acts immediately (117).
+    priority: startingPlayer,
     showdown: null,
+    mulligansTaken: 0,
     passes: 0,
     outcome: null,
   };
@@ -192,7 +192,7 @@ export function createGame(options: CreateGameOptions): ReduceResult {
 
   const events: readonly GameEvent[] = [
     { type: 'gameStarted', startingPlayer },
-    { type: 'phaseEntered', turn: 1, player: startingPlayer, phase: 'awaken' },
+    { type: 'phaseEntered', turn: 1, player: startingPlayer, phase: 'mulligan' },
   ];
 
   return { state, events };

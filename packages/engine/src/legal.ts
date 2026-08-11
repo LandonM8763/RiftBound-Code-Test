@@ -4,7 +4,7 @@ import { effectOf } from '@riftbound/cards';
 import { legalTargets } from './effects.js';
 import { standardMoves } from './move.js';
 import { playableFromHand, validUnitLocations } from './play.js';
-import type { GameState, PlayerId } from './state.js';
+import type { EntityId, GameState, PlayerId } from './state.js';
 import { entityCard, getPlayer, isClosed, isOver, isShowdown } from './state.js';
 
 /**
@@ -17,6 +17,11 @@ import { entityCard, getPlayer, isClosed, isOver, isShowdown } from './state.js'
 export function legalActions(state: GameState, player: PlayerId): readonly Action[] {
   if (isOver(state)) {
     return [];
+  }
+
+  // Rule 117: during setup the only choice is which cards to set aside.
+  if (state.phase === 'mulligan') {
+    return player === state.priority ? mulliganChoices(state, player) : [];
   }
 
   // Outside the Main Phase nothing has Priority and the phase simply resolves.
@@ -97,6 +102,30 @@ export function legalActions(state: GameState, player: PlayerId): readonly Actio
   }
 
   return actions;
+}
+
+/**
+ * Every subset of the hand a player may set aside, up to the Mulligan limit
+ * (rule 117.1). Keeping none is always an option.
+ */
+function mulliganChoices(state: GameState, player: PlayerId): Action[] {
+  const hand = getPlayer(state, player).zones.hand;
+  const limit = Math.min(state.config.mulliganLimit, hand.length);
+  const choices: Action[] = [{ type: 'mulligan', cards: [] }];
+
+  const build = (start: number, chosen: EntityId[]): void => {
+    if (chosen.length >= limit) {
+      return;
+    }
+    for (let i = start; i < hand.length; i += 1) {
+      const next = [...chosen, hand[i] as EntityId];
+      choices.push({ type: 'mulligan', cards: next });
+      build(i + 1, next);
+    }
+  };
+  build(0, []);
+
+  return choices;
 }
 
 /** Convenience wrapper for the player who may act right now. */

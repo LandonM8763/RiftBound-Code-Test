@@ -43,7 +43,18 @@ function testDeck(mainSize = 12, runeSize = 8): DeckList {
 
 function newGame(seed: string | number = 'test', config?: CreateGameOptions['config']) {
   const decks = [testDeck(), testDeck()];
-  return createGame({ decks, registry: registryFor(), seed, ...(config ? { config } : {}) });
+  const started = createGame({ decks, registry: registryFor(), seed, ...(config ? { config } : {}) });
+  // Every player takes the empty Mulligan so tests start at the first turn.
+  return { ...started, state: pastMulligan(started.state) };
+}
+
+/** Take the empty Mulligan for every player so play can begin (rule 117). */
+function pastMulligan(state: GameState): GameState {
+  let next = state;
+  while (next.phase === 'mulligan') {
+    next = reduce(next, { type: 'mulligan', cards: [] }).state;
+  }
+  return next;
 }
 
 /** Drive the game with the first legal action until it reaches `phase`. */
@@ -85,7 +96,7 @@ describe('createGame', () => {
     start = newGame().state;
   });
 
-  it('starts on turn 1 in the Awaken phase with no outcome', () => {
+  it('starts on turn 1 in the Awaken phase once Mulligans are done', () => {
     expect(start.turn).toBe(1);
     expect(start.phase).toBe('awaken');
     expect(start.outcome).toBeNull();
@@ -186,7 +197,7 @@ describe('determinism', () => {
 
   it('replays an identical game for the same seed and action sequence', () => {
     const play = (): GameState => {
-      let state = createGame({ decks, registry: registryFor(), seed: 'replay' }).state;
+      let state = pastMulligan(createGame({ decks, registry: registryFor(), seed: 'replay' }).state);
       for (let i = 0; i < 60 && !isOver(state); i += 1) {
         const action = currentLegalActions(state)[0];
         if (action === undefined) break;
@@ -429,7 +440,9 @@ describe('Burn Out (rules 413.4, 431)', () => {
   const emptyDecks = (): DeckList[] => [testDeck(4), testDeck(4)];
 
   it('burns out when the Main Deck is empty at the Draw Phase', () => {
-    const start = createGame({ decks: emptyDecks(), registry: registryFor(), seed: 'burn' }).state;
+    const start = pastMulligan(
+      createGame({ decks: emptyDecks(), registry: registryFor(), seed: 'burn' }).state,
+    );
     const player = start.activePlayer;
     expect(zoneOf(start, player, 'mainDeck')).toHaveLength(0);
 
@@ -441,7 +454,9 @@ describe('Burn Out (rules 413.4, 431)', () => {
   });
 
   it('gives an opponent a point (rule 431.2.c)', () => {
-    const start = createGame({ decks: emptyDecks(), registry: registryFor(), seed: 'burn-point' }).state;
+    const start = pastMulligan(
+      createGame({ decks: emptyDecks(), registry: registryFor(), seed: 'burn-point' }).state,
+    );
     const player = start.activePlayer;
     const opponent = playerId((player + 1) % start.players.length);
 
@@ -452,7 +467,9 @@ describe('Burn Out (rules 413.4, 431)', () => {
   });
 
   it('recycles the trash back into the Main Deck (rule 431.2.b)', () => {
-    const start = createGame({ decks: emptyDecks(), registry: registryFor(), seed: 'recycle' }).state;
+    const start = pastMulligan(
+      createGame({ decks: emptyDecks(), registry: registryFor(), seed: 'recycle' }).state,
+    );
     const player = start.activePlayer;
     const hand = zoneOf(start, player, 'hand');
 
@@ -480,7 +497,14 @@ describe('Burn Out (rules 413.4, 431)', () => {
   });
 
   it('ends the game once repeated Burn Outs carry someone to the Victory Score', () => {
-    let state = createGame({ decks: emptyDecks(), registry: registryFor(), seed: 'burn-win', config: { maxTurns: 400 } }).state;
+    let state = pastMulligan(
+      createGame({
+        decks: emptyDecks(),
+        registry: registryFor(),
+        seed: 'burn-win',
+        config: { maxTurns: 400 },
+      }).state,
+    );
 
     while (!isOver(state)) {
       const action = currentLegalActions(state)[0];

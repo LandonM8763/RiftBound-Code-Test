@@ -38,9 +38,9 @@ What is built:
   Scoring by Hold, Burn Out, the win condition, Rune Pools, the Chain with
   Priority, the Process of Play, the Standard Move and Contested status,
   Showdowns with Focus, the full Steps of Combat, Scoring by Conquer including
-  the Final Point restriction, and **data-driven card effects**, first-class
-  legal action generation, per-player observable views, and a structural
-  invariant checker.
+  the Final Point restriction, **data-driven card effects**, **the Mulligan**,
+  first-class legal action generation, per-player observable views, and a
+  structural invariant checker.
 
   With Combat in, the engine can play a complete game of Riftbound with vanilla
   cards: contest a Battlefield, fight over it, take Control, and score to 8.
@@ -71,9 +71,7 @@ What is **not** built yet, in rough dependency order:
 2. **Cost modification** (rule 356's layers: base-cost replacement, additional
    costs, increases, discounts). `totalCost` in `play.ts` returns the printed
    cost and is the seam.
-3. **The Mulligan** (rule 117) — verified but unimplemented: it is a player
-   choice, so it needs a setup-time decision point rather than a config value.
-4. **Signature card limits and champion tag matching** (103.2.a.2, 103.2.d) —
+3. **Signature card limits and champion tag matching** (103.2.a.2, 103.2.d) —
    both need card data that carries champion tags.
 
 Focus (rule 313) *is* implemented, as part of Non-Combat Showdowns: granted to
@@ -231,6 +229,17 @@ aside, both decks shuffled separately, turn order by any fair random method, the
 **each player draws 4** (116) and takes a **Mulligan** (117): set aside up to 2
 cards, draw that many, then Recycle the set-aside cards to the bottom of the deck.
 
+The Mulligan is a **player choice**, so it is modelled as a phase (`'mulligan'`,
+before `'awaken'`) with a real decision point, not as a config value.
+`createGame` deals the opening hands and stops there, with Priority on the First
+Player; `legalActions` enumerates every subset of the hand up to the limit, and
+each `mulligan` action passes the choice to the next player in turn order until
+`mulligansTaken` reaches the player count, at which point rule 118 begins play
+with the First Player. **The 117.2-then-117.3 order is load-bearing** — drawing
+before Recycling is what stops a player redrawing what they just set aside — and
+`mulligan.test.ts` pins it with a near-empty deck, the only case where the two
+orders diverge.
+
 ### Modes of Play (rules 481-486)
 
 A Mode defines player count, Victory Score, Battlefield Count, setup, format and
@@ -361,7 +370,7 @@ every game currently ends in the `maxTurns` draw.
 | `legal.ts` | `legalActions(state, player)` |
 | `view.ts` | Per-player observable view; redacts hidden zones |
 | `invariants.ts` | `checkInvariants(state)`, run after every action when fuzzing |
-| `setup.ts` | `createGame` — entity creation, shuffles, opening hands |
+| `setup.ts` | `createGame` — entity creation, shuffles, opening hands, opens in the Mulligan |
 
 ### Engine design principles
 

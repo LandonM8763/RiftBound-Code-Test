@@ -214,7 +214,22 @@ export interface BattlefieldState {
  * The A/B/C/D naming used by community guides maps onto the four Start of Turn
  * phases; the rulebook names them, and the rulebook is the naming authority.
  */
-export const PHASES = ['awaken', 'beginning', 'channel', 'draw', 'main', 'ending'] as const;
+export const PHASES = [
+  /**
+   * Setup only (rule 117), before the first turn begins.
+   *
+   * Each player in turn order sets aside up to two cards, draws that many, then
+   * Recycles the set-aside cards. It is a player choice, which is why it is a
+   * phase with a decision point rather than a config value.
+   */
+  'mulligan',
+  'awaken',
+  'beginning',
+  'channel',
+  'draw',
+  'main',
+  'ending',
+] as const;
 
 export type Phase = (typeof PHASES)[number];
 
@@ -314,6 +329,13 @@ export interface GameState {
   readonly priority: PlayerId | null;
   /** The open Showdown, if any (rule 341). */
   readonly showdown: ShowdownState | null;
+  /**
+   * How many players have taken their Mulligan (rule 117).
+   *
+   * Setup bookkeeping: once it reaches the player count, play begins with the
+   * First Player (118).
+   */
+  readonly mulligansTaken: number;
   /** Consecutive passes since the last Chain item was added or resolved. */
   readonly passes: number;
   /** `null` while the game is still running. */

@@ -49,6 +49,12 @@ export type GameEvent =
   | { readonly type: 'damageDealt'; readonly unit: EntityId; readonly amount: number }
   /** Might granted until the end of the turn. */
   | { readonly type: 'mightGranted'; readonly unit: EntityId; readonly amount: number }
+  /** Rule 117: a player took their Mulligan. */
+  | {
+      readonly type: 'mulliganed';
+      readonly player: PlayerId;
+      readonly setAside: readonly EntityId[];
+    }
   /** Rule 167: the Rune Pool emptied and unspent resources were lost. */
   | { readonly type: 'poolEmptied'; readonly player: PlayerId }
   /** Rule 359: a card finished the Process of Play. */

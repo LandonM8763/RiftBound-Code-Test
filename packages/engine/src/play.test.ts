@@ -91,8 +91,17 @@ function deck(): DeckList {
 }
 
 /** A game sitting in the Main Phase with two Runes Channelled. */
+/** Take the empty Mulligan for every player so play can begin (rule 117). */
+function pastMulligan(state: GameState): GameState {
+  let next = state;
+  while (next.phase === 'mulligan') {
+    next = reduce(next, { type: 'mulligan', cards: [] }).state;
+  }
+  return next;
+}
+
 function inMainPhase(seed = 'play'): GameState {
-  let state = createGame({ decks: [deck(), deck()], registry: REGISTRY, seed }).state;
+  let state = pastMulligan(createGame({ decks: [deck(), deck()], registry: REGISTRY, seed }).state);
   while (state.phase !== 'main' && !isOver(state)) {
     state = reduce(state, { type: 'resolvePhase' }).state;
   }
@@ -342,7 +351,9 @@ describe('Priority (rules 312-313)', () => {
   });
 
   it('belongs to nobody outside the Main Phase', () => {
-    const state = createGame({ decks: [deck(), deck()], registry: REGISTRY, seed: 'prio' }).state;
+    const state = pastMulligan(
+      createGame({ decks: [deck(), deck()], registry: REGISTRY, seed: 'prio' }).state,
+    );
     expect(state.phase).toBe('awaken');
     expect(state.priority).toBeNull();
   });

@@ -78,6 +78,8 @@ export function reduce(state: GameState, action: Action): ReduceResult {
       return pass(state);
     case 'moveUnits':
       return moveUnits(state, action.units, action.to);
+    case 'mulligan':
+      return mulligan(state, action.cards);
     default: {
       const exhaustive: never = action;
       throw new IllegalActionError(`Unknown action: ${JSON.stringify(exhaustive)}`);
@@ -228,6 +230,79 @@ function playCard(
   }
 
   return { state: next, events };
+}
+
+/**
+ * The Mulligan (rule 117).
+ *
+ * 117.1 sets aside up to two cards, 117.2 draws that many, and only then 117.3
+ * Recycles the set-aside cards to the bottom of the Main Deck. The order is
+ * load-bearing: drawing first is what stops a player redrawing the very cards
+ * they just put back.
+ */
+function mulligan(state: GameState, cards: readonly EntityId[]): ReduceResult {
+  if (state.phase !== 'mulligan') {
+    throw new IllegalActionError('The Mulligan happens during setup only (rule 117)');
+  }
+
+  const player = requirePriority(state);
+  const limit = state.config.mulliganLimit;
+
+  if (cards.length > limit) {
+    throw new IllegalActionError(`A Mulligan sets aside at most ${limit} cards (rule 117.1)`);
+  }
+  if (new Set(cards).size !== cards.length) {
+    throw new IllegalActionError('The same card cannot be set aside twice');
+  }
+  for (const card of cards) {
+    if (!zoneOf(state, player, 'hand').includes(card)) {
+      throw new IllegalActionError(`Card ${card} is not in player ${player}'s hand`);
+    }
+  }
+
+  const events: GameEvent[] = [{ type: 'mulliganed', player, setAside: [...cards] }];
+  let next = state;
+
+  // 117.1: set the chosen cards aside, out of hand.
+  for (const card of cards) {
+    next = moveEntity(next, card, playerLocation(player, 'chain'));
+  }
+
+  // 117.2: draw as many as were set aside.
+  const drawn = drawCards(next, player, cards.length, events);
+  next = drawn.state;
+
+  // 117.3: Recycle the set-aside cards to the bottom of the Main Deck (416.1.a).
+  for (const card of cards) {
+    next = moveEntity(next, card, playerLocation(player, 'mainDeck'), 'bottom');
+  }
+
+  const taken = next.mulligansTaken + 1;
+  if (taken < next.players.length) {
+    const upcoming = nextPlayer(next, player);
+    return {
+      state: { ...next, mulligansTaken: taken, activePlayer: upcoming, priority: upcoming },
+      events,
+    };
+  }
+
+  // 118: begin play with the First Player taking their turn.
+  events.push({
+    type: 'phaseEntered',
+    turn: next.turn,
+    player: next.firstPlayer,
+    phase: 'awaken',
+  });
+  return {
+    state: {
+      ...next,
+      mulligansTaken: taken,
+      phase: 'awaken',
+      activePlayer: next.firstPlayer,
+      priority: null,
+    },
+    events,
+  };
 }
 
 /** Adapter so `effects.ts` can draw without importing the Burn Out machinery. */
@@ -720,6 +795,10 @@ function requirePriority(state: GameState): PlayerId {
 
 function resolvePhase(state: GameState): ReduceResult {
   switch (state.phase) {
+    case 'mulligan':
+      throw new IllegalActionError(
+        'The Mulligan is a choice; take the mulligan action instead (rule 117)',
+      );
     case 'awaken':
       return awaken(state);
     case 'beginning':

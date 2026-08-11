@@ -61,8 +61,17 @@ function deck(): DeckList {
   };
 }
 
+/** Take the empty Mulligan for every player so play can begin (rule 117). */
+function pastMulligan(state: GameState): GameState {
+  let next = state;
+  while (next.phase === 'mulligan') {
+    next = reduce(next, { type: 'mulligan', cards: [] }).state;
+  }
+  return next;
+}
+
 function inMainPhase(seed = 'showdown'): GameState {
-  let state = createGame({ decks: [deck(), deck()], registry: REGISTRY, seed }).state;
+  let state = pastMulligan(createGame({ decks: [deck(), deck()], registry: REGISTRY, seed }).state);
   while (state.phase !== 'main' && !isOver(state)) {
     state = reduce(state, { type: 'resolvePhase' }).state;
   }

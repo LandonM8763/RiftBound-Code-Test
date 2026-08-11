@@ -40,6 +40,11 @@ export type Action =
   /** Pass Priority (rule 312.2.d). Resolves the Chain once everyone passes. */
   | { readonly type: 'pass' }
   /**
+   * Take the Mulligan (rule 117): set aside these cards, draw that many, then
+   * Recycle the set-aside ones. An empty list keeps the opening hand.
+   */
+  | { readonly type: 'mulligan'; readonly cards: readonly EntityId[] }
+  /**
    * The Standard Move (rule 144): exhaust one or more Units to move them to a
    * shared destination. Rule 144.3 allows several at once as a single action.
    */
