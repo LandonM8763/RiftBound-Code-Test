@@ -225,6 +225,11 @@ function normalizeCard(
     signature: info.signature,
     ...(championTag === undefined ? {} : { championTag }),
     ...(understood && parsed.abilities !== undefined ? { abilities: parsed.abilities } : {}),
+    // Keywords ride on the same all-or-nothing rule as everything else. A card
+    // whose other clause is unreadable keeps neither: half a card is the
+    // failure mode this design exists to avoid, and Assault without the
+    // Deathknell next to it is still the wrong card.
+    ...(understood && parsed.keywords !== undefined ? { keywords: parsed.keywords } : {}),
   };
   const cardEffect = understood ? parsed.effect : undefined;
 

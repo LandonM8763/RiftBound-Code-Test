@@ -7,6 +7,7 @@
  */
 import type { CardEffect, DestinationSpec, Effect, TargetSpec } from '@riftbound/cards';
 
+import type { TriggerEventInstance } from './abilities.js';
 import type { GameEvent } from './events.js';
 import { moveEntity, withEntity, withPlayer } from './mutate.js';
 import type { EntityId, GameState, Location, PlayerId } from './state.js';
@@ -75,6 +76,18 @@ export interface EffectContext {
     player: PlayerId,
     to: Location,
     units: readonly EntityId[],
+    events: GameEvent[],
+  ) => GameState;
+  /**
+   * Rule 383.2: announce that something happened, so Triggered Abilities
+   * watching for it reach the Chain.
+   *
+   * Supplied rather than done here for the same reason as `queueDeaths`: this
+   * layer executes effects and the Chain lives above it.
+   */
+  readonly raise: (
+    state: GameState,
+    instance: TriggerEventInstance,
     events: GameEvent[],
   ) => GameState;
 }
@@ -296,7 +309,17 @@ function applyEffect(
         return state;
       }
       events.push({ type: 'buffAdded', unit: target });
-      return withEntity(state, target, (current) => ({ ...current, buffs: current.buffs + 1 }));
+      const buffed = withEntity(state, target, (current) => ({
+        ...current,
+        buffs: current.buffs + 1,
+      }));
+      // 702.3.a refuses the *second* Buff, so only a placement that actually
+      // happened raises the event — "when you buff me" must not fire on a no-op.
+      return context.raise(
+        buffed,
+        { event: 'buffed', actor: controller, objects: [target] },
+        events,
+      );
     }
 
     // 702.2.b.1: a Buff cannot be spent from a Unit that has none.
@@ -329,7 +352,9 @@ function applyEffect(
         next = moveEntity(next, card, playerLocation(controller, 'trash'));
       }
       events.push({ type: 'cardsDiscarded', player: controller, cards: chosen });
-      return next;
+      // "When you discard one or more cards" is one event however many cards
+      // went, which is why this is raised once outside the loop.
+      return context.raise(next, { event: 'discard', actor: controller }, events);
     }
 
     // 733: there is no limit to the XP a player can accrue.

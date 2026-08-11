@@ -11,15 +11,21 @@ import {
   type CardDefinition,
   type CardEffect,
 } from '@riftbound/cards';
-import { makeBattlefield, makeLegend, makeRune, makeUnit } from '@riftbound/cards/testing';
+import {
+  makeBattlefield,
+  makeLegend,
+  makeRune,
+  makeSpell,
+  makeUnit,
+} from '@riftbound/cards/testing';
 import { describe, expect, it } from 'vitest';
 
-import { activatableAbilities, triggersFor } from './abilities.js';
+import { activatableAbilities, dependencyMet, triggersFor } from './abilities.js';
 import { currentLegalActions, legalActions } from './legal.js';
 import { Rng } from './rng.js';
 import { IllegalActionError } from './actions.js';
 import { checkInvariants } from './invariants.js';
-import { moveEntity, withEntity } from './mutate.js';
+import { moveEntity, withEntity, withPlayer } from './mutate.js';
 import { reduce } from './reduce.js';
 import { createGame, type DeckList } from './setup.js';
 import {
@@ -66,7 +72,7 @@ const GREETER = makeUnit(2, ['fury'], {
   id: cardId('A-013'),
   name: 'Greeter',
   cost: cost(1),
-  abilities: { triggered: [{ condition: { kind: 'played' }, effect: DRAW_ONE }] },
+  abilities: { triggered: [{ condition: { event: 'played', subject: 'self' }, effect: DRAW_ONE }] },
 });
 
 /** "When you play me, you may draw 1" — optional, chosen at finalization (383.3.a). */
@@ -74,7 +80,7 @@ const OPTIONAL_GREETER = makeUnit(2, ['fury'], {
   id: cardId('A-014'),
   name: 'Maybe',
   cost: cost(1),
-  abilities: { triggered: [{ condition: { kind: 'played' }, optional: true, effect: DRAW_ONE }] },
+  abilities: { triggered: [{ condition: { event: 'played', subject: 'self' }, optional: true, effect: DRAW_ONE }] },
 });
 
 /** "Once each turn, when you play me, draw 1" (383.3.e). */
@@ -83,7 +89,7 @@ const LIMITED = makeUnit(2, ['fury'], {
   name: 'Limited',
   cost: cost(1),
   abilities: {
-    triggered: [{ condition: { kind: 'played' }, limitPerTurn: 1, effect: DRAW_ONE }],
+    triggered: [{ condition: { event: 'played', subject: 'self' }, limitPerTurn: 1, effect: DRAW_ONE }],
   },
 });
 
@@ -92,7 +98,7 @@ const DEATHKNELL = makeUnit(2, ['fury'], {
   id: cardId('A-016'),
   name: 'Deathknell',
   cost: cost(1),
-  abilities: { triggered: [{ condition: { kind: 'dies' }, effect: DRAW_ONE }] },
+  abilities: { triggered: [{ condition: { event: 'dies', subject: 'self' }, effect: DRAW_ONE }] },
 });
 
 /** "At the end of your turn, draw 1" (317.1). */
@@ -100,7 +106,7 @@ const CLOSER = makeUnit(2, ['fury'], {
   id: cardId('A-018'),
   name: 'Closer',
   cost: cost(1),
-  abilities: { triggered: [{ condition: { kind: 'endOfTurn' }, effect: DRAW_ONE }] },
+  abilities: { triggered: [{ condition: { event: 'endOfTurn', subject: 'you' }, effect: DRAW_ONE }] },
 });
 
 /** "At the start of your Beginning Phase, draw 1" (315.2.a). */
@@ -108,7 +114,90 @@ const OPENER = makeUnit(2, ['fury'], {
   id: cardId('A-019'),
   name: 'Opener',
   cost: cost(1),
-  abilities: { triggered: [{ condition: { kind: 'beginningPhase' }, effect: DRAW_ONE }] },
+  abilities: { triggered: [{ condition: { event: 'beginningPhase', subject: 'you' }, effect: DRAW_ONE }] },
+});
+
+/** "When you play a spell, draw 1" — an event plus a card-type filter. */
+const SPELLWATCHER = makeUnit(2, ['fury'], {
+  id: cardId('A-030'),
+  name: 'Spellwatcher',
+  cost: cost(1),
+  abilities: {
+    triggered: [
+      { condition: { event: 'played', subject: 'you', filter: { cardType: 'spell' } }, effect: DRAW_ONE },
+    ],
+  },
+});
+
+/** "When you play another unit, draw 1" — the same event, excluding itself. */
+const RECRUITER = makeUnit(2, ['fury'], {
+  id: cardId('A-031'),
+  name: 'Recruiter',
+  cost: cost(1),
+  abilities: {
+    triggered: [
+      {
+        condition: {
+          event: 'played',
+          subject: 'you',
+          filter: { cardType: 'unit', excludeSelf: true },
+        },
+        effect: DRAW_ONE,
+      },
+    ],
+  },
+});
+
+/** "When a friendly unit dies, draw 1" — the same event as a Deathknell. */
+const MOURNER = makeUnit(2, ['fury'], {
+  id: cardId('A-032'),
+  name: 'Mourner',
+  cost: cost(1),
+  abilities: { triggered: [{ condition: { event: 'dies', subject: 'friendly' }, effect: DRAW_ONE }] },
+});
+
+/** "When one or more enemy units die, draw 1". */
+const VULTURE = makeUnit(2, ['fury'], {
+  id: cardId('A-033'),
+  name: 'Vulture',
+  cost: cost(1),
+  abilities: { triggered: [{ condition: { event: 'dies', subject: 'enemy' }, effect: DRAW_ONE }] },
+});
+
+/** "When you play your second card in a turn, draw 1". */
+const SECOND_WIND = makeUnit(2, ['fury'], {
+  id: cardId('A-034'),
+  name: 'Second Wind',
+  cost: cost(1),
+  abilities: {
+    triggered: [
+      { condition: { event: 'played', subject: 'you', filter: { ordinal: 2 } }, effect: DRAW_ONE },
+    ],
+  },
+});
+
+/** "LEGION - When you play me, draw 1" — a Dependent Keyword (812). */
+const LEGIONNAIRE = makeUnit(2, ['fury'], {
+  id: cardId('A-035'),
+  name: 'Legionnaire',
+  cost: cost(1),
+  abilities: {
+    triggered: [
+      {
+        condition: { event: 'played', subject: 'self' },
+        dependsOn: { kind: 'legion' },
+        effect: DRAW_ONE,
+      },
+    ],
+  },
+});
+
+/** A cheap Spell, so a card-type filter has something to see. */
+const CANTRIP = makeSpell(['fury'], {
+  id: cardId('A-036'),
+  name: 'Cantrip',
+  cost: cost(1),
+  timing: 'action',
 });
 
 /** "Units you play cost [1] less" — a Passive cost modifier (356.4, 363). */
@@ -161,6 +250,13 @@ const REGISTRY = CardRegistry.from([
   DISCOUNTER,
   TAXMAN,
   SNIPER,
+  SPELLWATCHER,
+  RECRUITER,
+  MOURNER,
+  VULTURE,
+  SECOND_WIND,
+  LEGIONNAIRE,
+  CANTRIP,
   RUNE,
   ...BATTLEFIELDS,
 ] as CardDefinition[]);
@@ -466,7 +562,9 @@ describe('per-turn limits (rule 383.3.e)', () => {
     expect(played.triggersUsed[`${cardA}:0`]).toBe(1);
 
     // The same source cannot trigger again this turn.
-    expect(triggersFor(played, { kind: 'played' }, { sources: [cardA] })).toEqual([]);
+    expect(
+      triggersFor(played, { event: 'played', actor: played.activePlayer, objects: [cardA] }),
+    ).toEqual([]);
   });
 
   it('clears the counters at the end of the turn', () => {
@@ -483,7 +581,9 @@ describe('per-turn limits (rule 383.3.e)', () => {
 
   it('leaves an unlimited ability alone', () => {
     const [state, card] = withBoardCard(inMainPhase('unlimited'), GREETER.id);
-    expect(triggersFor(state, { kind: 'played' }, { sources: [card] })).toHaveLength(1);
+    expect(
+      triggersFor(state, { event: 'played', actor: state.activePlayer, objects: [card] }),
+    ).toHaveLength(1);
     expect(card).toBeGreaterThanOrEqual(0);
   });
 });
@@ -496,7 +596,11 @@ describe('death triggers', () => {
     const [placed, unit] = withBoardCard(state, DEATHKNELL.id);
     state = moveEntity(placed, unit, battlefieldLocation(0));
 
-    const triggers = triggersFor(state, { kind: 'dies' }, { sources: [unit] });
+    const triggers = triggersFor(
+      state,
+      { event: 'dies', actor: state.activePlayer, objects: [unit] },
+      { extraSources: [unit] },
+    );
     expect(triggers).toHaveLength(1);
     expect(triggers[0]?.ability).toEqual({ kind: 'triggered', index: 0 });
   });
@@ -505,7 +609,13 @@ describe('death triggers', () => {
     let state = inMainPhase('nodeath', 3);
     const [placed, unit] = withBoardCard(state, PLAIN.id);
     state = withEntity(placed, unit, (current) => ({ ...current, damage: 99 }));
-    expect(triggersFor(state, { kind: 'dies' }, { sources: [unit] })).toEqual([]);
+    expect(
+      triggersFor(
+        state,
+        { event: 'dies', actor: state.activePlayer, objects: [unit] },
+        { extraSources: [unit] },
+      ),
+    ).toEqual([]);
   });
 });
 
@@ -520,7 +630,11 @@ describe('trigger ordering (rule 383.3.d.1)', () => {
     const [withTheirs, theirs] = withBoardCard(state, GREETER.id, opponent);
     const [both, mine] = withBoardCard(withTheirs, GREETER.id, player);
 
-    const triggers = triggersFor(both, { kind: 'played' });
+    const triggers = triggersFor(both, {
+      event: 'played',
+      actor: player,
+      objects: [mine, theirs],
+    });
     expect(triggers.map((trigger) => trigger.source)).toEqual([mine, theirs]);
     expect(triggers.map((trigger) => trigger.controller)).toEqual([player, opponent]);
   });
@@ -532,10 +646,13 @@ describe('trigger ordering (rule 383.3.d.1)', () => {
     const [one, first] = withBoardCard(state, GREETER.id);
     const [two, second] = withBoardCard(one, GREETER.id);
 
-    expect(triggersFor(two, { kind: 'played' }).map((trigger) => trigger.source)).toEqual([
-      first,
-      second,
-    ]);
+    expect(
+      triggersFor(two, {
+        event: 'played',
+        actor: two.activePlayer,
+        objects: [first, second],
+      }).map((trigger) => trigger.source),
+    ).toEqual([first, second]);
   });
 });
 
@@ -743,6 +860,219 @@ describe('the interruptible phase machine', () => {
       next = reduce(next, { type: 'resolvePhase' }).state;
       expect(next.chain).toEqual([]);
       expect(next.phaseStep).toBe(0);
+    }
+  });
+});
+
+describe('trigger subjects (rule 383.1)', () => {
+  it('separates "when I die" from "when a friendly unit dies" on one event', () => {
+    // The same death reaches both, and each decides for itself. The old shape
+    // could not express this: it looked triggers up by condition against the
+    // dying Unit alone, so a bystander never saw the death at all.
+    const state = inMainPhase('subjects');
+    const [withKnell, dying] = withBoardCard(state, DEATHKNELL.id);
+    const [both, mourner] = withBoardCard(withKnell, MOURNER.id);
+
+    const triggers = triggersFor(
+      both,
+      { event: 'dies', actor: both.activePlayer, objects: [dying] },
+      { extraSources: [dying] },
+    );
+
+    expect(triggers.map((trigger) => trigger.source).sort()).toEqual([dying, mourner].sort());
+  });
+
+  it('reads friendly and enemy from the object`s controller, not the actor`s', () => {
+    // A Unit you control can die to an opponent's Spell and still be friendly.
+    const state = inMainPhase('sides');
+    const opponent = playerId((state.activePlayer + 1) % state.players.length);
+    const [mine, dying] = withBoardCard(state, PLAIN.id);
+    const [withMourner, mourner] = withBoardCard(mine, MOURNER.id);
+    const [board, vulture] = withBoardCard(withMourner, VULTURE.id, opponent);
+
+    // The opponent kills it, so the actor is the opponent and the object is mine.
+    const triggers = triggersFor(
+      board,
+      { event: 'dies', actor: opponent, objects: [dying] },
+      { extraSources: [dying] },
+    );
+    const sources = triggers.map((trigger) => trigger.source);
+
+    expect(sources).toContain(mourner);
+    expect(sources).toContain(vulture);
+  });
+
+  it('does not fire a friendly watcher on an enemy death', () => {
+    const state = inMainPhase('nofire');
+    const opponent = playerId((state.activePlayer + 1) % state.players.length);
+    const [board, mourner] = withBoardCard(state, MOURNER.id);
+    const [withEnemy, theirs] = withBoardCard(board, PLAIN.id, opponent);
+
+    const triggers = triggersFor(withEnemy, {
+      event: 'dies',
+      actor: opponent,
+      objects: [theirs],
+    });
+
+    expect(triggers.map((trigger) => trigger.source)).not.toContain(mourner);
+  });
+});
+
+describe('trigger filters (rule 383.1)', () => {
+  it('fires a card-type watcher on a Spell and not on a Unit', () => {
+    let state = inMainPhase('filter', 5);
+    const [withWatcher] = withBoardCard(state, SPELLWATCHER.id);
+    const [withSpell, spell] = withHandCard(withWatcher, CANTRIP.id);
+    state = withSpell;
+    const before = getPlayer(state, state.activePlayer).zones.hand.length;
+
+    const after = resolveChain(reduce(state, { type: 'playCard', card: spell }).state);
+
+    // The Spell left the hand and the trigger put a card back into it.
+    expect(getPlayer(after, after.activePlayer).zones.hand.length).toBe(before);
+  });
+
+  it('does not fire a Spell watcher when a Unit is played', () => {
+    let state = inMainPhase('filter-unit', 5);
+    const [withWatcher] = withBoardCard(state, SPELLWATCHER.id);
+    const [withUnit, unit] = withHandCard(withWatcher, PLAIN.id);
+    state = withUnit;
+    const before = getPlayer(state, state.activePlayer).zones.hand.length;
+
+    const after = resolveChain(reduce(state, { type: 'playCard', card: unit }).state);
+
+    expect(getPlayer(after, after.activePlayer).zones.hand.length).toBe(before - 1);
+  });
+
+  it('excludes the source itself for "another" (383.1)', () => {
+    const state = inMainPhase('another');
+    const [board, recruiter] = withBoardCard(state, RECRUITER.id);
+
+    // Playing the Recruiter itself must not trigger it.
+    expect(
+      triggersFor(board, {
+        event: 'played',
+        actor: board.activePlayer,
+        objects: [recruiter],
+      }),
+    ).toEqual([]);
+
+    const [withOther, other] = withBoardCard(board, PLAIN.id);
+    expect(
+      triggersFor(withOther, {
+        event: 'played',
+        actor: withOther.activePlayer,
+        objects: [other],
+      }).map((trigger) => trigger.source),
+    ).toEqual([recruiter]);
+  });
+
+  it('matches an ordinal against the occurrence, not a per-turn cap', () => {
+    const state = inMainPhase('ordinal');
+    const [board] = withBoardCard(state, SECOND_WIND.id);
+    const [withCard, card] = withBoardCard(board, PLAIN.id);
+
+    const at = (ordinal: number) =>
+      triggersFor(withCard, {
+        event: 'played',
+        actor: withCard.activePlayer,
+        objects: [card],
+        ordinal,
+      });
+
+    expect(at(1)).toEqual([]);
+    expect(at(2)).toHaveLength(1);
+    expect(at(3)).toEqual([]);
+  });
+
+  it('reads "here" as the source`s own Location (355.9)', () => {
+    const state = inMainPhase('here');
+    const [board, watcher] = withBoardCard(state, PLAIN.id);
+    // A Conquer somewhere the source is not must not reach a `here` trigger.
+    const at0 = moveEntity(board, watcher, battlefieldLocation(0));
+
+    const matches = (battlefield: number) =>
+      triggersFor(
+        {
+          ...at0,
+          definitions: {
+            ...at0.definitions,
+            [PLAIN.id]: {
+              ...PLAIN,
+              abilities: {
+                triggered: [
+                  {
+                    condition: { event: 'conquer', subject: 'you', filter: { here: true } },
+                    effect: DRAW_ONE,
+                  },
+                ],
+              },
+            },
+          },
+        },
+        { event: 'conquer', actor: at0.activePlayer, battlefield },
+      ).length;
+
+    expect(matches(0)).toBe(1);
+    expect(matches(1)).toBe(0);
+  });
+});
+
+describe('Dependent Keywords (rules 801.1, 812)', () => {
+  it('is unmet until a *different* card has been Finalized this turn (812.1.c)', () => {
+    const state = inMainPhase('legion');
+    const player = state.activePlayer;
+    const [board, source] = withBoardCard(state, LEGIONNAIRE.id);
+
+    expect(dependencyMet(board, source, player, { kind: 'legion' })).toBe(false);
+
+    // The card's own Finalization does not satisfy its own Legion — which is
+    // exactly why `playedThisTurn` holds identities rather than a count.
+    const itself = withPlayer(board, player, (seat) => ({ ...seat, playedThisTurn: [source] }));
+    expect(dependencyMet(itself, source, player, { kind: 'legion' })).toBe(false);
+
+    const other = withPlayer(board, player, (seat) => ({
+      ...seat,
+      playedThisTurn: [(source + 1) as EntityId, source],
+    }));
+    expect(dependencyMet(other, source, player, { kind: 'legion' })).toBe(true);
+  });
+
+  it('keeps a gated Play Effect off the Chain until Legion is satisfied', () => {
+    // Measured against the Main Deck rather than the hand: playing a card moves
+    // it out of the hand whether or not anything triggers, but only the draw
+    // touches the deck. So the deck is the signal with no arithmetic in it.
+    let state = inMainPhase('legion-play', 6);
+    const [first, legionnaire] = withHandCard(state, LEGIONNAIRE.id);
+    state = first;
+    const player = state.activePlayer;
+    const deckBefore = getPlayer(state, player).zones.mainDeck.length;
+
+    // Played as the turn's first card: the ability is not Active, so no draw.
+    const alone = resolveChain(reduce(state, { type: 'playCard', card: legionnaire }).state);
+    expect(getPlayer(alone, player).zones.mainDeck.length).toBe(deckBefore);
+
+    // Played second, after any other card: the ability is Active.
+    const [withBoth, plain] = withHandCard(state, PLAIN.id);
+    let after = resolveChain(reduce(withBoth, { type: 'playCard', card: plain }).state);
+    after = resolveChain(reduce(after, { type: 'playCard', card: legionnaire }).state);
+
+    expect(getPlayer(after, player).zones.mainDeck.length).toBe(deckBefore - 1);
+  });
+
+  it('forgets what was played once the turn ends (812.1.c)', () => {
+    let state = inMainPhase('legion-turn', 5);
+    const [withCard, card] = withHandCard(state, PLAIN.id);
+    state = resolveChain(reduce(withCard, { type: 'playCard', card }).state);
+    expect(getPlayer(state, state.activePlayer).playedThisTurn).toHaveLength(1);
+
+    state = reduce(state, { type: 'endTurn' }).state;
+    while (state.phase === 'ending') {
+      state = reduce(state, { type: 'resolvePhase' }).state;
+    }
+
+    for (const seat of state.players) {
+      expect(seat.playedThisTurn).toEqual([]);
     }
   });
 });

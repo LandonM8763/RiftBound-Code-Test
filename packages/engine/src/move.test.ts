@@ -38,6 +38,12 @@ const SPELL = makeSpell(['fury'], {
   cost: cost(1),
   timing: 'reaction',
 });
+const GANKER = makeUnit(2, ['fury'], {
+  id: cardId('M-012'),
+  name: 'Ganker',
+  cost: cost(1),
+  keywords: [{ kind: 'ganking' }],
+});
 const FURY_RUNE = makeRune('fury', { id: cardId('M-100') });
 const BATTLEFIELDS = Array.from({ length: 3 }, (_, i) =>
   makeBattlefield({ id: cardId(`M-20${i}`) }),
@@ -47,6 +53,7 @@ const REGISTRY = CardRegistry.from([
   LEGEND,
   CHAMPION,
   UNIT,
+  GANKER,
   SPELL,
   FURY_RUNE,
   ...BATTLEFIELDS,
@@ -57,7 +64,12 @@ function deck(): DeckList {
     legend: LEGEND.id,
     champion: CHAMPION.id,
     // Deep enough that `withReadyUnit` can always pull another Unit out.
-    main: [...Array.from({ length: 12 }, () => UNIT.id), SPELL.id, SPELL.id],
+    main: [
+      ...Array.from({ length: 12 }, () => UNIT.id),
+      ...Array.from({ length: 4 }, () => GANKER.id),
+      SPELL.id,
+      SPELL.id,
+    ],
     runes: Array.from({ length: 8 }, () => FURY_RUNE.id),
     battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
   };
@@ -87,13 +99,13 @@ function inMainPhase(seed = 'move'): GameState {
  * exhausted Unit cannot pay the Standard Move's cost — so these tests place it
  * directly rather than spending two turns getting there.
  */
-function withReadyUnit(state: GameState): [GameState, EntityId] {
+function withReadyUnit(state: GameState, of = UNIT): [GameState, EntityId] {
   const player = state.activePlayer;
   const card = state.players[player]!.zones.mainDeck.find(
-    (id) => state.entities[id]!.card === UNIT.id,
+    (id) => state.entities[id]!.card === of.id,
   );
   if (card === undefined) {
-    throw new Error('No Unit left in the deck');
+    throw new Error(`No ${of.name} left in the deck`);
   }
   return [moveEntity(state, card, playerLocation(player, 'base')), card];
 }
@@ -400,5 +412,55 @@ describe('legal action generation', () => {
     for (const action of currentLegalActions(state)) {
       expect(() => reduce(state, action)).not.toThrow();
     }
+  });
+});
+
+describe('Ganking (rules 144.4.c, 810)', () => {
+  it('is what makes a Battlefield-to-Battlefield Standard Move legal', () => {
+    // 144.4.b alone gets a Unit at a Battlefield only back to its Base.
+    const [placed, unit] = withReadyUnit(inMainPhase('gank'));
+    const state = settleShowdown(moveEntity(placed, unit, battlefieldLocation(0)), 0);
+    const player = state.activePlayer;
+
+    expect(standardMoveDestinations(state, unit)).toEqual([
+      playerLocation(playerId(player), 'base'),
+    ]);
+
+    const [withGanker, ganker] = withReadyUnit(state, GANKER);
+    const ganking = moveEntity(withGanker, ganker, battlefieldLocation(0));
+
+    expect(standardMoveDestinations(ganking, ganker)).toContainEqual(battlefieldLocation(1));
+  });
+
+  it('adds the option rather than replacing the move home (810.1.c.1)', () => {
+    const [placed, ganker] = withReadyUnit(inMainPhase('gank-adds'), GANKER);
+    const state = settleShowdown(moveEntity(placed, ganker, battlefieldLocation(0)), 0);
+    const player = state.activePlayer;
+
+    expect(standardMoveDestinations(state, ganker)).toContainEqual(
+      playerLocation(playerId(player), 'base'),
+    );
+  });
+
+  it('never offers the Battlefield the Unit is already at', () => {
+    const [placed, ganker] = withReadyUnit(inMainPhase('gank-same'), GANKER);
+    const state = settleShowdown(moveEntity(placed, ganker, battlefieldLocation(0)), 0);
+
+    expect(standardMoveDestinations(state, ganker)).not.toContainEqual(battlefieldLocation(0));
+  });
+
+  it('costs the same exhaust and nothing more (810.1.c.2)', () => {
+    const [placed, ganker] = withReadyUnit(inMainPhase('gank-cost'), GANKER);
+    const state = settleShowdown(moveEntity(placed, ganker, battlefieldLocation(0)), 0);
+
+    const after = reduce(state, {
+      type: 'moveUnits',
+      units: [ganker],
+      to: battlefieldLocation(1),
+    }).state;
+
+    expect(after.battlefields[1]?.units).toContain(ganker);
+    expect(after.entities[ganker]!.exhausted).toBe(true);
+    checkInvariants(after);
   });
 });

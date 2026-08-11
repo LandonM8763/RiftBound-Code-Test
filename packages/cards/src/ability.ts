@@ -5,9 +5,32 @@
  * what price". Both stay data for the same reason: a pool in the thousands is
  * unmaintainable as hand-written control flow.
  */
+import type { CardType } from './card.js';
 import type { Cost } from './cost.js';
 import type { CostModifier } from './cost-modifier.js';
 import type { CardEffect } from './effect.js';
+
+/**
+ * A gate on an otherwise ordinary ability — the rulebook's Dependent Keywords
+ * (801.1, 812.1, 824.1).
+ *
+ * 812.1.b: "Starting from the Keyword to the end of the clause, the entire
+ * statement is the Legion Ability", and 812.1.b.1 expands it to "If you have
+ * played another card this turn, this card gains [Text]". So a Dependent
+ * Keyword does not change *what* the ability does or *when* it fires — it
+ * decides whether the ability is there at all. That is why it sits on the
+ * ability rather than in `Keyword`.
+ */
+export type AbilityDependency =
+  /**
+   * Legion (812.1.c): satisfied while a card *other than this one* has been
+   * Finalized by the controller this turn.
+   *
+   * 812.2: one card satisfies every Legion on everything that player controls.
+   */
+  | { readonly kind: 'legion' }
+  /** Level N (824.1.c): satisfied while the controller has at least N XP. */
+  | { readonly kind: 'level'; readonly xp: number };
 
 /**
  * A repeatable effect with a cost (rule 377).
@@ -24,34 +47,117 @@ export interface ActivatedAbility {
    * itself rather than out of the Rune Pool.
    */
   readonly exhaustSelf?: boolean | undefined;
+  /** A Dependent Keyword gating this ability (801.1). */
+  readonly dependsOn?: AbilityDependency | undefined;
   readonly effect: CardEffect;
+}
+
+/**
+ * The kind of thing that happened (rule 383.2).
+ *
+ * Deliberately an *event*, not a condition: the engine raises one of these when
+ * something occurs, and each ability's `TriggerCondition` decides whether it
+ * cares. The previous shape put the whole condition in the variant, which meant
+ * every new wording on a real card was a new variant — and measuring the card
+ * corpus showed that tail is flat, so 23 more variants would have bought 23
+ * cards and no structure. An event plus a filter is what generalizes.
+ *
+ * Only events the engine actually raises appear here. A wording the engine has
+ * no event for is refused at ingest rather than approximated.
+ */
+export type TriggerEvent =
+  /** A card was Finalized and entered the Board (383.4.a, a Play Effect). */
+  | 'played'
+  /** A Unit died (428). */
+  | 'dies'
+  /** Scoring by Conquer (469.1). */
+  | 'conquer'
+  /** Scoring by Hold (469.2), in the Beginning Phase's Scoring Step. */
+  | 'hold'
+  /** A Move completed (446). Not a Recall, which is not a Move (456). */
+  | 'move'
+  /** A Combat resolved with this player as the winner (466.3). */
+  | 'winCombat'
+  /** A Buff was placed (702). */
+  | 'buffed'
+  /** One or more cards were discarded (422). */
+  | 'discard'
+  /** An Activated Ability was used (377.3). */
+  | 'activateAbility'
+  /**
+   * The controller's Beginning Phase started (315.2.a).
+   *
+   * Fires in the Beginning Step, *before* the Scoring Step, so a trigger that
+   * changes who Controls a Battlefield changes what gets Held that turn.
+   */
+  | 'beginningPhase'
+  /** The end-of-turn effects of 317.1. */
+  | 'endOfTurn';
+
+/**
+ * Whose event it has to be, relative to the ability's source.
+ *
+ * This is the half of a trigger condition that the old shape could not say at
+ * all: "When I die" and "When a friendly unit dies" watch the same event and
+ * differ only here.
+ */
+export type TriggerSubject =
+  /** The source itself: "When I die", "When I move from a battlefield". */
+  | 'self'
+  /** The source's controller did it: "When you play a spell". */
+  | 'you'
+  /** Anything that player controls: "When a friendly unit dies". */
+  | 'friendly'
+  /** Anything an opponent controls: "When one or more enemy units die". */
+  | 'enemy'
+  /** Anyone's: "When a unit dies". */
+  | 'any';
+
+/**
+ * Extra requirements on the event's object (383.1).
+ *
+ * Every field is a conjunct: all present ones must hold. An absent field
+ * imposes nothing.
+ */
+export interface TriggerFilter {
+  /** "a spell", "a gear" — the type of the card the event is about. */
+  readonly cardType?: CardType | undefined;
+  /** "another unit" — the object must not be the ability's own source. */
+  readonly excludeSelf?: boolean | undefined;
+  /** "a spell that costs 5 or more" — against the object's printed Energy. */
+  readonly minEnergy?: number | undefined;
+  /** "a card with power cost 2 runes or more" — against its printed Power pips. */
+  readonly minPower?: number | undefined;
+  /** "here" (355.9) — the event happened at the source's own Location. */
+  readonly here?: boolean | undefined;
+  /**
+   * "your second card in a turn" — the event must be the Nth of its kind for
+   * that actor this turn, counting from 1.
+   *
+   * Distinct from `TriggeredAbility.limitPerTurn`, which caps how often the
+   * ability may fire; this picks out *which* occurrence fires it.
+   */
+  readonly ordinal?: number | undefined;
 }
 
 /**
  * What makes a Triggered Ability fire (rule 383.1).
  *
- * A deliberately small set: the conditions that are both common on real cards
- * and reachable with the events the engine already emits. Rule 383.1 also
- * allows "the Nth time" conditions, which need per-turn counters keyed by
- * event instance and are not modelled — see `limitPerTurn` for the part of
- * that which is.
+ * Rule 383.1 also allows "the Nth time" conditions; `filter.ordinal` covers the
+ * "your second X" form and `limitPerTurn` covers "the first time ... each
+ * turn".
  */
-export type TriggerCondition =
-  /** Rule 383.4.a, a Play Effect: "When you play me". */
-  | { readonly kind: 'played' }
-  /** "When I die" — evaluated after the death is processed (383.2.c). */
-  | { readonly kind: 'dies' }
-  /** "When you conquer here" — Scoring by Conquer (469.1). */
-  | { readonly kind: 'conquer' }
+export interface TriggerCondition {
+  readonly event: TriggerEvent;
   /**
-   * "At the start of your Beginning Phase" (315.2.a).
-   *
-   * Fires in the Beginning Step, *before* the Scoring Step, so a trigger that
-   * changes who Controls a Battlefield changes what gets Held that turn.
+   * Required rather than defaulted. "When I die" and "When a friendly unit
+   * dies" are both plausible readings of an absent subject, and guessing
+   * between them silently is exactly the kind of wrong-but-plausible card the
+   * ingest gap model exists to prevent.
    */
-  | { readonly kind: 'beginningPhase' }
-  /** "At the end of your turn" — the end-of-turn effects of 317.1. */
-  | { readonly kind: 'endOfTurn' };
+  readonly subject: TriggerSubject;
+  readonly filter?: TriggerFilter | undefined;
+}
 
 export interface TriggeredAbility {
   readonly condition: TriggerCondition;
@@ -66,6 +172,8 @@ export interface TriggeredAbility {
    * performed this many times in a turn, the condition stops triggering it.
    */
   readonly limitPerTurn?: number | undefined;
+  /** A Dependent Keyword gating this ability (801.1) — "Legion > When ...". */
+  readonly dependsOn?: AbilityDependency | undefined;
   readonly effect: CardEffect;
 }
 
@@ -93,7 +201,5 @@ export function triggeredAbilities(abilities: CardAbilities | undefined): readon
   return abilities?.triggered ?? [];
 }
 
-/** True when the two conditions are the same trigger. */
-export function sameCondition(a: TriggerCondition, b: TriggerCondition): boolean {
-  return a.kind === b.kind;
-}
+/** Shorthand for the common "when you play me" Play Effect condition (383.4.a). */
+export const ON_PLAY: TriggerCondition = Object.freeze({ event: 'played', subject: 'self' });

@@ -5,15 +5,25 @@
  * `@riftbound/cards`, and this decides when one may be activated, which ones a
  * game event triggers, and in what order they reach the Chain. Executing the
  * effect itself is still `effects.ts` — an ability's effect is an effect.
+ *
+ * Triggers are **event-driven**: the reducer raises a `TriggerEventInstance`
+ * describing what happened, and every Triggered Ability on the Board is asked
+ * whether it cares. The reverse arrangement — look up abilities by a closed set
+ * of condition variants — is what the previous shape did, and it could not
+ * express "when a *friendly* unit dies" at all, because the lookup only ever
+ * consulted the dying Unit.
  */
 import {
   activatedAbilities,
+  costOf,
   triggeredAbilities,
+  type AbilityDependency,
   type AbilityRef,
   type ActivatedAbility,
   type Cost,
   type TriggerCondition,
   type TriggeredAbility,
+  type TriggerEvent,
 } from '@riftbound/cards';
 
 import { abilityCost } from './costs.js';
@@ -35,6 +45,39 @@ export interface PendingTrigger {
   readonly ability: AbilityRef;
 }
 
+/**
+ * Something that happened, which Triggered Abilities may watch for (383.2).
+ *
+ * Raised by the reducer at the point the rules say the event occurs. Rule
+ * 383.2.c evaluates conditions *after* the inciting event has been processed,
+ * so the state handed to `triggersFor` is the state after it.
+ */
+export interface TriggerEventInstance {
+  readonly event: TriggerEvent;
+  /** The player whose event it is: who played the card, whose turn ended. */
+  readonly actor: PlayerId;
+  /**
+   * The Game Objects the event is about. Often one; sometimes none.
+   *
+   * A list rather than a single id because some events genuinely are about
+   * several things at once: a Combat is won by every surviving Unit on the
+   * winning side (466.3), and "When I win a combat" has to match each of them
+   * from a single event. Raising one event per Unit instead would fire a
+   * "when *you* win a combat" trigger once per survivor.
+   *
+   * Empty for events that are about no object at all — a phase starting, a
+   * discard of cards that are no longer anywhere interesting.
+   */
+  readonly objects?: readonly EntityId[] | undefined;
+  /** Where it happened, for `here` filters and Battlefield-scoped events. */
+  readonly battlefield?: number | undefined;
+  /**
+   * Which occurrence of this event it is for `actor` this turn, counting from
+   * 1 — "your second card in a turn".
+   */
+  readonly ordinal?: number | undefined;
+}
+
 /** Resolve a Chain item's ability back to its definition. */
 export function abilityFor(
   state: GameState,
@@ -48,14 +91,43 @@ export function abilityFor(
 }
 
 /**
+ * Is a Dependent Keyword's condition currently met (801.1, 812, 824)?
+ *
+ * An unmet dependency makes the ability *absent*, not merely unusable: 812.1.c
+ * says the Dependent Ability is Active only while the condition holds, so a
+ * Legion trigger whose condition fails never goes on the Chain in the first
+ * place.
+ */
+export function dependencyMet(
+  state: GameState,
+  source: EntityId,
+  controller: PlayerId,
+  dependency: AbilityDependency | undefined,
+): boolean {
+  if (dependency === undefined) {
+    return true;
+  }
+  const seat = getPlayer(state, controller);
+  if (dependency.kind === 'legion') {
+    // 812.1.c: "a card different than the one with the Legion ability has been
+    // Finalized by you on the same turn". The card carrying Legion is itself in
+    // this list when its own Play Effect is being checked, which is exactly why
+    // this compares identities rather than counting.
+    return seat.playedThisTurn.some((played) => played !== source);
+  }
+  return seat.xp >= dependency.xp;
+}
+
+/**
  * Every Activated Ability `player` may use right now (rules 376-381).
  *
- * Three gates, all from the rules rather than convenience:
+ * Four gates, all from the rules rather than convenience:
  * - 381: the controller's own turn, and an Open State only.
  * - 380: the source is on the Board.
  * - 377: the cost is payable, including exhausting the source when that is
  *   part of it (414). The cost is the *Total* Cost (403.2-403.3), so a modifier
  *   that names abilities has already been applied.
+ * - 801.1: a Dependent Keyword's condition holds, or the ability is not there.
  */
 export function activatableAbilities(
   state: GameState,
@@ -82,6 +154,9 @@ export function activatableAbilities(
       if (ability.exhaustSelf === true && entity.exhausted) {
         return;
       }
+      if (!dependencyMet(state, source, player, ability.dependsOn)) {
+        return;
+      }
       const cost = abilityCost(state, player, ability.cost);
       if (!canPay(getPlayer(state, player).pool, cost)) {
         return;
@@ -93,7 +168,139 @@ export function activatableAbilities(
 }
 
 /**
- * Triggered Abilities that `condition` fires, in the order they go on the Chain.
+ * Does `condition` care about `instance`, for an ability on `source`?
+ *
+ * Three checks, all of which must hold:
+ *
+ * 1. The same kind of event.
+ * 2. The requirements that are about the event as a whole — "you" as the actor,
+ *    "here" as the place, the ordinal.
+ * 3. The requirements that are about an *object*. Those are satisfied by a
+ *    single object satisfying all of them at once, not by different objects
+ *    satisfying them separately: "another friendly unit" has to be one Unit
+ *    that is both.
+ */
+export function matchesTrigger(
+  state: GameState,
+  instance: TriggerEventInstance,
+  source: EntityId,
+  controller: PlayerId,
+  condition: TriggerCondition,
+): boolean {
+  if (condition.event !== instance.event) {
+    return false;
+  }
+  if (!matchesEvent(state, instance, source, controller, condition)) {
+    return false;
+  }
+
+  const filter = condition.filter;
+  const objectSubject =
+    condition.subject === 'self' ||
+    condition.subject === 'friendly' ||
+    condition.subject === 'enemy';
+  const objectFilter =
+    filter !== undefined &&
+    (filter.excludeSelf === true ||
+      filter.cardType !== undefined ||
+      filter.minEnergy !== undefined ||
+      filter.minPower !== undefined);
+
+  if (!objectSubject && !objectFilter) {
+    return true;
+  }
+  return (instance.objects ?? []).some(
+    (object) =>
+      matchesObjectSubject(state, object, source, controller, condition.subject) &&
+      matchesObjectFilter(state, object, source, filter),
+  );
+}
+
+/** The parts of a condition that are about the event rather than its objects. */
+function matchesEvent(
+  state: GameState,
+  instance: TriggerEventInstance,
+  source: EntityId,
+  controller: PlayerId,
+  condition: TriggerCondition,
+): boolean {
+  if (condition.subject === 'you' && instance.actor !== controller) {
+    return false;
+  }
+  const filter = condition.filter;
+  if (filter === undefined) {
+    return true;
+  }
+  if (filter.ordinal !== undefined && instance.ordinal !== filter.ordinal) {
+    return false;
+  }
+  if (filter.here === true) {
+    // 355.9: "here" is the source's own Location.
+    const location = state.entities[source]?.location;
+    const at = location?.kind === 'battlefield' ? location.index : undefined;
+    if (at === undefined || at !== instance.battlefield) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function matchesObjectSubject(
+  state: GameState,
+  object: EntityId,
+  source: EntityId,
+  controller: PlayerId,
+  subject: TriggerCondition['subject'],
+): boolean {
+  if (subject === 'self') {
+    return object === source;
+  }
+  if (subject !== 'friendly' && subject !== 'enemy') {
+    return true;
+  }
+  // Judged by the *object's* controller, not the actor's: a Unit you control
+  // can die to an opponent's Spell and still be friendly.
+  const owner = state.entities[object]?.controller;
+  if (owner === undefined) {
+    return false;
+  }
+  return subject === 'friendly' ? owner === controller : owner !== controller;
+}
+
+function matchesObjectFilter(
+  state: GameState,
+  object: EntityId,
+  source: EntityId,
+  filter: TriggerCondition['filter'],
+): boolean {
+  if (filter === undefined) {
+    return true;
+  }
+  if (filter.excludeSelf === true && object === source) {
+    return false;
+  }
+  if (state.entities[object] === undefined) {
+    return false;
+  }
+  const card = entityCard(state, object);
+  if (filter.cardType !== undefined && card.type !== filter.cardType) {
+    return false;
+  }
+
+  // 356.1.c: "Base Cost" is the printed cost, which is what a card's text means
+  // by "a spell that costs 5 or more" — not what it happened to cost to play.
+  const cost = costOf(card);
+  if (filter.minEnergy !== undefined && (cost?.energy ?? 0) < filter.minEnergy) {
+    return false;
+  }
+  if (filter.minPower !== undefined && (cost?.power.length ?? 0) < filter.minPower) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Triggered Abilities that `instance` fires, in the order they go on the Chain.
  *
  * Rule 383.3.d has each player order their own simultaneous triggers, starting
  * with the Turn Player and proceeding in turn order. The per-player *ordering
@@ -105,54 +312,58 @@ export function activatableAbilities(
  */
 export function triggersFor(
   state: GameState,
-  condition: TriggerCondition,
+  instance: TriggerEventInstance,
   options: {
-    /** Restrict to sources controlled by this player, e.g. an end-of-*your*-turn trigger. */
-    readonly controller?: PlayerId | undefined;
-    /** Restrict to these sources, for a condition about specific entities. */
-    readonly sources?: readonly EntityId[] | undefined;
-    /** Battlefield index, for a Battlefield-scoped condition such as Conquer. */
-    readonly battlefield?: number | undefined;
+    /**
+     * Sources to consider *in addition* to everything on the Board.
+     *
+     * A Unit that just died is no longer on the Board, so its own "When I die"
+     * would never be found. Naming it here keeps it a candidate without making
+     * it the only one — which is what lets another Unit's "when a friendly unit
+     * dies" see the same death.
+     */
+    readonly extraSources?: readonly EntityId[] | undefined;
   } = {},
 ): readonly PendingTrigger[] {
-  // Candidates as (source, controller) pairs, gathered once. Gathering them
-  // per player instead would emit an explicitly-passed source once per seat.
+  // Candidates as (source, controller) pairs, gathered once and deduplicated:
+  // an extra source may also still be on the Board.
   const candidates: { source: EntityId; controller: PlayerId }[] = [];
+  const seen = new Set<EntityId>();
 
-  if (options.sources !== undefined) {
-    for (const source of options.sources) {
-      const entity = state.entities[source];
-      if (entity === undefined) {
-        continue;
-      }
-      candidates.push({ source, controller: options.controller ?? entity.controller });
+  const add = (source: EntityId): void => {
+    if (seen.has(source)) {
+      return;
     }
-  } else {
-    for (const seat of state.players) {
-      if (options.controller !== undefined && seat.id !== options.controller) {
-        continue;
-      }
-      for (const source of boardEntities(state, seat.id)) {
-        candidates.push({ source, controller: seat.id });
-      }
+    const entity = state.entities[source];
+    if (entity === undefined) {
+      return;
     }
-    for (const source of battlefieldCards(state, options.battlefield)) {
-      candidates.push({ source, controller: getEntity(state, source).controller });
+    seen.add(source);
+    candidates.push({ source, controller: entity.controller });
+  };
+
+  for (const seat of state.players) {
+    for (const source of boardEntities(state, seat.id)) {
+      add(source);
     }
+  }
+  for (const source of options.extraSources ?? []) {
+    add(source);
   }
 
   // 383.3.d.1: each player orders their own, starting with the Turn Player and
   // proceeding in turn order. Array.prototype.sort is stable, so the fixed
-  // within-player order below survives this.
+  // within-player order above survives this.
   const order = turnOrder(state);
-  candidates.sort(
-    (a, b) => order.indexOf(a.controller) - order.indexOf(b.controller),
-  );
+  candidates.sort((a, b) => order.indexOf(a.controller) - order.indexOf(b.controller));
 
   const pending: PendingTrigger[] = [];
   for (const { source, controller } of candidates) {
     triggeredAbilities(entityCard(state, source).abilities).forEach((ability, index) => {
-      if (ability.condition.kind !== condition.kind) {
+      if (!matchesTrigger(state, instance, source, controller, ability.condition)) {
+        return;
+      }
+      if (!dependencyMet(state, source, controller, ability.dependsOn)) {
         return;
       }
       if (!withinTurnLimit(state, source, index, ability)) {
@@ -204,15 +415,6 @@ function boardEntities(state: GameState, player: PlayerId): EntityId[] {
     }
   }
   return found;
-}
-
-/**
- * Battlefield cards are not entities, so a Battlefield's own Triggered Ability
- * has no entity to hang off. Returns nothing today; the hook is here so the
- * one place that would need it is obvious when Battlefield abilities land.
- */
-function battlefieldCards(_state: GameState, _battlefield: number | undefined): EntityId[] {
-  return [];
 }
 
 /** Turn order starting from the Turn Player (rule 383.3.d.1). */

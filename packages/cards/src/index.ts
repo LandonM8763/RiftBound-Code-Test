@@ -6,14 +6,21 @@ export type { Cost } from './cost.js';
 
 export { cardId, costOf, effectOf, isChampionUnit, isPlayable, isSignature } from './card.js';
 
-export { activatedAbilities, sameCondition, triggeredAbilities } from './ability.js';
+export { ON_PLAY, activatedAbilities, triggeredAbilities } from './ability.js';
 export type {
+  AbilityDependency,
   AbilityRef,
   ActivatedAbility,
   CardAbilities,
   TriggerCondition,
+  TriggerEvent,
+  TriggerFilter,
+  TriggerSubject,
   TriggeredAbility,
 } from './ability.js';
+
+export { UNMODELLED_KEYWORDS, hasKeyword, keywordValue } from './keyword.js';
+export type { Keyword, KeywordKind, ValuedKeywordKind } from './keyword.js';
 
 export { layerOf, modifierApplies } from './cost-modifier.js';
 export type { CostChange, CostFilter, CostModifier, CostTarget } from './cost-modifier.js';

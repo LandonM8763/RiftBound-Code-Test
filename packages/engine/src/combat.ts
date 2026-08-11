@@ -15,34 +15,82 @@
  *    Defender is still present (466.1.a.2).
  * 5. The result is decided by who has Units remaining, not by Might (466.3).
  */
+import { hasKeyword, keywordValue } from '@riftbound/cards';
+
 import type { EntityId, GameState, PlayerId } from './state.js';
 import { entityCard, getEntity } from './state.js';
 
-/** Might of a Unit, floored at 0 for summing purposes (rule 143.2.b). */
-export function mightOf(state: GameState, unit: EntityId): number {
+/**
+ * The designation a Unit has gained in a Combat (rule 464.2.c).
+ *
+ * Assault and Shield are conditioned on it — 807.1.d and 814.1.d both say the
+ * keyword applies while the Unit *has the designation*, not while a Combat is
+ * merely happening. So it is a parameter rather than something read off the
+ * state: a Unit's Might outside Combat is not its Might inside one, and the
+ * view, the heuristic and the invariant checker all want the plain number.
+ */
+export type CombatRole = 'attacker' | 'defender';
+
+/**
+ * Might of a Unit, floored at 0 for summing purposes (rule 143.2.b).
+ *
+ * `role` adds the Combat-only keywords. Might is both the damage a Unit deals
+ * and the damage it survives, so Assault and Shield have to reach every use of
+ * this — summing, lethal thresholds and the death check alike. Passing the role
+ * through rather than defaulting it is what stops one of those being missed.
+ */
+export function mightOf(state: GameState, unit: EntityId, role?: CombatRole): number {
   const card = entityCard(state, unit);
   if (card.type !== 'unit') {
     return 0;
   }
   const entity = getEntity(state, unit);
+  // 807.1.c: "While I am an attacker, I have +X Might." 814.1.c is the mirror
+  // for a defender. 807.2/814.2: multiple instances sum, which keywordValue does.
+  const designation =
+    role === 'attacker'
+      ? keywordValue(card.keywords, 'assault')
+      : role === 'defender'
+        ? keywordValue(card.keywords, 'shield')
+        : 0;
   // Rule 703: each Buff contributes +1 Might. 143.2.b: a Might below 0 counts
   // as 0 when summing for damage.
-  return Math.max(0, card.might + entity.mightBonus + entity.buffs);
+  return Math.max(0, card.might + entity.mightBonus + entity.buffs + designation);
 }
 
-export function sumMight(state: GameState, units: readonly EntityId[]): number {
-  return units.reduce((total, unit) => total + mightOf(state, unit), 0);
+export function sumMight(state: GameState, units: readonly EntityId[], role?: CombatRole): number {
+  return units.reduce((total, unit) => total + mightOf(state, unit, role), 0);
 }
 
 /** Damage still needed to kill a Unit (rules 142.4.b, 143.2.a). */
-export function lethalRemaining(state: GameState, unit: EntityId): number {
-  return Math.max(1, mightOf(state, unit) - getEntity(state, unit).damage);
+export function lethalRemaining(state: GameState, unit: EntityId, role?: CombatRole): number {
+  return Math.max(1, mightOf(state, unit, role) - getEntity(state, unit).damage);
 }
 
 /** True once marked damage equals or exceeds Might, and is non-zero. */
-export function hasLethalDamage(state: GameState, unit: EntityId): boolean {
+export function hasLethalDamage(state: GameState, unit: EntityId, role?: CombatRole): boolean {
   const damage = getEntity(state, unit).damage;
-  return damage > 0 && damage >= mightOf(state, unit);
+  return damage > 0 && damage >= mightOf(state, unit, role);
+}
+
+/**
+ * The order damage must be assigned in, by rule (815, 826).
+ *
+ * Tank (815.1.b) must be assigned lethal damage *before* any same-controller
+ * Unit without it; Backline (826.3) must be assigned it *after*. They are exact
+ * mirrors, so one rank function states both: everything Tank outranks,
+ * everything Backline is outranked by.
+ *
+ * A Unit with both is a contradiction the rulebook does not address. Ranking it
+ * with the Tanks follows 815's "before any other unit ... that does not have
+ * Tank" literally, and is noted rather than hidden.
+ */
+function assignmentRank(state: GameState, unit: EntityId): number {
+  const keywords = entityCard(state, unit).keywords;
+  if (hasKeyword(keywords, 'tank')) {
+    return 0;
+  }
+  return hasKeyword(keywords, 'backline') ? 2 : 1;
 }
 
 /**
@@ -53,24 +101,35 @@ export function hasLethalDamage(state: GameState, unit: EntityId): boolean {
  * 465.2.c.4: a Unit cannot be assigned more than the minimum lethal amount
  * while other Units remain to be assigned to.
  *
- * SIMPLIFICATION: the *order* of assignment is the assigning player's choice,
- * and a real one — it decides which enemy Units die. This walks the targets in
- * a fixed order instead. Every constraint above is still obeyed, so the totals
- * and the number of deaths are right, but which Units die is not yet a
- * decision. Making it one needs a sub-action protocol during the Damage Step;
- * that is the seam.
+ * Tank (815) and Backline (826) constrain that order and *are* honoured: they
+ * are rules rather than preferences, so they sort the targets before the walk.
+ *
+ * SIMPLIFICATION: within a rank the *order* of assignment is still the
+ * assigning player's choice, and a real one — it decides which enemy Units die.
+ * This walks the targets in a fixed order instead. Every constraint above is
+ * obeyed, so the totals and the number of deaths are right, but which Units die
+ * is not yet a decision. Making it one needs a sub-action protocol during the
+ * Damage Step; that is the seam.
  */
 export function assignDamage(
   state: GameState,
   total: number,
   targets: readonly EntityId[],
+  role?: CombatRole,
 ): Map<EntityId, number> {
   const assignment = new Map<EntityId, number>();
   let remaining = total;
 
-  for (let i = 0; i < targets.length && remaining > 0; i += 1) {
-    const unit = targets[i] as EntityId;
-    const needed = lethalRemaining(state, unit);
+  // 815.1.c / 826.4: the keywords alter which assignments are *valid*, not
+  // merely which are wise. Array.prototype.sort is stable, so the caller's
+  // order survives within a rank.
+  const ordered = targets
+    .slice()
+    .sort((a, b) => assignmentRank(state, a) - assignmentRank(state, b));
+
+  for (let i = 0; i < ordered.length && remaining > 0; i += 1) {
+    const unit = ordered[i] as EntityId;
+    const needed = lethalRemaining(state, unit, role);
 
     if (remaining >= needed) {
       assignment.set(unit, needed);

@@ -6,6 +6,8 @@
  * (446.3). What it *does* do is apply Contested status, which is the trigger
  * for Showdowns and Combat (190.3.c).
  */
+import { hasKeyword } from '@riftbound/cards';
+
 import type { BattlefieldState, EntityId, GameState, Location, PlayerId } from './state.js';
 import {
   battlefieldLocation,
@@ -21,10 +23,31 @@ export function standardMoveDestinations(state: GameState, unit: EntityId): Loca
   const entity = getEntity(state, unit);
   const player = entity.controller;
 
+  const toBattlefields = (): Location[] => {
+    const destinations: Location[] = [];
+    state.battlefields.forEach((battlefield, index) => {
+      const from = entity.location;
+      if (from.kind === 'battlefield' && from.index === index) {
+        return;
+      }
+      if (isValidDestination(state, player, battlefield)) {
+        destinations.push(battlefieldLocation(index));
+      }
+    });
+    return destinations;
+  };
+
   if (entity.location.kind === 'battlefield') {
-    // 144.4.b. Battlefield to Battlefield needs Ganking (144.4.c), which no
-    // card has yet.
-    return [{ kind: 'player', player, zone: 'base' }];
+    // 144.4.b: back to the Base, always.
+    const home: Location = { kind: 'player', player, zone: 'base' };
+    // 144.4.c / 810.1.b: Ganking is what makes Battlefield to Battlefield a
+    // legal Standard Move. 810.1.c.1-3: it only *adds* this destination — it is
+    // not an extra Move and has no cost of its own, so the exhaust in
+    // `canStandardMove` is still the whole price.
+    if (!hasKeyword(entityCard(state, unit).keywords, 'ganking')) {
+      return [home];
+    }
+    return [home, ...toBattlefields()];
   }
 
   if (entity.location.zone !== 'base') {
@@ -32,13 +55,7 @@ export function standardMoveDestinations(state: GameState, unit: EntityId): Loca
   }
 
   // 144.4.a: Base to a Battlefield, subject to the destination being valid.
-  const destinations: Location[] = [];
-  state.battlefields.forEach((battlefield, index) => {
-    if (isValidDestination(state, player, battlefield)) {
-      destinations.push(battlefieldLocation(index));
-    }
-  });
-  return destinations;
+  return toBattlefields();
 }
 
 /**

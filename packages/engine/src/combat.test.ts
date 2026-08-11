@@ -11,7 +11,7 @@ import { CardRegistry, cardId, cost, type CardDefinition } from '@riftbound/card
 import { makeBattlefield, makeLegend, makeRune, makeUnit } from '@riftbound/cards/testing';
 import { describe, expect, it } from 'vitest';
 
-import { assignDamage, combatResult, sumMight } from './combat.js';
+import { assignDamage, combatResult, mightOf, sumMight } from './combat.js';
 import { checkInvariants } from './invariants.js';
 import { moveEntity } from './mutate.js';
 import { reduce } from './reduce.js';
@@ -31,6 +31,33 @@ const CHAMPION = makeUnit(3, ['fury'], { id: cardId('C-001'), champion: true });
 const BIG = makeUnit(5, ['fury'], { id: cardId('C-010'), name: 'Big', cost: cost(1) });
 const SMALL = makeUnit(2, ['fury'], { id: cardId('C-011'), name: 'Small', cost: cost(1) });
 const FURY_RUNE = makeRune('fury', { id: cardId('C-100') });
+
+// Keyword carriers. Assault and Shield are the same base Might as SMALL so the
+// only thing a test can be measuring is the keyword.
+const ASSAULT = makeUnit(2, ['fury'], {
+  id: cardId('C-012'),
+  name: 'Assaulter',
+  cost: cost(1),
+  keywords: [{ kind: 'assault', value: 3 }],
+});
+const SHIELDED = makeUnit(2, ['fury'], {
+  id: cardId('C-013'),
+  name: 'Shielded',
+  cost: cost(1),
+  keywords: [{ kind: 'shield', value: 3 }],
+});
+const TANK = makeUnit(2, ['fury'], {
+  id: cardId('C-014'),
+  name: 'Tanker',
+  cost: cost(1),
+  keywords: [{ kind: 'tank' }],
+});
+const BACKLINE = makeUnit(2, ['fury'], {
+  id: cardId('C-015'),
+  name: 'Backliner',
+  cost: cost(1),
+  keywords: [{ kind: 'backline' }],
+});
 const BATTLEFIELDS = Array.from({ length: 3 }, (_, i) =>
   makeBattlefield({ id: cardId(`C-20${i}`) }),
 );
@@ -40,6 +67,10 @@ const REGISTRY = CardRegistry.from([
   CHAMPION,
   BIG,
   SMALL,
+  ASSAULT,
+  SHIELDED,
+  TANK,
+  BACKLINE,
   FURY_RUNE,
   ...BATTLEFIELDS,
 ] as CardDefinition[]);
@@ -48,7 +79,14 @@ function deck(): DeckList {
   return {
     legend: LEGEND.id,
     champion: CHAMPION.id,
-    main: [...Array.from({ length: 8 }, () => BIG.id), ...Array.from({ length: 8 }, () => SMALL.id)],
+    main: [
+      ...Array.from({ length: 8 }, () => BIG.id),
+      ...Array.from({ length: 8 }, () => SMALL.id),
+      ...Array.from({ length: 2 }, () => ASSAULT.id),
+      ...Array.from({ length: 2 }, () => SHIELDED.id),
+      ...Array.from({ length: 2 }, () => TANK.id),
+      ...Array.from({ length: 2 }, () => BACKLINE.id),
+    ],
     runes: Array.from({ length: 8 }, () => FURY_RUNE.id),
     battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
   };
@@ -360,5 +398,116 @@ describe('fighting a Combat end to end', () => {
         to: battlefieldLocation(0),
       }),
     ).not.toThrow();
+  });
+});
+
+describe('Assault and Shield (rules 807, 814)', () => {
+  it('adds Might only while the Unit has the matching designation', () => {
+    const [state, unit] = place(inMainPhase('assault'), 0, ASSAULT, 0);
+
+    // 807.1.d: the keyword applies while the Unit *has* the Attacker
+    // designation, not whenever a Combat is happening — so the plain reading is
+    // still the printed Might.
+    expect(mightOf(state, unit)).toBe(2);
+    expect(mightOf(state, unit, 'attacker')).toBe(5);
+    expect(mightOf(state, unit, 'defender')).toBe(2);
+  });
+
+  it('gives Shield to the defender and nothing to the attacker (814.1.c)', () => {
+    const [state, unit] = place(inMainPhase('shield'), 0, SHIELDED, 0);
+
+    expect(mightOf(state, unit, 'defender')).toBe(5);
+    expect(mightOf(state, unit, 'attacker')).toBe(2);
+  });
+
+  it('counts in the summed Might a side assigns (465.2.a)', () => {
+    let state = inMainPhase('sum');
+    const [a, assaulter] = place(state, 0, ASSAULT, 0);
+    state = a;
+    const [b, plain] = place(state, 0, SMALL, 0);
+    state = b;
+
+    expect(sumMight(state, [assaulter, plain])).toBe(4);
+    expect(sumMight(state, [assaulter, plain], 'attacker')).toBe(7);
+  });
+
+  it('raises the damage a Unit survives, because Might is one stat', () => {
+    // Might is both the damage dealt and the damage sustained, so a Shield that
+    // only added to the damage dealt would be half a keyword.
+    const [state, unit] = place(inMainPhase('survive'), 0, SHIELDED, 0);
+
+    expect(assignDamage(state, 4, [unit]).get(unit)).toBe(2);
+    expect(assignDamage(state, 4, [unit], 'defender').get(unit)).toBe(4);
+  });
+
+  it('turns a mutual kill into a won Combat', () => {
+    // Both Units are 2 Might, so without Assault each kills the other and the
+    // result is No Result with nobody in Control (466.3). Assault 3 makes the
+    // Attacker a 5 that survives the 2 it takes, so it is the only side left.
+    const mutual = fight(poised(SMALL, SMALL, 'mutual'));
+    expect(mutual.battlefields[0]?.controller).toBeNull();
+
+    const settled = fight(poised(ASSAULT, SMALL, 'assault-kill'));
+    expect(settled.battlefields[0]?.controller).toBe(settled.activePlayer);
+    checkInvariants(settled);
+  });
+});
+
+describe('Tank and Backline (rules 815, 826)', () => {
+  it('assigns lethal damage to a Tank before anything else (815.1.b)', () => {
+    let state = inMainPhase('tank');
+    // The plain Unit is placed first, so list order alone would take it first.
+    const [a, plain] = place(state, 0, SMALL, 0);
+    state = a;
+    const [b, tank] = place(state, 0, TANK, 0);
+    state = b;
+
+    const assignment = assignDamage(state, 2, [plain, tank]);
+
+    expect(assignment.get(tank)).toBe(2);
+    expect(assignment.get(plain)).toBeUndefined();
+  });
+
+  it('assigns lethal damage to a Backline last (826.3)', () => {
+    let state = inMainPhase('backline');
+    const [a, back] = place(state, 0, BACKLINE, 0);
+    state = a;
+    const [b, plain] = place(state, 0, SMALL, 0);
+    state = b;
+
+    const assignment = assignDamage(state, 2, [back, plain]);
+
+    expect(assignment.get(plain)).toBe(2);
+    expect(assignment.get(back)).toBeUndefined();
+  });
+
+  it('still assigns lethal before moving on, within the keyword order', () => {
+    // 815.1.c.1: the keywords reorder the targets; they do not relax 465.2.c.3.
+    let state = inMainPhase('tank-lethal');
+    const [a, plain] = place(state, 0, SMALL, 0);
+    state = a;
+    const [b, tank] = place(state, 0, TANK, 0);
+    state = b;
+
+    const assignment = assignDamage(state, 4, [plain, tank]);
+
+    expect(assignment.get(tank)).toBe(2);
+    expect(assignment.get(plain)).toBe(2);
+  });
+
+  it('orders a Tank ahead of a Backline', () => {
+    let state = inMainPhase('both');
+    const [a, back] = place(state, 0, BACKLINE, 0);
+    state = a;
+    const [b, plain] = place(state, 0, SMALL, 0);
+    state = b;
+    const [c, tank] = place(state, 0, TANK, 0);
+    state = c;
+
+    const assignment = assignDamage(state, 4, [back, plain, tank]);
+
+    expect(assignment.get(tank)).toBe(2);
+    expect(assignment.get(plain)).toBe(2);
+    expect(assignment.get(back)).toBeUndefined();
   });
 });

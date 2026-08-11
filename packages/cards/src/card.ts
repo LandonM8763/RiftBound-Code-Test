@@ -2,6 +2,7 @@ import type { CardAbilities } from './ability.js';
 import type { Cost } from './cost.js';
 import type { CardEffect } from './effect.js';
 import type { Domain, DomainIdentity } from './domain.js';
+import type { Keyword } from './keyword.js';
 
 /**
  * Printed card identifier, e.g. `OGN-296` (set code + collector number).
@@ -65,6 +66,16 @@ interface CardBase {
    * one as often as a Unit does.
    */
   readonly abilities?: CardAbilities | undefined;
+  /**
+   * Keywords that are rules of the engine (rules 800-828).
+   *
+   * Only the ones the engine actually honours appear — see `keyword.ts` for the
+   * three kinds a keyword can be and why the other two are not here. `tags` is
+   * not the place for these for the same reason `championTag` is not: the
+   * engine has to know *which* keyword it is holding, and picking one out of an
+   * untyped string list would be a guess.
+   */
+  readonly keywords?: readonly Keyword[] | undefined;
 }
 
 /** Occupies the Legend Zone for the whole game and never leaves it. */

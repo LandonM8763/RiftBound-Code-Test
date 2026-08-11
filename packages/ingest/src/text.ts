@@ -15,10 +15,12 @@
  */
 import {
   NO_TARGET,
+  UNMODELLED_KEYWORDS,
   type CardAbilities,
   type Domain,
   type CardEffect,
   type Effect,
+  type Keyword,
   type TargetSpec,
   type TriggerCondition,
   type TriggeredAbility,
@@ -28,6 +30,8 @@ export interface ParsedText {
   /** Rules text that runs when the card itself resolves (359.2.b, 359.3.d). */
   readonly effect?: CardEffect | undefined;
   readonly abilities?: CardAbilities | undefined;
+  /** Keywords the engine models (rules 800-828). */
+  readonly keywords?: readonly Keyword[] | undefined;
   /** Clauses the grammar does not cover. Empty means the card is understood. */
   readonly unparsed: readonly string[];
 }
@@ -70,14 +74,47 @@ function normalize(line: string): string {
 }
 
 /**
- * Keywords with their own rules (700s), none of which the engine models.
+ * Keywords the engine refuses (rules 800-828), with `UNMODELLED_KEYWORDS`
+ * holding the reason for each.
  *
- * Listed so a card carrying one is *recognised* as beyond the grammar rather
- * than silently parsed as though the keyword were absent — a Tank that forgets
- * it is a Tank is a wrong card, not a simpler one.
+ * A card carrying one is *recognised* as beyond the grammar rather than
+ * silently parsed as though the keyword were absent — a Tank that forgets it is
+ * a Tank is a wrong card, not a simpler one, and rule 002 makes the card's text
+ * supersede the rules.
+ *
+ * `mighty` is here rather than in `UNMODELLED_KEYWORDS` because it is a *state*
+ * cards refer to ("when one of your units becomes MIGHTY") rather than a
+ * keyword ability in the glossary.
  */
-const KEYWORDS =
-  /\b(tank|shield|assault|accelerate|deflect|hidden|ganking|weaponmaster|legion|temporary|mighty|equip|repeat|vision|deathknell)\b/i;
+const REFUSED_KEYWORDS = new RegExp(
+  `\\b(${[...Object.keys(UNMODELLED_KEYWORDS), 'mighty'].join('|')})\\b`,
+  'i',
+);
+
+/**
+ * Keywords that are rules of the engine, matched against a whole line.
+ *
+ * Anchored deliberately. "Give a unit ASSAULT 3 this turn" *grants* a keyword,
+ * which is a static ability the effect model cannot express — so it must fall
+ * through and be refused, not be mistaken for the Unit having Assault itself.
+ */
+const MODELLED_KEYWORDS: readonly {
+  readonly pattern: RegExp;
+  readonly build: (match: RegExpMatchArray) => Keyword;
+}[] = [
+  // 807.1.b.3 / 814.1.b: an omitted value is 1.
+  {
+    pattern: /^assault(?:\s+(\d+))?$/i,
+    build: (m) => ({ kind: 'assault', value: count(m[1] ?? '1') ?? 1 }),
+  },
+  {
+    pattern: /^shield(?:\s+(\d+))?$/i,
+    build: (m) => ({ kind: 'shield', value: count(m[1] ?? '1') ?? 1 }),
+  },
+  { pattern: /^tank$/i, build: () => ({ kind: 'tank' }) },
+  { pattern: /^backline$/i, build: () => ({ kind: 'backline' }) },
+  { pattern: /^ganking$/i, build: () => ({ kind: 'ganking' }) },
+];
 
 /** A clause that consumes the whole line, mapping to zero or more effects. */
 interface ClauseRule {
@@ -250,16 +287,189 @@ const CLAUSES: readonly ClauseRule[] = [
   },
 ];
 
-/** Trigger conditions the grammar recognises, in the wording the cards use. */
-const CONDITIONS: readonly { readonly pattern: RegExp; readonly condition: TriggerCondition }[] = [
-  { pattern: /^when you play me$/i, condition: { kind: 'played' } },
-  { pattern: /^when you play this$/i, condition: { kind: 'played' } },
-  { pattern: /^when i die$/i, condition: { kind: 'dies' } },
-  { pattern: /^when i'm killed$/i, condition: { kind: 'dies' } },
-  { pattern: /^when you conquer(?: here)?$/i, condition: { kind: 'conquer' } },
-  { pattern: /^at the end of your turn$/i, condition: { kind: 'endOfTurn' } },
-  { pattern: /^at the start of your beginning phase$/i, condition: { kind: 'beginningPhase' } },
+/**
+ * Conditions that are about a phase and so do not start with "when".
+ */
+const PHASE_CONDITIONS: readonly {
+  readonly pattern: RegExp;
+  readonly condition: TriggerCondition;
+}[] = [
+  { pattern: /^at the end of your turn$/i, condition: { event: 'endOfTurn', subject: 'you' } },
+  {
+    pattern: /^at the start of your beginning phase$/i,
+    condition: { event: 'beginningPhase', subject: 'you' },
+  },
 ];
+
+/**
+ * The trigger grammar, matched against the phrase *after* "when"/"whenever".
+ *
+ * Written as an event plus a subject plus a filter rather than one variant per
+ * wording, because measuring the card corpus showed the wordings are flat — the
+ * most common one a narrower grammar missed appeared twice. The win is the
+ * category, so these rules are mostly about mapping English onto the three
+ * fields rather than enumerating sentences.
+ */
+const CONDITIONS: readonly {
+  readonly pattern: RegExp;
+  readonly build: (match: RegExpMatchArray) => TriggerCondition | undefined;
+}[] = [
+  // 383.4.a, a Play Effect.
+  { pattern: /^you play (?:me|this)$/i, build: () => ({ event: 'played', subject: 'self' }) },
+  { pattern: /^i'?m played$/i, build: () => ({ event: 'played', subject: 'self' }) },
+
+  // "When you play a spell", "when you play another unit", with the optional
+  // cost qualifier real cards attach.
+  {
+    pattern:
+      /^you play (a|an|another) (spell|unit|gear)(?: that costs (\d+) or more)?$/i,
+    build: (m) => {
+      const article = (m[1] ?? '').toLowerCase();
+      const minEnergy = m[3] === undefined ? undefined : count(m[3]);
+      if (m[3] !== undefined && minEnergy === undefined) {
+        return undefined;
+      }
+      return {
+        event: 'played',
+        subject: 'you',
+        filter: {
+          cardType: (m[2] ?? '').toLowerCase() as 'spell' | 'unit' | 'gear',
+          ...(article === 'another' ? { excludeSelf: true } : {}),
+          ...(minEnergy === undefined ? {} : { minEnergy }),
+        },
+      };
+    },
+  },
+  {
+    pattern: /^you play a card with power cost (\d+) runes? or more$/i,
+    build: (m) => {
+      const minPower = count(m[1] ?? '');
+      return minPower === undefined
+        ? undefined
+        : { event: 'played', subject: 'you', filter: { minPower } };
+    },
+  },
+  {
+    // "your second card in a turn" picks out *which* occurrence fires, which is
+    // `ordinal` rather than a per-turn limit.
+    pattern: /^you play your (second|third|fourth) card in a turn$/i,
+    build: (m) => {
+      const ordinal = { second: 2, third: 3, fourth: 4 }[(m[1] ?? '').toLowerCase()];
+      return ordinal === undefined
+        ? undefined
+        : { event: 'played', subject: 'you', filter: { ordinal } };
+    },
+  },
+
+  // Deaths (428). The subject is what separates these; the event is one.
+  { pattern: /^i die$/i, build: () => ({ event: 'dies', subject: 'self' }) },
+  { pattern: /^i'?m killed$/i, build: () => ({ event: 'dies', subject: 'self' }) },
+  {
+    pattern: /^(?:a|one or more) friendly units? dies?$/i,
+    build: () => ({ event: 'dies', subject: 'friendly' }),
+  },
+  {
+    pattern: /^(?:an|one or more) enemy units? dies?$/i,
+    build: () => ({ event: 'dies', subject: 'enemy' }),
+  },
+  { pattern: /^(?:a|one or more) units? dies?$/i, build: () => ({ event: 'dies', subject: 'any' }) },
+
+  // Scoring (469). "I conquer" is the Unit's own Battlefield being Conquered,
+  // which is `here` — a Conquer has no Game Object to be the subject of.
+  {
+    pattern: /^you conquer( here)?$/i,
+    build: (m) => ({
+      event: 'conquer',
+      subject: 'you',
+      ...(m[1] === undefined ? {} : { filter: { here: true } }),
+    }),
+  },
+  {
+    pattern: /^i conquer$/i,
+    build: () => ({ event: 'conquer', subject: 'you', filter: { here: true } }),
+  },
+  {
+    pattern: /^you hold( here)?$/i,
+    build: (m) => ({
+      event: 'hold',
+      subject: 'you',
+      ...(m[1] === undefined ? {} : { filter: { here: true } }),
+    }),
+  },
+  { pattern: /^i hold$/i, build: () => ({ event: 'hold', subject: 'you', filter: { here: true } }) },
+
+  // Movement (446). "from a battlefield" is deliberately absent: the Move event
+  // carries the destination, not the origin, so that wording is refused rather
+  // than treated as any Move.
+  { pattern: /^i move$/i, build: () => ({ event: 'move', subject: 'self' }) },
+  { pattern: /^i move to a battlefield$/i, build: () => ({ event: 'move', subject: 'self' }) },
+
+  // Combat (466.3).
+  { pattern: /^i win (?:a )?combat$/i, build: () => ({ event: 'winCombat', subject: 'self' }) },
+  { pattern: /^you win (?:a )?combat$/i, build: () => ({ event: 'winCombat', subject: 'you' }) },
+
+  // Buffs (702) and discards (422).
+  { pattern: /^you buff me$/i, build: () => ({ event: 'buffed', subject: 'self' }) },
+  { pattern: /^i'?m buffed$/i, build: () => ({ event: 'buffed', subject: 'self' }) },
+  {
+    pattern: /^you discard(?: one or more cards| a card| \d+)?$/i,
+    build: () => ({ event: 'discard', subject: 'you' }),
+  },
+
+  // Activated abilities (377.3).
+  {
+    pattern: /^you use an activated ability of an? (gear|unit|spell)$/i,
+    build: (m) => ({
+      event: 'activateAbility',
+      subject: 'you',
+      filter: { cardType: (m[1] ?? '').toLowerCase() as 'gear' | 'unit' | 'spell' },
+    }),
+  },
+];
+
+/** A trigger condition together with any per-turn limit its wording implies. */
+interface ParsedCondition {
+  readonly condition: TriggerCondition;
+  readonly limitPerTurn?: number | undefined;
+}
+
+/**
+ * Read a trigger's condition clause.
+ *
+ * Three wrappers come off first, because each is orthogonal to *what* the
+ * condition watches: "the first time ... each turn" is rule 383.3.e's per-turn
+ * limit, and "when"/"whenever" is noise.
+ */
+export function parseCondition(head: string): ParsedCondition | undefined {
+  const phrase = head.trim();
+
+  const firstTime = phrase.match(/^the first time (.+?) each turn$/i);
+  if (firstTime !== null) {
+    const inner = parseCondition(`when ${firstTime[1] ?? ''}`);
+    // A limit already implied by the inner wording would be being overwritten,
+    // which never happens today and should not pass silently if it starts to.
+    return inner === undefined || inner.limitPerTurn !== undefined
+      ? undefined
+      : { condition: inner.condition, limitPerTurn: 1 };
+  }
+
+  const when = phrase.match(/^(?:when|whenever)\s+(.+)$/i);
+  if (when === null) {
+    const phase = PHASE_CONDITIONS.find((entry) => entry.pattern.test(phrase));
+    return phase === undefined ? undefined : { condition: phase.condition };
+  }
+
+  const body = when[1] ?? '';
+  for (const rule of CONDITIONS) {
+    const match = body.match(rule.pattern);
+    if (match === null) {
+      continue;
+    }
+    const condition = rule.build(match);
+    return condition === undefined ? undefined : { condition };
+  }
+  return undefined;
+}
 
 /**
  * Parse a run of effect clauses, e.g. `"Draw 1, then deal 2 to a unit"`.
@@ -358,28 +568,69 @@ function parseLine(line: string): {
   }
 
   // A Triggered Ability is a condition clause followed by its effect (383.2).
-  const comma = line.indexOf(',');
-  if (comma !== -1) {
-    const head = line.slice(0, comma).trim();
-    let body = line.slice(comma + 1).trim();
-    const condition = CONDITIONS.find((entry) => entry.pattern.test(head))?.condition;
-    if (condition !== undefined) {
-      // 383.3.a: a leading "you may" makes performing it the controller's choice.
-      const optional = /^you may\s+/i.test(body);
-      if (optional) {
-        body = body.replace(/^you may\s+/i, '');
-      }
-      const effect = parseEffects(body);
-      if (effect === undefined) {
-        return undefined;
-      }
-      return { triggered: { condition, ...(optional ? { optional } : {}), effect } };
+  // The split is at the *first* comma so that a condition never swallows the
+  // effect, and every prefix is tried so a condition containing a comma is not
+  // lost — "when you play a spell that costs 5 or more, ..." has none, but the
+  // grammar should not depend on that.
+  for (let comma = line.indexOf(','); comma !== -1; comma = line.indexOf(',', comma + 1)) {
+    const parsed = parseCondition(line.slice(0, comma).trim());
+    if (parsed === undefined) {
+      continue;
     }
+    let body = line.slice(comma + 1).trim();
+    // 383.3.a: a leading "you may" makes performing it the controller's choice.
+    const optional = /^you may\s+/i.test(body);
+    if (optional) {
+      body = body.replace(/^you may\s+/i, '');
+    }
+    const effect = parseEffects(body);
+    if (effect === undefined) {
+      return undefined;
+    }
+    return {
+      triggered: {
+        condition: parsed.condition,
+        ...(optional ? { optional } : {}),
+        ...(parsed.limitPerTurn === undefined ? {} : { limitPerTurn: parsed.limitPerTurn }),
+        effect,
+      },
+    };
   }
 
   // Otherwise the whole line is the card's own rules text.
   const effect = parseEffects(line);
   return effect === undefined ? undefined : { effect };
+}
+
+/**
+ * Keywords that are shorthand for an ability this model already has (801).
+ *
+ * Desugared here rather than added to `Keyword`, because the glossary defines
+ * them *as* the expansion: 808.1.c makes Deathknell "When I die, [Effect]" and
+ * 816.1.b makes Temporary a Beginning Phase trigger that kills its source.
+ * Giving the engine a second way to say either is how two code paths drift.
+ */
+function parseKeywordAbility(line: string): TriggeredAbility | undefined {
+  // 808.1.b: "[Deathknell][>] [Effect]", printed with a dash.
+  const deathknell = line.match(/^deathknell\s*[-—]\s*(.+)$/i);
+  if (deathknell !== null) {
+    const effect = parseEffects(deathknell[1] ?? '');
+    return effect === undefined
+      ? undefined
+      : { condition: { event: 'dies', subject: 'self' }, effect };
+  }
+
+  // 816.1.b: "At the start of this permanent's controller's Beginning Phase,
+  // before scoring, kill this." The engine's Beginning Step already runs before
+  // the Scoring Step, so "before scoring" needs nothing extra.
+  if (/^temporary$/i.test(line)) {
+    return {
+      condition: { event: 'beginningPhase', subject: 'you' },
+      effect: { target: SELF, effects: [{ kind: 'kill' }] },
+    };
+  }
+
+  return undefined;
 }
 
 /**
@@ -394,16 +645,41 @@ export function parseCardText(text: string): ParsedText {
   let target: TargetSpec = NO_TARGET;
   const triggered: TriggeredAbility[] = [];
   const activated: NonNullable<CardAbilities['activated']>[number][] = [];
+  const keywords: Keyword[] = [];
 
   for (const rawLine of text.split('\n')) {
-    const line = normalize(rawLine);
+    let line = normalize(rawLine);
     if (line === '') {
       continue;
     }
 
-    // A keyword carries rules the engine does not model, so a card with one is
-    // beyond the grammar however well the rest of the line reads.
-    if (KEYWORDS.test(line)) {
+    // A keyword the engine is a rule for, on a line of its own.
+    const keyword = MODELLED_KEYWORDS.map((rule) => ({ rule, match: line.match(rule.pattern) })).find(
+      (entry) => entry.match !== null,
+    );
+    if (keyword?.match != null) {
+      keywords.push(keyword.rule.build(keyword.match));
+      continue;
+    }
+
+    // A keyword that is shorthand for an ability the model already has.
+    const desugared = parseKeywordAbility(line);
+    if (desugared !== undefined) {
+      triggered.push(desugared);
+      continue;
+    }
+
+    // 812.1.b: Legion runs from the keyword to the end of the clause, and what
+    // follows is an ordinary ability that happens to be gated. So it is peeled
+    // off here and reattached as a dependency once the rest has parsed.
+    const legion = line.match(/^legion\s*[-—>]?\s*(.+)$/i);
+    if (legion !== null) {
+      line = legion[1] ?? '';
+    }
+
+    // A keyword carrying rules the engine does not model makes the card beyond
+    // the grammar however well the rest of the line reads.
+    if (REFUSED_KEYWORDS.test(line)) {
       unparsed.push(line);
       continue;
     }
@@ -411,6 +687,22 @@ export function parseCardText(text: string): ParsedText {
     const parsed = parseLine(line);
     if (parsed === undefined) {
       unparsed.push(line);
+      continue;
+    }
+    if (legion !== null) {
+      // 812 gates an *ability*. A card whose Legion clause is its own rules text
+      // rather than an ability — "LEGION - I cost 2 less" — has nothing to hang
+      // the dependency on, so it stays unparsed.
+      if (parsed.triggered === undefined && parsed.activated === undefined) {
+        unparsed.push(line);
+        continue;
+      }
+      if (parsed.triggered !== undefined) {
+        triggered.push({ ...parsed.triggered, dependsOn: { kind: 'legion' } });
+      }
+      if (parsed.activated !== undefined) {
+        activated.push({ ...parsed.activated, dependsOn: { kind: 'legion' } });
+      }
       continue;
     }
     if (parsed.effect !== undefined) {
@@ -439,6 +731,7 @@ export function parseCardText(text: string): ParsedText {
   return {
     ...(effects.length > 0 ? { effect: { target, effects } } : {}),
     ...(Object.keys(abilities).length > 0 ? { abilities } : {}),
+    ...(keywords.length > 0 ? { keywords } : {}),
     unparsed,
   };
 }

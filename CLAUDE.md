@@ -25,16 +25,16 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. Only 22 of the 468 cards with
-text are covered so far, and [Card data](#card-data) explains why that number
-is a statement about the engine's mechanics rather than about the parser.
+with damage spells, draw and Play Effects firing. 55 of the 468 cards with text
+are covered so far, and [Card data](#card-data) explains why that number is a
+statement about the engine's mechanics rather than about the parser.
 
 What is built:
 
 - **`@riftbound/cards`** — the six Domains, the Energy/Power `Cost` model, card
   definition types (Legend, Unit, Spell, Gear, Rune, Battlefield), the Champion
-  and Signature supertypes with Champion Tags, and a duplicate-rejecting
-  `CardRegistry`. No real card data yet.
+  and Signature supertypes with Champion Tags, **keywords** (rules 800-828) and
+  a duplicate-rejecting `CardRegistry`. No real card data yet.
 - **`@riftbound/deck`** — the deck model, a plain-text deck list parser behind a
   pluggable importer interface, and format legality validation (main deck minimum
   of 40, 12 Runes, 3 distinct Battlefields, the 3-copy limit including the Chosen
@@ -49,8 +49,10 @@ What is built:
   heal, Might, resources, kill, recall, move, ready/exhaust, Buffs, discard,
   XP, Channel), **the Mulligan**,
   **Activated and Triggered abilities** on an **interruptible phase machine**,
-  **rule 356 cost modification**, first-class legal action generation,
-  per-player observable views, and a structural invariant checker.
+  **event-driven trigger conditions**, **rule 356 cost modification**, the
+  **keywords** Assault, Shield, Tank, Backline and Ganking, the **Dependent
+  Keywords** Legion and Level, first-class legal action generation, per-player
+  observable views, and a structural invariant checker.
 
   With Combat in, the engine can play a complete game of Riftbound: contest a
   Battlefield, fight over it, take Control, and score to 8.
@@ -104,13 +106,20 @@ What is **not** built yet, in rough dependency order:
    choices at the Make Relevant Choices step of resolution, which needs the
    sub-action protocol. Activated abilities and played cards are unaffected:
    both choose at play time, as 355.8 requires.
-3. **Mechanics real cards need.** Text is now parsed into the effect model
-   where the grammar reaches (see [Card data](#card-data)), and what that
-   measurement shows is that the engine, not the parser, is the constraint.
-   Self-targeting is now built; what is left, in the measured order of what it
-   would buy, is **keywords** (Accelerate, Tank, Shield, Deflect, …),
-   **a wider `TriggerCondition`**, then static/passive abilities and
-   conditional/modal effects.
+3. **The keywords that need mechanics the engine has no representation for.**
+   Assault, Shield, Tank, Backline and Ganking are built; the rest are refused
+   with a stated reason in `UNMODELLED_KEYWORDS`, and each reason is a mechanic
+   rather than a keyword: Accelerate and Repeat want Optional Additional Costs
+   (item 1), Deflect wants those *and* a Power cost of any Domain that `Cost`
+   cannot express, Hidden wants facedown cards, Equip and Weaponmaster want
+   Attach, Vision wants Predict (436) — a choice made during resolution, so
+   item 2's protocol.
+4. **Static and passive abilities** — "Units here have +1 Might", "I enter
+   ready", "My Might is increased by your points". `CostModifier` is the only
+   passive the model has, and 137 cards in the corpus want more.
+5. **Conditional and modal effects** — "if this kills it", "unless its
+   controller…", "choose one •…", "for each…". The effect model has no
+   conditions, no counting and no modes.
 
 Focus (rule 313) *is* implemented, as part of Non-Combat Showdowns: granted to
 the contesting player (345), passing on a pass (347.2.b) and when the last Chain
@@ -146,7 +155,8 @@ would with the cards that exist today:
   assigning player pick the order, which decides *which* enemy Units die.
   `assignDamage` in `combat.ts` walks the targets in a fixed order instead. Every
   constraint is still obeyed — lethal-first (465.2.c.3), no overkill while others
-  remain (465.2.c.4) — so totals and death counts are right, but the choice is
+  remain (465.2.c.4), and Tank and Backline (815, 826), which are rules rather
+  than preferences and so sort the targets — but *within* a rank the choice is
   not yet exposed. Making it one needs a sub-action protocol during the Damage
   Step.
 
@@ -469,9 +479,10 @@ effect is just an effect.
   why `ChainItem.ability` exists: `entity` points at the ability's *source*, and
   the source stays exactly where it is. A resolved Spell goes to the trash; a
   resolved ability leaves its source alone.
-- **Activated abilities are gated by three rules, not convenience**: 381 (the
-  controller's own turn, Open State only), 380 (source on the Board) and 377
-  (the cost is payable, exhausting the source included when printed — 414).
+- **Activated abilities are gated by four rules, not convenience**: 381 (the
+  controller's own turn, Open State only), 380 (source on the Board), 377
+  (the cost is payable, exhausting the source included when printed — 414) and
+  801.1 (a Dependent Keyword's condition holds).
 - **An optional trigger goes on the Chain *pending*.** Rule 383.3.a makes
   performing a "you may" its controller's choice at finalization, and
   383.3.e.2.b removes it from the Chain if they decline, so a pending item is
@@ -479,8 +490,107 @@ effect is just an effect.
 - **`triggersUsed` counts per-turn limits** (383.3.e), keyed by source and
   ability index and cleared in the Ending Phase.
 
-`TriggerCondition` covers `played` (383.4.a), `dies`, `conquer`,
-`beginningPhase` (315.2.a) and `endOfTurn` (317.1).
+#### Triggers are event-driven
+
+**The reducer raises a `TriggerEventInstance`, and every ability on the Board is
+asked whether it cares.** The reverse arrangement — look abilities up by a
+closed set of condition variants — is what this used to do, and it could not
+express "when a *friendly* unit dies" at all, because the lookup only ever
+consulted the dying Unit.
+
+A `TriggerCondition` is three things rather than one variant:
+
+| Field | Rule | What it says |
+|---|---|---|
+| `event` | 383.2 | What happened: `played`, `dies`, `conquer`, `hold`, `move`, `winCombat`, `buffed`, `discard`, `activateAbility`, `beginningPhase`, `endOfTurn` |
+| `subject` | 383.1 | Whose: `self`, `you`, `friendly`, `enemy`, `any` |
+| `filter` | 383.1 | Which: card type, `excludeSelf`, a cost floor, `here`, an ordinal |
+
+This shape came out of measuring the corpus, not from taste. At the level of
+literal wordings the tail is **flat** — the most common condition a narrower
+grammar missed appeared *twice* — so 23 more variants would have bought 23
+cards and no structure. The category is the win.
+
+Four things about it are load-bearing:
+
+- **`subject` is required, not defaulted.** "When I die" and "When a friendly
+  unit dies" are both plausible readings of an absent subject, and guessing
+  silently is the wrong-but-plausible card the gap model exists to prevent.
+- **`objects` is a list.** A Combat is won by *every* surviving Unit on the
+  winning side (466.3), so "When I win a combat" must match each of them from a
+  single event while "when you win a combat" fires once. One event per Unit
+  would fire the second one per survivor.
+- **Subject and filter are satisfied by the *same* object.** "Another friendly
+  unit" has to be one Unit that is both, not one that is friendly and a
+  different one that is another.
+- **`triggersFor` takes `extraSources`.** A corpse is off the Board, so its own
+  Deathknell would never be found; naming it keeps it a candidate *without*
+  making it the only one, which is what lets a bystander see the same death.
+
+`filter.ordinal` and `limitPerTurn` are different things and both exist: the
+ordinal picks *which* occurrence fires ("your second card in a turn"), the limit
+caps *how often* the ability may ("the first time … each turn").
+
+### Keywords
+
+Rules 800-828, with the data in `cards/keyword.ts`. Rule 801 says a Keyword is
+"a shorthand for a specific game effect", and the glossary means it literally —
+every entry gives an expansion, "functionally short for …". That sentence is the
+whole design, and it sorts keywords into three kinds:
+
+| Kind | Where it lives | Examples |
+|---|---|---|
+| Shorthand for something already modelled | **desugared at ingest**, never reaches the engine as a keyword | Deathknell → a `dies` trigger (808.1.c); Temporary → a Beginning Phase self-kill (816.1.b); Action/Reaction → `SpellCard.timing` |
+| A genuine engine rule | `Keyword` on the card | Assault, Shield, Tank, Backline, Ganking |
+| A gate on an ordinary ability | `AbilityDependency` on the ability | Legion (812), Level (824) |
+
+**Desugaring is not a shortcut, it is the point.** Giving the engine a second
+way to say "when I die" is how two code paths drift apart, so a keyword that
+*is* an ability becomes that ability and nothing else.
+
+The five modelled as engine rules are the ones no effect can express:
+
+- **Assault X / Shield X** (807.1.c, 814.1.c) are Might while the Unit holds the
+  Attacker or Defender designation. `mightOf` takes a `CombatRole` rather than
+  reading the Showdown off the state, because 807.1.d conditions the keyword on
+  the *designation*, and the view, the heuristic and the invariant checker all
+  want the plain number. The role is threaded through `sumMight`,
+  `lethalRemaining` **and** `hasLethalDamage`: Might is one stat for damage
+  dealt and damage survived, so a Shield that only raised the damage dealt would
+  be half a keyword.
+- **Tank / Backline** (815.1.b, 826.3) are exact mirrors — assigned lethal
+  damage before, or after, every same-controller Unit without the keyword — so
+  one rank function states both, and it sorts `assignDamage`'s targets. 815.1.c.1
+  keeps 465.2.c.3 intact: they reorder the targets, they do not relax lethal-first.
+- **Ganking** (810.1.b) adds Battlefield-to-Battlefield to the Standard Move.
+  810.1.c.1-3: it only *adds* a destination, is not an extra Move, and has no
+  cost of its own — the exhaust of 144.2 is still the whole price.
+
+**Everything else is refused with a stated reason**, in `UNMODELLED_KEYWORDS`, so
+the parser can cite it. Rule 002 makes card text supersede the rules, so a card
+whose keyword is ignored is being played wrong — a Tank that forgets it is a
+Tank is a wrong card, not a simpler one.
+
+Two consequences worth knowing:
+
+- **A keyword granted by an effect is refused, not read as the card having it.**
+  "Give a unit ASSAULT 3 this turn" is a static ability the effect model cannot
+  express, and mistaking it would give the wrong Unit the keyword, permanently.
+  The keyword patterns are anchored to a whole line for exactly this reason.
+- **Keywords ride the same all-or-nothing rule as everything else.** A card
+  whose other clause is unreadable keeps neither. That is why only 11 ingested
+  cards carry a keyword while 55 parse fully.
+
+`Keyword` stacking follows the rules rather than the callers: valued keywords
+sum (807.2, 814.2) and unvalued ones are redundant (810.2, 815.2, 826.5), which
+is what `keywordValue` and `hasKeyword` are for.
+
+**Legion needs identities, not a count.** 812.1.c satisfies it when "a card
+*different than* the one with the Legion ability" has been Finalized this turn —
+and a card's own Play Effect is checked while that card is already in the list.
+So `PlayerState.playedThisTurn` holds entity ids; a count would satisfy every
+Legion trigger on the first card played. It clears in the Ending Phase, because
+812.1.c scopes it to "the same turn".
 
 ### Effect primitives
 
@@ -773,7 +883,11 @@ node packages/cli/dist/main.js ingest origins.json > cards.json
 541 card records in (699 minus sealed products and tokens), **479 cards out**,
 covering every card type including 322 Units and 157 Champion Units. A legal
 deck builds and validates from it with no issues, and the engine plays complete
-games with it — 300 games, all decided, heuristic 61.7% ± 5.5 against random.
+games with it — 300 games, all decided, heuristic 60.7% ± 5.5 against random.
+
+37 of those cards carry an ability and 11 a keyword. The keyword figure is low
+against the 55 that parse because keywords ride the same all-or-nothing rule:
+a card whose other clause is unreadable keeps neither.
 
 What it still cannot supply:
 
@@ -818,63 +932,73 @@ It covers `Draw N`, `Deal N to a unit [at a battlefield]`, `Give a unit +N
 Might this turn`, `Kill`, `Ready`, `Buff`, `Heal`, `Discard N`, `Channel N
 rune(s) [exhausted]`, `ADD` resources and `Gain N XP`; the self-targeting forms
 (`Ready/Buff/Heal/Exhaust/Recall me`, `Give me +N Might this turn`); sequences
-joined by "then" or "and"; the five `TriggerCondition` wordings with their
-optional "you may"; and Activated abilities written `[N,] Exhaust: <effects>`.
+joined by "then" or "and"; the trigger grammar below; the modelled keywords and
+the desugared ones (`DEATHKNELL - <effects>`, `TEMPORARY`, `LEGION - <ability>`);
+and Activated abilities written `[N,] Exhaust: <effects>`.
 
-**Coverage is 22 of the 468 cards that have text, and that number is the
-finding, not a shortfall to grind away at.** Measured on the corpus:
+Trigger conditions are parsed as an event plus a subject plus a filter rather
+than one pattern per sentence — see [Abilities](#abilities) for the shape. The
+grammar strips two orthogonal wrappers first: "the first time … each turn" is
+rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
+
+**Coverage is 55 of the 468 cards that have text**, and the shape of what is
+left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 22 |
-| Blocked | 446 |
+| Fully parsed | 55 |
+| Blocked | 413 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
-common non-keyword clause the grammar misses appears 3 or 4 times, everything
-else once or twice. More regexes buy roughly one card each. The head is one
-level up, in the mechanics the clauses need, and each one's worth is measurable:
-pretend the mechanic exists, re-parse the corpus, count what goes from blocked
-to whole.
+common clause the grammar misses appears 3 or 4 times, everything else once or
+twice. More regexes buy roughly one card each. The head is one level up, in the
+mechanics the clauses need, and each one's worth is measurable: pretend the
+mechanic exists, re-parse the corpus, count what goes from blocked to whole.
+
+That measurement is what ranked keywords and trigger conditions as one piece of
+work — projected +46 together against +19 and +23 apart, because many cards need
+both ("LEGION - When you play me, ready me." is one clause blocked twice over).
+**The delivered figure is +33, 22 → 55**, and the gap is entirely the eight
+keywords still refused: the projection modelled *all* of them, and Accelerate,
+Deflect, Hidden, Weaponmaster, Vision, Equip, Repeat and Quick-Draw each turned
+out to want a mechanic of its own rather than a keyword slot. Re-measured from
+the new baseline:
 
 | Mechanic | Cards it unlocks |
 |---|---|
-| Keywords modelled | +19 (22 → 41) |
-| `TriggerCondition` widened | +23 (22 → 45) |
-| Both together | **+46 (22 → 68)** |
+| The eight remaining keywords | +11 (55 → 66) |
+| `TriggerCondition` widened further | +8 (55 → 63) |
+| Both together | +21 (55 → 76) |
 
-The two **interact**: together they buy more than the 42 they buy apart, because
-many cards need both — "LEGION - When you play me, ready me." is one clause
-blocked twice over. That is the argument for doing them as one piece of work.
+**The trigger tail is now genuinely spent.** The 8 cards a wider condition would
+still buy want 8 *distinct* wordings, and most need a mechanic that does not
+exist — Stun, Hidden, and an event for choosing a target. There is no third
+round of this to do.
 
-What the corpus is blocked on, in the order that measurement puts them:
+What the corpus is blocked on now, in the order measurement puts them:
 
-1. **Keywords** — Accelerate, Tank, Shield N, Assault N, Deflect, Hidden,
-   Ganking, Weaponmaster, Legion, Vision, Equip, Repeat. 170 cards carry one.
-   These are rules the *engine* does not model; a card carrying one is
-   deliberately refused rather than parsed as though the keyword were absent.
-2. **Trigger conditions beyond the five modelled** — "When you play a spell",
-   "When I move from a battlefield", "When one or more enemy units die", "When
-   you recycle a rune", "The first time I conquer each turn". Note these are
-   themselves flat: across the 23 cards a wider condition alone would unlock,
-   the most common wording appears twice. The win is the *category*, so
-   `TriggerCondition` wants a general shape — an event kind plus a filter —
-   rather than 23 more variants.
-3. **Static/passive abilities** — "Units here have +1 Might", "I enter ready",
-   "My Might is increased by your points". `CostModifier` is the only passive
-   the model has.
-4. **Conditional and modal effects** — "if this kills it", "unless its
-   controller…", "choose one •…", "for each…". The effect model has no
+1. **Static and passive abilities** — "Units here have +1 Might", "I enter
+   ready", "My Might is increased by your points". 137 cards. `CostModifier` is
+   the only passive the model has, and it is also what the remaining keywords
+   mostly reduce to.
+2. **The eight refused keywords**, each blocked on a mechanic: Optional
+   Additional Costs (Accelerate, Repeat, and Deflect, which also wants Power of
+   any Domain), facedown cards (Hidden), Attach (Equip, Weaponmaster,
+   Quick-Draw), Predict (Vision).
+3. **Conditional and modal effects** — "if this kills it", "unless its
+   controller…", "choose one •…", "for each…". 42 cards. The effect model has no
    conditions, no counting and no modes.
-5. **Non-standard ability costs** — "Spend my buff:", "Recycle 1 from your
+4. **Non-standard ability costs** — "Spend my buff:", "Recycle 1 from your
    trash:", "you may exhaust me to …". `ActivatedAbility.cost` is Energy, Power
    and the exhaust; 22 cards want more.
 
-Self-targeting *was* on this list and is now built — and the honest result is
-that **coverage did not move**. All 40 cards in the corpus with a self-targeting
-clause are blocked on something else, most often a trigger condition. That is
-the measurement that produced the ranking above: a mechanic's worth is what it
-unlocks in combination, not that real cards use it.
+Self-targeting was on this list before keywords and triggers, and unlocked
+**nothing** — every self-targeting card was blocked on something else. That is
+the reason for the measure-first rule here: a mechanic's worth is what it
+unlocks *in combination*, not that real cards use it. Do not add a mechanic to
+this engine because the corpus mentions it; add it because deleting it from the
+corpus moves the number.
 
 So the next investment is engine mechanics, not parser rules.
 

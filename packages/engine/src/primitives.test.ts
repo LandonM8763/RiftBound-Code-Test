@@ -49,7 +49,7 @@ const DEATHKNELL = makeUnit(2, ['fury'], {
   abilities: {
     triggered: [
       {
-        condition: { kind: 'dies' },
+        condition: { event: 'dies', subject: 'self' },
         effect: { target: NO_TARGET, effects: [{ kind: 'draw', count: 1 }] },
       },
     ],
@@ -180,6 +180,7 @@ function run(
     // The real tail lives in the reducer; these tests exercise the primitive,
     // and `move` gets its Contest/Cleanup coverage through a played card below.
     afterMove: (current) => current,
+    raise: (current) => current,
   };
   return {
     state: executeEffect(
@@ -233,6 +234,7 @@ describe('kill (rule 428)', () => {
         return current;
       },
       afterMove: (current) => current,
+      raise: (current) => current,
     };
     executeEffect(
       state,
@@ -692,7 +694,7 @@ describe('self-targeting', () => {
     abilities: {
       triggered: [
         {
-          condition: { kind: 'played' },
+          condition: { event: 'played', subject: 'self' },
           effect: { target: { kind: 'self' }, effects: [{ kind: 'giveMight', amount: 2 }] },
         },
       ],
@@ -818,7 +820,7 @@ describe('primitive fuzz', () => {
   const onPlay = (effects: readonly Effect[], targeted: boolean) => ({
     triggered: [
       {
-        condition: { kind: 'played' } as const,
+        condition: { event: 'played', subject: 'self' } as const,
         effect: {
           target: targeted ? ({ kind: 'unit', scope: 'any' } as const) : NO_TARGET,
           effects,

@@ -44,6 +44,7 @@ export function makeLegend(
     championTag: overrides.championTag,
     signature: overrides.signature,
     abilities: overrides.abilities,
+    keywords: overrides.keywords,
     type: 'legend',
     domainIdentity,
   };
@@ -63,6 +64,7 @@ export function makeUnit(
     championTag: overrides.championTag,
     signature: overrides.signature,
     abilities: overrides.abilities,
+    keywords: overrides.keywords,
     type: 'unit',
     cost: overrides.cost ?? ({ energy: might, power: [] } satisfies Cost),
     might,
@@ -84,6 +86,7 @@ export function makeSpell(
     championTag: overrides.championTag,
     signature: overrides.signature,
     abilities: overrides.abilities,
+    keywords: overrides.keywords,
     type: 'spell',
     cost: overrides.cost ?? FREE,
     timing: overrides.timing ?? 'action',
@@ -104,6 +107,7 @@ export function makeGear(
     championTag: overrides.championTag,
     signature: overrides.signature,
     abilities: overrides.abilities,
+    keywords: overrides.keywords,
     type: 'gear',
     cost: overrides.cost ?? FREE,
     effect: overrides.effect,
@@ -123,6 +127,7 @@ export function makeRune(
     championTag: overrides.championTag,
     signature: overrides.signature,
     abilities: overrides.abilities,
+    keywords: overrides.keywords,
     type: 'rune',
     domain,
   };
@@ -140,6 +145,7 @@ export function makeBattlefield(
     championTag: overrides.championTag,
     signature: overrides.signature,
     abilities: overrides.abilities,
+    keywords: overrides.keywords,
     type: 'battlefield',
   };
 }

@@ -157,6 +157,16 @@ export interface PlayerState {
    * so it lives on the player rather than as an entity. There is no cap (733).
    */
   readonly xp: number;
+  /**
+   * Cards this player has Finalized this turn, in order (rule 329.2).
+   *
+   * Kept as identities rather than a count because Legion (812.1.c) asks
+   * whether "a card *different than* the one with the Legion ability" has been
+   * played — a card's own Play Effect is being checked while that card is
+   * already in this list, so a count would satisfy every Legion trigger on the
+   * first card played. Cleared in the Ending Phase.
+   */
+  readonly playedThisTurn: readonly EntityId[];
 }
 
 /**

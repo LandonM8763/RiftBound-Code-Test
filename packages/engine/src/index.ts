@@ -63,11 +63,13 @@ export type { BattlefieldView, EntityView, GameView, PlayerView, ShowdownView } 
 export {
   abilityFor,
   activatableAbilities,
+  dependencyMet,
+  matchesTrigger,
   triggerKey,
   triggersFor,
   withinTurnLimit,
 } from './abilities.js';
-export type { PendingTrigger } from './abilities.js';
+export type { PendingTrigger, TriggerEventInstance } from './abilities.js';
 
 export { executeEffect, isValidTarget, legalTargets } from './effects.js';
 export type { EffectContext } from './effects.js';
@@ -81,7 +83,7 @@ export {
   mightOf,
   sumMight,
 } from './combat.js';
-export type { CombatResult, CombatSides } from './combat.js';
+export type { CombatResult, CombatRole, CombatSides } from './combat.js';
 
 export {
   applyContested,
