@@ -18,7 +18,7 @@ export type {
 export { layerOf, modifierApplies } from './cost-modifier.js';
 export type { CostChange, CostFilter, CostModifier, CostTarget } from './cost-modifier.js';
 
-export { NO_TARGET, needsDestination, needsTarget } from './effect.js';
+export { NO_TARGET, needsDestination, needsTarget, needsTargetChoice } from './effect.js';
 export type { CardEffect, DestinationSpec, Effect, TargetSpec } from './effect.js';
 export type {
   BattlefieldCard,

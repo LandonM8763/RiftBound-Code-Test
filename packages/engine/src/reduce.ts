@@ -247,7 +247,13 @@ function playCard(
 
   // 359.2.b: execute all rules text on the card, top to bottom.
   if (effect !== undefined) {
-    next = executeEffect(next, player, effect, { target, destination }, events, EFFECT_CONTEXT);
+    next = executeEffect(
+      next,
+      { controller: player, source: card, choices: { target, destination } },
+      effect,
+      events,
+      EFFECT_CONTEXT,
+    );
   }
 
   // 383.4.a.2: Play Effects go on the Chain as Pending Items once the Permanent
@@ -609,9 +615,14 @@ function pass(state: GameState): ReduceResult {
     if (ability !== undefined) {
       next = executeEffect(
         next,
-        top.controller,
+        {
+          controller: top.controller,
+          // 377.3.a.1: the ability has no card on the Chain, so "me" is the
+          // Game Object the ability is printed on.
+          source: top.entity,
+          choices: { target: top.target ?? undefined, destination: top.destination ?? undefined },
+        },
         ability.effect,
-        { target: top.target ?? undefined, destination: top.destination ?? undefined },
         events,
         EFFECT_CONTEXT,
       );
@@ -631,9 +642,12 @@ function pass(state: GameState): ReduceResult {
     if (spellEffect !== undefined) {
       next = executeEffect(
         next,
-        top.controller,
+        {
+          controller: top.controller,
+          source: top.entity,
+          choices: { target: top.target ?? undefined, destination: top.destination ?? undefined },
+        },
         spellEffect,
-        { target: top.target ?? undefined, destination: top.destination ?? undefined },
         events,
         EFFECT_CONTEXT,
       );

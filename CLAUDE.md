@@ -106,10 +106,11 @@ What is **not** built yet, in rough dependency order:
    both choose at play time, as 355.8 requires.
 3. **Mechanics real cards need.** Text is now parsed into the effect model
    where the grammar reaches (see [Card data](#card-data)), and what that
-   measurement shows is that the engine, not the parser, is the constraint:
-   keywords (Accelerate, Tank, Shield, Deflect, …), static/passive abilities,
-   conditional and modal effects, and self-targeting are what the corpus is
-   actually made of.
+   measurement shows is that the engine, not the parser, is the constraint.
+   Self-targeting is now built; what is left, in the measured order of what it
+   would buy, is **keywords** (Accelerate, Tank, Shield, Deflect, …),
+   **a wider `TriggerCondition`**, then static/passive abilities and
+   conditional/modal effects.
 
 Focus (rule 313) *is* implemented, as part of Non-Combat Showdowns: granted to
 the contesting player (345), passing on a pass (347.2.b) and when the last Chain
@@ -486,7 +487,7 @@ effect is just an effect.
 `cards/effect.ts` holds the data, `engine/effects.ts` the interpreter. Adding a
 primitive is a variant plus a case — never a code path per card.
 
-Four of them encode a rule that is easy to get backwards:
+Five of them encode a rule that is easy to get backwards:
 
 - **A Kill Instruction queues the dying Unit's Deathknell *before* it reaches
   the trash** (428.1.a.1.b), because the trigger has to see it on the Board.
@@ -517,6 +518,21 @@ has no cap (733).
 `executeEffect` takes an `EffectContext` rather than reaching for the reducer:
 drawing can cause a Burn Out, killing has to touch the Chain, and a Move runs
 the Contest/Cleanup/Showdown tail — all of which live above this layer.
+
+**"Me" is not a target choice.** `TargetSpec` has a `self` variant for the "me"
+of "ready me" and "give me +2 Might". Rule 355.6 is about *choosing* something,
+and which Game Object "me" refers to is already settled by which card the text
+is printed on — so `self` is resolved when the effect executes, not enumerated
+when the card is played. That is the one asymmetry with `unit` targets, and it
+is why `needsTargetChoice` exists alongside `needsTarget`: `legalActions` offers
+a self-targeting card as a single action carrying no target, and `reduce`
+rejects one that arrives with a target attached.
+
+Resolving it needs the effect's own source, so `executeEffect` takes an
+`EffectInvocation { controller, source, choices }` rather than loose arguments.
+For a played card `source` is the card; for an ability it is the ability's
+source, because 377.3.a.1 puts no card on the Chain for an ability and "me" has
+to mean the Game Object the ability is printed on.
 
 **A `move` needs a second choice, and it is made the same way a target is.**
 `CardEffect.destination` names the kind of Location wanted, `legalActions`
@@ -800,9 +816,10 @@ reduced to "deal 6" is a card that plays, looks right, and is wrong.
 
 It covers `Draw N`, `Deal N to a unit [at a battlefield]`, `Give a unit +N
 Might this turn`, `Kill`, `Ready`, `Buff`, `Heal`, `Discard N`, `Channel N
-rune(s) [exhausted]`, `ADD` resources and `Gain N XP`; sequences joined by
-"then"; the five `TriggerCondition` wordings with their optional "you may"; and
-Activated abilities written `[N,] Exhaust: <effects>`.
+rune(s) [exhausted]`, `ADD` resources and `Gain N XP`; the self-targeting forms
+(`Ready/Buff/Heal/Exhaust/Recall me`, `Give me +N Might this turn`); sequences
+joined by "then" or "and"; the five `TriggerCondition` wordings with their
+optional "you may"; and Activated abilities written `[N,] Exhaust: <effects>`.
 
 **Coverage is 22 of the 468 cards that have text, and that number is the
 finding, not a shortfall to grind away at.** Measured on the corpus:
@@ -810,29 +827,54 @@ finding, not a shortfall to grind away at.** Measured on the corpus:
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Carrying a keyword the engine does not model | 180 |
-| Addressable (no keyword at all) | 288 |
 | Fully parsed | 22 |
+| Blocked | 446 |
 
-Within that addressable set the unparsed tail is **flat** — the most common
-clause the grammar misses appears 3 times, everything else once or twice. There
-is no head to attack, so more regexes buy roughly one card each.
+At the level of literal clause strings the unparsed tail is **flat** — the most
+common non-keyword clause the grammar misses appears 3 or 4 times, everything
+else once or twice. More regexes buy roughly one card each. The head is one
+level up, in the mechanics the clauses need, and each one's worth is measurable:
+pretend the mechanic exists, re-parse the corpus, count what goes from blocked
+to whole.
 
-What the corpus is actually blocked on, in order:
+| Mechanic | Cards it unlocks |
+|---|---|
+| Keywords modelled | +19 (22 → 41) |
+| `TriggerCondition` widened | +23 (22 → 45) |
+| Both together | **+46 (22 → 68)** |
+
+The two **interact**: together they buy more than the 42 they buy apart, because
+many cards need both — "LEGION - When you play me, ready me." is one clause
+blocked twice over. That is the argument for doing them as one piece of work.
+
+What the corpus is blocked on, in the order that measurement puts them:
 
 1. **Keywords** — Accelerate, Tank, Shield N, Assault N, Deflect, Hidden,
-   Ganking, Weaponmaster, Legion, Vision, Equip, Repeat. These are rules the
-   *engine* does not model; a card carrying one is deliberately refused rather
-   than parsed as though the keyword were absent.
-2. **Static/passive abilities** — "Units here have +1 Might", "I enter ready",
+   Ganking, Weaponmaster, Legion, Vision, Equip, Repeat. 170 cards carry one.
+   These are rules the *engine* does not model; a card carrying one is
+   deliberately refused rather than parsed as though the keyword were absent.
+2. **Trigger conditions beyond the five modelled** — "When you play a spell",
+   "When I move from a battlefield", "When one or more enemy units die", "When
+   you recycle a rune", "The first time I conquer each turn". Note these are
+   themselves flat: across the 23 cards a wider condition alone would unlock,
+   the most common wording appears twice. The win is the *category*, so
+   `TriggerCondition` wants a general shape — an event kind plus a filter —
+   rather than 23 more variants.
+3. **Static/passive abilities** — "Units here have +1 Might", "I enter ready",
    "My Might is increased by your points". `CostModifier` is the only passive
    the model has.
-3. **Conditional and modal effects** — "if this kills it", "unless its
+4. **Conditional and modal effects** — "if this kills it", "unless its
    controller…", "choose one •…", "for each…". The effect model has no
    conditions, no counting and no modes.
-4. **Self-targeting** — "ready me", "give me +2 Might". `TargetSpec` can name a
-   Unit but not *this* Unit, and threading the effect's own source through
-   `executeEffect` is the change that would fix it.
+5. **Non-standard ability costs** — "Spend my buff:", "Recycle 1 from your
+   trash:", "you may exhaust me to …". `ActivatedAbility.cost` is Energy, Power
+   and the exhaust; 22 cards want more.
+
+Self-targeting *was* on this list and is now built — and the honest result is
+that **coverage did not move**. All 40 cards in the corpus with a self-targeting
+clause are blocked on something else, most often a trigger condition. That is
+the measurement that produced the ranking above: a mechanic's worth is what it
+unlocks in combination, not that real cards use it.
 
 So the next investment is engine mechanics, not parser rules.
 

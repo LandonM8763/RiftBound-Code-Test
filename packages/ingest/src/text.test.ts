@@ -101,6 +101,49 @@ describe('effect clauses', () => {
   });
 });
 
+describe('self-targeting', () => {
+  it('reads "me" as the card the text is printed on', () => {
+    expect(parseEffects('Ready me')).toEqual({
+      target: { kind: 'self' },
+      effects: [{ kind: 'ready' }],
+    });
+  });
+
+  it('covers the wordings the cards use', () => {
+    const cases = [
+      ['Buff me', { kind: 'buff' }],
+      ['Heal me', { kind: 'heal' }],
+      ['Exhaust me', { kind: 'exhaust' }],
+      ['Recall me', { kind: 'recall' }],
+    ] as const;
+    for (const [text, effect] of cases) {
+      expect(parseEffects(text)).toEqual({ target: { kind: 'self' }, effects: [effect] });
+    }
+    expect(parseEffects('Give me +2 Might this turn')).toEqual({
+      target: { kind: 'self' },
+      effects: [{ kind: 'giveMight', amount: 2 }],
+    });
+  });
+
+  it('splits clauses joined by "and" as well as "then"', () => {
+    // "Ready me and give me +1 Might this turn" is two effects on one target.
+    expect(parseEffects('Ready me and give me +1 Might this turn')).toEqual({
+      target: { kind: 'self' },
+      effects: [{ kind: 'ready' }, { kind: 'giveMight', amount: 1 }],
+    });
+  });
+
+  it('refuses to mix "me" with a chosen Unit', () => {
+    // One target per card: "me" and "a unit" cannot both be the target.
+    expect(parseEffects('Ready me and buff a friendly unit')).toBeUndefined();
+  });
+
+  it('parses a self-targeting activated ability end to end', () => {
+    const ability = parseCardText('Exhaust: Buff me.').abilities?.activated?.[0];
+    expect(ability?.effect).toEqual({ target: { kind: 'self' }, effects: [{ kind: 'buff' }] });
+  });
+});
+
 describe('triggered abilities (rule 383)', () => {
   it('parses a Play Effect (383.4.a)', () => {
     const parsed = parseCardText('When you play me, draw 1.');

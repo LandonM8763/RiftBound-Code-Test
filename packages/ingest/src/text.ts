@@ -85,6 +85,7 @@ interface ClauseRule {
   readonly build: (match: RegExpMatchArray) => { effects: Effect[]; target: TargetSpec } | undefined;
 }
 
+const SELF: TargetSpec = { kind: 'self' };
 const UNIT_ANY: TargetSpec = { kind: 'unit', scope: 'any' };
 const UNIT_FRIENDLY: TargetSpec = { kind: 'unit', scope: 'friendly' };
 const UNIT_ENEMY: TargetSpec = { kind: 'unit', scope: 'enemy' };
@@ -207,6 +208,37 @@ const CLAUSES: readonly ClauseRule[] = [
       return { effects: [{ kind: 'addPower', domain, count: 1 }], target: NO_TARGET };
     },
   },
+  // Self-targeting: "me" is the card the text is printed on, so these need no
+  // target choice at all — `TargetSpec` resolves them at execution.
+  {
+    pattern: /^ready me$/i,
+    build: () => ({ effects: [{ kind: 'ready' }], target: SELF }),
+  },
+  {
+    pattern: /^exhaust me$/i,
+    build: () => ({ effects: [{ kind: 'exhaust' }], target: SELF }),
+  },
+  {
+    pattern: /^buff me$/i,
+    build: () => ({ effects: [{ kind: 'buff' }], target: SELF }),
+  },
+  {
+    pattern: /^heal me$/i,
+    build: () => ({ effects: [{ kind: 'heal' }], target: SELF }),
+  },
+  {
+    pattern: /^recall me$/i,
+    build: () => ({ effects: [{ kind: 'recall' }], target: SELF }),
+  },
+  {
+    pattern: /^give me \+(\d+) might this turn$/i,
+    build: (m) => {
+      const n = count(m[1] ?? '');
+      return n === undefined
+        ? undefined
+        : { effects: [{ kind: 'giveMight', amount: n }], target: SELF };
+    },
+  },
   {
     pattern: /^gain (\d+) xp$/i,
     build: (m) => {
@@ -238,7 +270,7 @@ const CONDITIONS: readonly { readonly pattern: RegExp; readonly condition: Trigg
  */
 export function parseEffects(body: string): CardEffect | undefined {
   const parts = body
-    .split(/,\s*then\s+|\s+then\s+|\.\s*/i)
+    .split(/,\s*then\s+|\s+then\s+|\.\s*|,\s*and\s+|\s+and\s+|,\s*/i)
     .map((part) => part.replace(/[.]+$/, '').trim())
     .filter((part) => part.length > 0);
 

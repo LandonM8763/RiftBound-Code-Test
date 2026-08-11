@@ -33,6 +33,17 @@ export interface EffectChoices {
   readonly destination?: Location | undefined;
 }
 
+/** One execution of a card's or ability's rules text. */
+export interface EffectInvocation {
+  readonly controller: PlayerId;
+  /**
+   * The Game Object whose text this is: the played card, or an ability's
+   * source. What a `self` target resolves to.
+   */
+  readonly source: EntityId;
+  readonly choices: EffectChoices;
+}
+
 /**
  * What the interpreter needs from the reducer.
  *
@@ -79,7 +90,9 @@ export function legalTargets(
   controller: PlayerId,
   spec: TargetSpec,
 ): EntityId[] {
-  if (spec.kind === 'none') {
+  // Neither makes the player choose: `none` affects nobody in particular and
+  // `self` is already determined by which card the text is printed on.
+  if (spec.kind !== 'unit') {
     return [];
   }
 
@@ -122,7 +135,9 @@ export function isValidTarget(
   spec: TargetSpec,
   target: EntityId | undefined,
 ): boolean {
-  if (spec.kind === 'none') {
+  // A self-targeting card takes no chosen target; supplying one is an error,
+  // not a different reading.
+  if (spec.kind !== 'unit') {
     return target === undefined;
   }
   return target !== undefined && legalTargets(state, controller, spec).includes(target);
@@ -137,15 +152,21 @@ export function isValidTarget(
  */
 export function executeEffect(
   state: GameState,
-  controller: PlayerId,
+  invocation: EffectInvocation,
   effect: CardEffect,
-  choices: EffectChoices,
   events: GameEvent[],
   context: EffectContext,
 ): GameState {
+  // 355.6 is about choices; "me" is not one, so it is resolved here rather
+  // than enumerated when the card was played.
+  const choices: EffectChoices =
+    effect.target.kind === 'self'
+      ? { ...invocation.choices, target: invocation.source }
+      : invocation.choices;
+
   let next = state;
   for (const step of effect.effects) {
-    next = applyEffect(next, controller, step, choices, events, context);
+    next = applyEffect(next, invocation.controller, step, choices, events, context);
   }
   return next;
 }

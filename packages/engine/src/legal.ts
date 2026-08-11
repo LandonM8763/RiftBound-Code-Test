@@ -1,5 +1,5 @@
 import type { Action } from './actions.js';
-import { effectOf, type CardEffect } from '@riftbound/cards';
+import { effectOf, needsTargetChoice, type CardEffect, type TargetSpec } from '@riftbound/cards';
 
 import { activatableAbilities } from './abilities.js';
 import { legalDestinations, legalTargets } from './effects.js';
@@ -52,8 +52,9 @@ export function legalActions(state: GameState, player: PlayerId): readonly Actio
   // cards get one — 355.8 needs a valid choice before it can go on the Chain.
   for (const { source, index, ability } of activatableAbilities(state, player)) {
     const spec = ability.effect.target;
-    const targets =
-      spec.kind === 'none' ? [undefined] : legalTargets(state, player, spec);
+    // `self` needs no choice, so it enumerates as a single action with no
+    // target — the effect resolves "me" to the ability's source itself.
+    const targets = needsTargetChoice(spec) ? legalTargets(state, player, spec) : [undefined];
     for (const target of targets) {
       for (const destination of choicesOfDestination(state, player, ability.effect)) {
         actions.push({
@@ -88,10 +89,9 @@ export function legalActions(state: GameState, player: PlayerId): readonly Actio
     // A targeting card needs a valid choice before it can be played at all
     // (rule 355.8), so one action is offered per legal target.
     const effect = effectOf(check.card);
-    const targets =
-      effect === undefined || effect.target.kind === 'none'
-        ? [undefined]
-        : legalTargets(state, player, effect.target);
+    const targets = needsTargetChoice(effect?.target)
+      ? legalTargets(state, player, effect?.target as TargetSpec)
+      : [undefined];
 
     for (const target of targets) {
       // A `move` effect needs its Destination chosen now too (449.1), so the

@@ -15,6 +15,7 @@ import {
 import { makeBattlefield, makeLegend, makeRune, makeUnit } from '@riftbound/cards/testing';
 import { describe, expect, it } from 'vitest';
 
+import { IllegalActionError } from './actions.js';
 import { mightOf } from './combat.js';
 import { currentLegalActions } from './legal.js';
 import { Rng } from './rng.js';
@@ -157,6 +158,7 @@ function run(
   effects: readonly Effect[],
   target?: EntityId,
   destination?: Location,
+  source?: EntityId,
 ): { state: GameState; events: GameEvent[] } {
   const events: GameEvent[] = [];
   const effect: CardEffect = {
@@ -182,9 +184,8 @@ function run(
   return {
     state: executeEffect(
       state,
-      state.activePlayer,
+      { controller: state.activePlayer, source: source ?? target ?? (0 as EntityId), choices: { target, destination } },
       effect,
-      { target, destination },
       events,
       context,
     ),
@@ -235,9 +236,8 @@ describe('kill (rule 428)', () => {
     };
     executeEffect(
       state,
-      player,
+      { controller: player, source: unit, choices: { target: unit } },
       { target: { kind: 'unit', scope: 'any' }, effects: [{ kind: 'kill' }] },
-      { target: unit },
       [],
       context,
     );
@@ -669,6 +669,144 @@ describe('effects run in order (359.2.b)', () => {
     );
 
     expect(getPlayer(after, player).xp).toBe(xpBefore + 2);
+  });
+});
+
+describe('self-targeting', () => {
+  /** "[1]: Ready me." — the source is the target, with no choice to make. */
+  const SELF_READY = makeUnit(2, ['fury'], {
+    id: cardId('P-013'),
+    name: 'Self Ready',
+    cost: cost(1),
+    abilities: {
+      activated: [
+        { cost: cost(1), effect: { target: { kind: 'self' }, effects: [{ kind: 'ready' }] } },
+      ],
+    },
+  });
+  /** "When you play me, give me +2 Might this turn." — a self Play Effect. */
+  const SELF_PUMP = makeUnit(2, ['fury'], {
+    id: cardId('P-014'),
+    name: 'Self Pump',
+    cost: cost(1),
+    abilities: {
+      triggered: [
+        {
+          condition: { kind: 'played' },
+          effect: { target: { kind: 'self' }, effects: [{ kind: 'giveMight', amount: 2 }] },
+        },
+      ],
+    },
+  });
+
+  const registry = CardRegistry.from([
+    LEGEND,
+    CHAMPION,
+    UNIT,
+    DEATHKNELL,
+    MOVER,
+    SELF_READY,
+    SELF_PUMP,
+    RUNE,
+    ...BATTLEFIELDS,
+  ] as CardDefinition[]);
+
+  function game(seed: string): GameState {
+    let state = createGame({ decks: [deck(), deck()], registry, seed }).state;
+    while (state.phase === 'mulligan') state = reduce(state, { type: 'mulligan', cards: [] }).state;
+    while (state.phase !== 'main') state = reduce(state, { type: 'resolvePhase' }).state;
+    const player = state.activePlayer;
+    return {
+      ...state,
+      players: state.players.map((seat) =>
+        seat.id === player ? { ...seat, pool: { energy: 5, power: seat.pool.power } } : seat,
+      ),
+    };
+  }
+
+  /** Mint a card of `id` into the Turn Player's Base, using the local registry. */
+  function mint(state: GameState, id: CardDefinition['id']): [GameState, EntityId] {
+    const player = state.activePlayer;
+    const entity = state.nextEntityId as EntityId;
+    return [
+      {
+        ...state,
+        nextEntityId: state.nextEntityId + 1,
+        definitions: { ...state.definitions, [id]: registry.mustGet(id) },
+        entities: {
+          ...state.entities,
+          [entity]: {
+            id: entity,
+            card: id,
+            owner: player,
+            controller: player,
+            location: playerLocation(player, 'base'),
+            exhausted: false,
+            damage: 0,
+            mightBonus: 0,
+            buffs: 0,
+          },
+        },
+        players: state.players.map((seat) =>
+          seat.id === player
+            ? { ...seat, zones: { ...seat.zones, base: [...seat.zones.base, entity] } }
+            : seat,
+        ),
+      },
+      entity,
+    ];
+  }
+
+  it('resolves "me" to the ability`s own source (377.3.a.1)', () => {
+    const [placed, source] = mint(game('self-ready'), SELF_READY.id);
+    const state = withEntity(placed, source, (current) => ({ ...current, exhausted: true }));
+
+    let next = reduce(state, { type: 'activateAbility', source, index: 0 }).state;
+    let guard = 0;
+    while (next.chain.length > 0) {
+      if (guard++ > 20) throw new Error('Chain did not resolve');
+      next = reduce(next, { type: 'pass' }).state;
+    }
+
+    expect(getEntity(next, source).exhausted).toBe(false);
+    checkInvariants(next);
+  });
+
+  it('offers the ability with no target, since "me" is not a choice', () => {
+    const [state, source] = mint(game('self-legal'), SELF_READY.id);
+    const offered = currentLegalActions(state).filter(
+      (action) => action.type === 'activateAbility' && action.source === source,
+    );
+
+    expect(offered).toHaveLength(1);
+    expect(offered[0]).not.toHaveProperty('target');
+  });
+
+  it('rejects a chosen target on a self-targeting ability', () => {
+    // Supplying one is an error, not a different reading of the card.
+    const [placed, source] = mint(game('self-reject'), SELF_READY.id);
+    const [state, other] = mint(placed, UNIT.id);
+    expect(() =>
+      reduce(state, { type: 'activateAbility', source, index: 0, target: other }),
+    ).toThrow(IllegalActionError);
+  });
+
+  it('resolves "me" to the card itself for a Play Effect', () => {
+    const [placed, card] = mint(game('self-play'), SELF_PUMP.id);
+    const player = placed.activePlayer;
+    const state = moveEntity(placed, card, playerLocation(player, 'hand'));
+
+    let next = reduce(state, { type: 'playCard', card }).state;
+    let guard = 0;
+    while (next.chain.length > 0) {
+      if (guard++ > 20) throw new Error('Chain did not resolve');
+      next = reduce(next, { type: 'pass' }).state;
+    }
+
+    // The Unit pumped itself, not some other Unit on the board.
+    expect(getEntity(next, card).mightBonus).toBe(2);
+    expect(mightOf(next, card)).toBe(SELF_PUMP.might + 2);
+    checkInvariants(next);
   });
 });
 

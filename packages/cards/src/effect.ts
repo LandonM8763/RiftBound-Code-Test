@@ -20,6 +20,16 @@ export type TargetSpec =
   /** Affects the controller, or nothing in particular. No choice to make. */
   | { readonly kind: 'none' }
   /**
+   * The Game Object whose text this is — the "me" of "ready me", "give me +2
+   * Might".
+   *
+   * Not a target *choice*: rule 355.6 is about choosing something, and "me" is
+   * already determined by which card the text is printed on. So it is resolved
+   * when the effect executes rather than enumerated when the card is played,
+   * and `needsTarget` is false for it.
+   */
+  | { readonly kind: 'self' }
+  /**
    * A Unit on the Board (355.9.a.1).
    *
    * `scope` narrows by controller: `friendly` is the card's controller,
@@ -136,7 +146,15 @@ export const NO_TARGET: TargetSpec = { kind: 'none' };
 
 /** True when playing this card requires the player to choose a target. */
 export function needsTarget(effect: CardEffect | undefined): boolean {
-  return effect !== undefined && effect.target.kind !== 'none';
+  return needsTargetChoice(effect?.target);
+}
+
+/**
+ * True when a spec makes the player choose. `none` and `self` do not: one
+ * affects nobody in particular, the other is already determined.
+ */
+export function needsTargetChoice(spec: TargetSpec | undefined): boolean {
+  return spec !== undefined && spec.kind === 'unit';
 }
 
 /** True when playing this card requires the player to choose a Destination. */
