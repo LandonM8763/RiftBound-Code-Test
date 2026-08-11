@@ -6,6 +6,7 @@
  * unmaintainable as hand-written control flow.
  */
 import type { Cost } from './cost.js';
+import type { CostModifier } from './cost-modifier.js';
 import type { CardEffect } from './effect.js';
 
 /**
@@ -77,6 +78,11 @@ export interface AbilityRef {
 export interface CardAbilities {
   readonly activated?: readonly ActivatedAbility[] | undefined;
   readonly triggered?: readonly TriggeredAbility[] | undefined;
+  /**
+   * Passive cost modifiers this card applies while on the Board (rules 356,
+   * 363, 365.1). A standing statement, not something that fires.
+   */
+  readonly costModifiers?: readonly CostModifier[] | undefined;
 }
 
 export function activatedAbilities(abilities: CardAbilities | undefined): readonly ActivatedAbility[] {

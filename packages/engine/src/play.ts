@@ -3,10 +3,8 @@
  *
  * What is modelled and what is not:
  *
- * - **Total Cost is the base cost.** Rule 356 layers base-cost replacement,
- *   additional costs, increases and discounts on top; all of those come from
- *   card effects, and no card has effects yet. `totalCost` is the seam they
- *   plug into.
+ * - **Total Cost is determined by `costs.ts`.** Rule 356's layers live there;
+ *   this module asks for the answer and pays it.
  * - **Adding resources is a separate action from playing.** Rule 357.1.a lets
  *   the controller activate Add Reactions *during* the Pay step. Since Basic
  *   Runes are the only source of resources so far (164.2), and their abilities
@@ -15,13 +13,10 @@
  */
 import { isPlayable, powerOf, type CardDefinition, type Cost, type Domain } from '@riftbound/cards';
 
+import { totalCost } from './costs.js';
+
 import type { Entity, GameState, Location, PlayerId, RunePool } from './state.js';
 import { entityCard, getPlayer, playerLocation, powerIn } from './state.js';
-
-/** Rule 356. Currently the printed cost: nothing modifies costs yet. */
-export function totalCost(card: CardDefinition): Cost | undefined {
-  return isPlayable(card) ? card.cost : undefined;
-}
 
 /** Whether a pool covers a cost (rule 357.1). */
 export function canPay(pool: RunePool, cost: Cost): boolean {
@@ -102,7 +97,7 @@ export function playableFromHand(
     if (!timingAllows(card, timing)) {
       continue;
     }
-    const cost = totalCost(card);
+    const cost = totalCost(state, player, card);
     if (cost === undefined || !canPay(pool, cost)) {
       continue;
     }

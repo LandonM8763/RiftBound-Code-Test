@@ -24,7 +24,8 @@ import {
   type PendingTrigger,
 } from './abilities.js';
 import { executeEffect, isValidTarget } from './effects.js';
-import { canPay, payFrom, timingAllows, totalCost, validUnitLocations } from './play.js';
+import { totalCost } from './costs.js';
+import { canPay, payFrom, timingAllows, validUnitLocations } from './play.js';
 import { Rng } from './rng.js';
 import type {
   BattlefieldState,
@@ -179,7 +180,7 @@ function playCard(
     );
   }
 
-  const cost = totalCost(definition);
+  const cost = totalCost(state, player, definition);
   if (cost === undefined) {
     throw new IllegalActionError(`${definition.name} is not a playable card`);
   }
@@ -280,10 +281,11 @@ function activateAbility(
   const events: GameEvent[] = [];
   let next = state;
 
-  // 377: pay the cost. Exhausting the source is part of it when printed (414).
+  // 377 / 404: pay the Total Cost, which rule 403 has already modified.
+  // Exhausting the source is part of it when printed (414).
   next = withPlayer(next, player, (current) => ({
     ...current,
-    pool: payFrom(current.pool, chosen.ability.cost),
+    pool: payFrom(current.pool, chosen.cost),
   }));
   if (chosen.ability.exhaustSelf === true) {
     next = withEntity(next, source, (current) => ({ ...current, exhausted: true }));

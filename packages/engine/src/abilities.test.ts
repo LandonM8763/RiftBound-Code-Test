@@ -111,6 +111,28 @@ const OPENER = makeUnit(2, ['fury'], {
   abilities: { triggered: [{ condition: { kind: 'beginningPhase' }, effect: DRAW_ONE }] },
 });
 
+/** "Units you play cost [1] less" — a Passive cost modifier (356.4, 363). */
+const DISCOUNTER = makeUnit(2, ['fury'], {
+  id: cardId('A-020'),
+  name: 'Discounter',
+  cost: cost(1),
+  abilities: {
+    costModifiers: [
+      { applies: { scope: 'friendly', types: ['unit'] }, change: { kind: 'discount', energy: 1 } },
+    ],
+  },
+});
+
+/** A symmetric tax, so the fuzz sees costs rise as well as fall (356.3). */
+const TAXMAN = makeUnit(2, ['fury'], {
+  id: cardId('A-021'),
+  name: 'Taxman',
+  cost: cost(1),
+  abilities: {
+    costModifiers: [{ applies: { scope: 'any' }, change: { kind: 'increase', energy: 1 } }],
+  },
+});
+
 /** "[1]: Deal 2 to a unit" — an Activated Ability that targets (355.8). */
 const SNIPER = makeUnit(2, ['fury'], {
   id: cardId('A-017'),
@@ -136,6 +158,8 @@ const REGISTRY = CardRegistry.from([
   DEATHKNELL,
   CLOSER,
   OPENER,
+  DISCOUNTER,
+  TAXMAN,
   SNIPER,
   RUNE,
   ...BATTLEFIELDS,
@@ -531,6 +555,9 @@ describe('ability fuzz', () => {
         // The turn-boundary triggers, which hold a phase open mid-resolution.
         ...Array.from({ length: 3 }, () => CLOSER.id),
         ...Array.from({ length: 3 }, () => OPENER.id),
+        // Cost modifiers, so affordability is a moving target for the walk.
+        ...Array.from({ length: 3 }, () => DISCOUNTER.id),
+        ...Array.from({ length: 3 }, () => TAXMAN.id),
       ],
       runes: Array.from({ length: 10 }, () => RUNE.id),
       battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),

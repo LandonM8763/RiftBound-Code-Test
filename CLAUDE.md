@@ -44,8 +44,8 @@ What is built:
   Showdowns with Focus, the full Steps of Combat, Scoring by Conquer including
   the Final Point restriction, **data-driven card effects**, **the Mulligan**,
   **Activated and Triggered abilities** on an **interruptible phase machine**,
-  first-class legal action generation, per-player observable views, and a
-  structural invariant checker.
+  **rule 356 cost modification**, first-class legal action generation,
+  per-player observable views, and a structural invariant checker.
 
   With Combat in, the engine can play a complete game of Riftbound with vanilla
   cards: contest a Battlefield, fight over it, take Control, and score to 8.
@@ -89,9 +89,13 @@ What is **not** built yet, in rough dependency order:
    heal, give Might, and add resources. Adding a primitive is a variant plus a
    case — no new code path per card. Still absent: killing, recalling, moving,
    counters and XP.
-2. **Cost modification** (rule 356's layers: base-cost replacement, additional
-   costs, increases, discounts). `totalCost` in `play.ts` returns the printed
-   cost and is the seam.
+2. **Additional costs** (rule 356.2), the one layer of cost modification left
+   out. Both the mandatory and optional forms are paid with *non-standard*
+   costs (356.7) — "kill a friendly unit", "discard 1" — and none of those are
+   expressible as effects yet, so an additional cost could be added to a total
+   and then never paid. The optional form also needs a decision point during
+   the Announce step (356.2.b.1), since choosing to pay changes the total. It
+   belongs with the kill/discard primitives, not with the layer machinery.
 3. **Real card data.** Every construction rule is now enforced, but the card
    pool is still invented fixtures — see [Open questions](#open-questions).
 
@@ -118,6 +122,10 @@ would with the cards that exist today:
   proceeding in turn order. `triggersFor` honours the *between-player* order and
   decides the within-player tie-break for them, deterministically. Making it a
   choice needs the same sub-action protocol as the next item.
+- **Discount order is chosen for the player, not by them.** Rule 356.4.c.1 lets
+  a player order the discounts on a component, and 356.4.e makes that choice
+  matter. `costs.ts` applies bounded discounts before unbounded ones, which is
+  the player-favourable order in the rulebook's own worked example.
 - **Combat damage assignment order is fixed, not chosen.** Rule 465.2.c lets the
   assigning player pick the order, which decides *which* enemy Units die.
   `assignDamage` in `combat.ts` walks the targets in a fixed order instead. Every
@@ -422,6 +430,7 @@ builds the batch on top of it. Keep that split — a win rate computed inside
 | `actions.ts` | The `Action` union and `IllegalActionError` |
 | `reduce.ts` | `(state, action) -> { state, events }`, the interruptible phase machine |
 | `abilities.ts` | Activated/Triggered abilities: what may be activated, what a game event triggers |
+| `costs.ts` | Rule 356's layers: what a card or ability actually costs to play |
 | `legal.ts` | `legalActions(state, player)` |
 | `view.ts` | Per-player observable view; redacts hidden zones |
 | `invariants.ts` | `checkInvariants(state)`, run after every action when fuzzing |
@@ -456,6 +465,38 @@ effect is just an effect.
 
 `TriggerCondition` covers `played` (383.4.a), `dies`, `conquer`,
 `beginningPhase` (315.2.a) and `endOfTurn` (317.1).
+
+### Cost modification
+
+Rule 356, in `engine/costs.ts` with the data in `cards/cost-modifier.ts`. The
+rule is a sequence of layers and **the order between them decides the answer**,
+so each modifier carries its layer in the data rather than having it inferred
+from where the modifier was found:
+
+| Layer | Rule | What it does |
+|---|---|---|
+| 1 | 356.1 | Replace or ignore the Base Cost |
+| 3 | 356.3 | Increases |
+| 4 | 356.4 | Discounts |
+| 5 | 356.5 | "Ignoring any and all costs" — total to zero |
+
+Three things are easy to get wrong:
+
+- **A discount's minimum binds only that discount** (356.4.e), not the running
+  total, so a later discount can still go under it. The rulebook's own example
+  gives 0 or 1 for the same two discounts depending on order. 356.4.c.1 lets
+  the player pick that order; the choice is not exposed, so the engine applies
+  bounded discounts first, which is the player-favourable order in that example.
+- **Ignoring a Base Cost is not a floor** (356.1.b.3). A later increase raises
+  the total back above zero, which is the rulebook's Legion Rearguard case.
+- **"Base Cost" means the printed cost** (356.1.c), never the modified one, so
+  `baseCost` stays separate from `totalCost`.
+
+Abilities go through the same machine (403.2-403.3), but only via modifiers that
+name `'ability'` — "cards cost 1 less" is not a statement about Activated
+Abilities, so an unqualified modifier deliberately does not reach them.
+
+Layer 2, additional costs, is absent; see the list under Current status for why.
 
 ### The interruptible phase machine
 

@@ -11,10 +11,12 @@ import {
   triggeredAbilities,
   type AbilityRef,
   type ActivatedAbility,
+  type Cost,
   type TriggerCondition,
   type TriggeredAbility,
 } from '@riftbound/cards';
 
+import { abilityCost } from './costs.js';
 import { canPay } from './play.js';
 import {
   entityCard,
@@ -52,18 +54,25 @@ export function abilityFor(
  * - 381: the controller's own turn, and an Open State only.
  * - 380: the source is on the Board.
  * - 377: the cost is payable, including exhausting the source when that is
- *   part of it (414).
+ *   part of it (414). The cost is the *Total* Cost (403.2-403.3), so a modifier
+ *   that names abilities has already been applied.
  */
 export function activatableAbilities(
   state: GameState,
   player: PlayerId,
-): readonly { readonly source: EntityId; readonly index: number; readonly ability: ActivatedAbility }[] {
+): readonly {
+  readonly source: EntityId;
+  readonly index: number;
+  readonly ability: ActivatedAbility;
+  /** Rule 403: the cost after modification, which is what gets paid. */
+  readonly cost: Cost;
+}[] {
   // 381: "only ... on the Controlling Player's Turn and during an Open State".
   if (state.activePlayer !== player || isClosed(state) || state.showdown !== null) {
     return [];
   }
 
-  const found: { source: EntityId; index: number; ability: ActivatedAbility }[] = [];
+  const found: { source: EntityId; index: number; ability: ActivatedAbility; cost: Cost }[] = [];
   for (const source of boardEntities(state, player)) {
     const entity = getEntity(state, source);
     const abilities = activatedAbilities(entityCard(state, source).abilities);
@@ -73,10 +82,11 @@ export function activatableAbilities(
       if (ability.exhaustSelf === true && entity.exhausted) {
         return;
       }
-      if (!canPay(getPlayer(state, player).pool, ability.cost)) {
+      const cost = abilityCost(state, player, ability.cost);
+      if (!canPay(getPlayer(state, player).pool, cost)) {
         return;
       }
-      found.push({ source, index, ability });
+      found.push({ source, index, ability, cost });
     });
   }
   return found;

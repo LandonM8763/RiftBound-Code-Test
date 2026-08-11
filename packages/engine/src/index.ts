@@ -96,9 +96,11 @@ export {
   payFrom,
   playableFromHand,
   timingAllows,
-  totalCost,
   validUnitLocations,
 } from './play.js';
+
+export { activeModifiers, applyModifiers, baseCost, totalCost } from './costs.js';
+export type { ActiveModifier } from './costs.js';
 
 export { InvariantError, checkInvariants } from './invariants.js';
 

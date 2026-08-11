@@ -1,0 +1,215 @@
+/**
+ * Determining Total Cost (rule 356).
+ *
+ * Step 3 of the Process of Play. The rule is a sequence of layers, and the
+ * order between them is not negotiable: base-cost modifications (356.1), then
+ * additional costs (356.2, absent — see `cost-modifier.ts`), then increases
+ * (356.3), then discounts (356.4), then modifications to the total (356.5),
+ * with Energy and Power floored at 0 throughout (356.6).
+ *
+ * Applying them in any other order gives different answers, which is why the
+ * layer is carried in the data rather than inferred from where a modifier was
+ * found.
+ */
+import {
+  isPlayable,
+  layerOf,
+  modifierApplies,
+  type CardDefinition,
+  type Cost,
+  type CostChange,
+  type CostModifier,
+  type CostTarget,
+} from '@riftbound/cards';
+
+import { entityCard, getEntity, type EntityId, type GameState, type PlayerId } from './state.js';
+
+/** A modifier in play, with the player whose Passive Ability is supplying it. */
+export interface ActiveModifier {
+  readonly controller: PlayerId;
+  readonly modifier: CostModifier;
+}
+
+/**
+ * Every cost modifier currently active.
+ *
+ * Rule 365.1: a Permanent's Passive Abilities are active while it is on the
+ * Board, so this walks the Bases, the Battlefields and the Legend Zone — a
+ * modifier on a card in hand or trash does nothing.
+ */
+export function activeModifiers(state: GameState): readonly ActiveModifier[] {
+  const found: ActiveModifier[] = [];
+
+  const collect = (entity: EntityId): void => {
+    const modifiers = entityCard(state, entity).abilities?.costModifiers;
+    if (modifiers === undefined) {
+      return;
+    }
+    const controller = getEntity(state, entity).controller;
+    for (const modifier of modifiers) {
+      found.push({ controller, modifier });
+    }
+  };
+
+  for (const seat of state.players) {
+    for (const entity of [...seat.zones.base, ...seat.zones.legendZone]) {
+      collect(entity);
+    }
+  }
+  for (const battlefield of state.battlefields) {
+    for (const unit of battlefield.units) {
+      collect(unit);
+    }
+  }
+
+  return found;
+}
+
+/**
+ * The Total Cost of playing `card` as `player` (rule 356).
+ *
+ * Returns `undefined` for a card that is never paid for — Legends, Runes and
+ * Battlefields — which is the same contract the printed-cost version had.
+ */
+export function totalCost(
+  state: GameState,
+  player: PlayerId,
+  card: CardDefinition,
+): Cost | undefined {
+  if (!isPlayable(card)) {
+    return undefined;
+  }
+  return applyModifiers(card.cost, card.type, player, activeModifiers(state));
+}
+
+/**
+ * The Total Cost of an Activated Ability (rule 403).
+ *
+ * Rule 403.2-403.3 sends an ability's base cost through the same increases and
+ * decreases as a card's, so it runs the same layers — but only modifiers that
+ * name abilities apply, since "cards cost 1 less" is not about abilities.
+ */
+export function abilityCost(state: GameState, player: PlayerId, base: Cost): Cost {
+  return applyModifiers(base, 'ability', player, activeModifiers(state));
+}
+
+/** The printed cost, ignoring everything in play. Rule 356.1.c's "Base Cost". */
+export function baseCost(card: CardDefinition): Cost | undefined {
+  return isPlayable(card) ? card.cost : undefined;
+}
+
+/**
+ * Walk rule 356's layers over a base cost.
+ *
+ * Split out from `totalCost` so it can be exercised directly, and so an
+ * ability's cost can be run through the same machine when abilities start
+ * carrying modifiable costs.
+ */
+export function applyModifiers(
+  base: Cost,
+  target: CostTarget,
+  player: PlayerId,
+  active: readonly ActiveModifier[],
+): Cost {
+  const relevant = active
+    .filter(({ controller, modifier }) =>
+      modifierApplies(modifier.applies, target, controller === player),
+    )
+    .map(({ modifier }) => modifier.change);
+
+  // Sort by rule 356's layer, then put bounded discounts before unbounded ones.
+  //
+  // 356.4.c.1 lets the player apply discounts to a component in any order, and
+  // 356.4.e makes that choice matter: a minimum binds only its own discount, so
+  // spending the bounded one first and the unbounded one after reduces the cost
+  // furthest. That is exactly the rulebook's Eager Apprentice / Sky Splitter
+  // example, where the two orders give 0 and 1. The *choice* is not exposed —
+  // it needs the same sub-action protocol as trigger ordering — so the engine
+  // takes the player-favourable order rather than an arbitrary one.
+  const ordered = [...relevant].sort(
+    (a, b) => layerOf(a) - layerOf(b) || boundedFirst(a) - boundedFirst(b),
+  );
+
+  let cost: Cost = base;
+
+  for (const change of ordered) {
+    switch (change.kind) {
+      // 356.1.a: replace the Base Cost outright.
+      case 'replaceBase':
+        cost = change.cost;
+        break;
+
+      // 356.1.b: set the named Base Cost components to zero. 356.1.b.3 lets
+      // later layers raise the total back above zero, so this is not a floor.
+      case 'ignoreBase':
+        cost = {
+          energy: change.component === 'power' ? cost.energy : 0,
+          power: change.component === 'energy' ? cost.power : [],
+        };
+        break;
+
+      // 356.3: increases.
+      case 'increase':
+        cost = {
+          energy: cost.energy + (change.energy ?? 0),
+          power: [...cost.power, ...(change.power ?? [])],
+        };
+        break;
+
+      // 356.4: discounts, floored per rule 356.6 and per 356.4.e.
+      case 'discount':
+        cost = discount(cost, change);
+        break;
+
+      // 356.5.a: "ignoring any and all costs".
+      case 'ignoreAll':
+        cost = { energy: 0, power: [] };
+        break;
+
+      default: {
+        const exhaustive: never = change;
+        throw new Error(`Unknown cost change: ${JSON.stringify(exhaustive)}`);
+      }
+    }
+  }
+
+  // 356.6: Energy and Power costs can't be reduced below 0.
+  return { energy: Math.max(0, cost.energy), power: cost.power };
+}
+
+/** Bounded discounts sort ahead of unbounded ones; see the note in `applyModifiers`. */
+function boundedFirst(change: CostChange): number {
+  return change.kind === 'discount' && change.minimumEnergy !== undefined ? 0 : 1;
+}
+
+/**
+ * One discount (rule 356.4).
+ *
+ * `minimumEnergy` is 356.4.e: the floor belongs to *this* discount alone, so a
+ * later discount can still take the cost below it. That is what makes the
+ * rulebook's Eager Apprentice / Sky Splitter example order-dependent.
+ */
+function discount(
+  cost: Cost,
+  change: Extract<CostChange, { kind: 'discount' }>,
+): Cost {
+  let energy = cost.energy;
+  const reduction = change.energy ?? 0;
+
+  if (reduction > 0) {
+    const floor = change.minimumEnergy ?? 0;
+    // The minimum binds only this discount: never push the cost *up* to it.
+    energy = Math.max(Math.min(energy, floor), energy - reduction);
+  }
+
+  let power = cost.power;
+  for (const domain of change.power ?? []) {
+    const index = power.indexOf(domain);
+    if (index !== -1) {
+      power = [...power.slice(0, index), ...power.slice(index + 1)];
+    }
+  }
+
+  return { energy, power };
+}
+
