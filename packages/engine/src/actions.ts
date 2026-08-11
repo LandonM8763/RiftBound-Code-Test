@@ -24,8 +24,19 @@ export type Action =
    * `Recycle this: Add [C]` (rule 164.2.b).
    */
   | { readonly type: 'addPower'; readonly rune: EntityId }
-  /** Play a card from hand (rules 349-359). Units need a Location. */
-  | { readonly type: 'playCard'; readonly card: EntityId; readonly location?: Location }
+  /**
+   * Play a card from hand (rules 349-359).
+   *
+   * Units need a Location. A card whose rules text targets needs `target`,
+   * chosen now rather than on resolution: rule 355.8 requires valid choices for
+   * every target before the card can go on the Chain.
+   */
+  | {
+      readonly type: 'playCard';
+      readonly card: EntityId;
+      readonly location?: Location;
+      readonly target?: EntityId;
+    }
   /** Pass Priority (rule 312.2.d). Resolves the Chain once everyone passes. */
   | { readonly type: 'pass' }
   /**

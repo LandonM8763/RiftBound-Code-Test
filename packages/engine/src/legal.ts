@@ -1,4 +1,7 @@
 import type { Action } from './actions.js';
+import { effectOf } from '@riftbound/cards';
+
+import { legalTargets } from './effects.js';
 import { standardMoves } from './move.js';
 import { playableFromHand, validUnitLocations } from './play.js';
 import type { GameState, PlayerId } from './state.js';
@@ -47,12 +50,31 @@ export function legalActions(state: GameState, player: PlayerId): readonly Actio
   // Rule 358.4: timing permissions. `playableFromHand` filters to cards this
   // player can both legally play now and afford.
   for (const { entity, check } of playableFromHand(state, player, { closed, showdown })) {
-    if (check.card.type === 'unit') {
-      for (const location of validUnitLocations(state, player)) {
-        actions.push({ type: 'playCard', card: entity.id, location });
+    // A targeting card needs a valid choice before it can be played at all
+    // (rule 355.8), so one action is offered per legal target.
+    const effect = effectOf(check.card);
+    const targets =
+      effect === undefined || effect.target.kind === 'none'
+        ? [undefined]
+        : legalTargets(state, player, effect.target);
+
+    for (const target of targets) {
+      if (check.card.type === 'unit') {
+        for (const location of validUnitLocations(state, player)) {
+          actions.push({
+            type: 'playCard',
+            card: entity.id,
+            location,
+            ...(target === undefined ? {} : { target }),
+          });
+        }
+      } else {
+        actions.push({
+          type: 'playCard',
+          card: entity.id,
+          ...(target === undefined ? {} : { target }),
+        });
       }
-    } else {
-      actions.push({ type: 'playCard', card: entity.id });
     }
   }
 

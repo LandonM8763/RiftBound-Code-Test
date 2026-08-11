@@ -21,7 +21,11 @@ import { entityCard, getEntity } from './state.js';
 /** Might of a Unit, floored at 0 for summing purposes (rule 143.2.b). */
 export function mightOf(state: GameState, unit: EntityId): number {
   const card = entityCard(state, unit);
-  return card.type === 'unit' ? Math.max(0, card.might) : 0;
+  if (card.type !== 'unit') {
+    return 0;
+  }
+  // Rule 143.2.b: a Might below 0 counts as 0 when summing for damage.
+  return Math.max(0, card.might + getEntity(state, unit).mightBonus);
 }
 
 export function sumMight(state: GameState, units: readonly EntityId[]): number {

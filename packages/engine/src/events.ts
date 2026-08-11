@@ -40,10 +40,15 @@ export type GameEvent =
   | {
       readonly type: 'resourcesAdded';
       readonly player: PlayerId;
-      readonly rune: EntityId;
+      /** `null` when the resources came from a card effect rather than a Rune. */
+      readonly rune: EntityId | null;
       readonly energy: number;
       readonly power: Domain | null;
     }
+  /** Rule 417: damage was dealt to a Unit. */
+  | { readonly type: 'damageDealt'; readonly unit: EntityId; readonly amount: number }
+  /** Might granted until the end of the turn. */
+  | { readonly type: 'mightGranted'; readonly unit: EntityId; readonly amount: number }
   /** Rule 167: the Rune Pool emptied and unspent resources were lost. */
   | { readonly type: 'poolEmptied'; readonly player: PlayerId }
   /** Rule 359: a card finished the Process of Play. */

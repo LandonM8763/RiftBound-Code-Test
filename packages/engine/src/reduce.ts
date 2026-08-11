@@ -1,4 +1,4 @@
-import type { CardDefinition } from '@riftbound/cards';
+import { effectOf, type CardDefinition } from '@riftbound/cards';
 
 import { IllegalActionError, type Action } from './actions.js';
 import type { GameEvent } from './events.js';
@@ -16,6 +16,7 @@ import {
   cleanupControl,
   standardMoveDestinations,
 } from './move.js';
+import { executeEffect, isValidTarget } from './effects.js';
 import { canPay, payFrom, timingAllows, totalCost, validUnitLocations } from './play.js';
 import { Rng } from './rng.js';
 import type {
@@ -72,7 +73,7 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     case 'addPower':
       return addPower(state, action.rune);
     case 'playCard':
-      return playCard(state, action.card, action.location);
+      return playCard(state, action.card, action.location, action.target);
     case 'pass':
       return pass(state);
     case 'moveUnits':
@@ -142,7 +143,12 @@ function addPower(state: GameState, rune: EntityId): ReduceResult {
  * the Chain and finalizing: other players only get Priority once an item is
  * Finalized, and a Permanent leaves the Chain at that moment (359.2).
  */
-function playCard(state: GameState, card: EntityId, location: Location | undefined): ReduceResult {
+function playCard(
+  state: GameState,
+  card: EntityId,
+  location: Location | undefined,
+  target: EntityId | undefined,
+): ReduceResult {
   const player = requirePriority(state);
   const entity = getEntity(state, card);
 
@@ -167,6 +173,15 @@ function playCard(state: GameState, card: EntityId, location: Location | undefin
     throw new IllegalActionError(`Cannot pay for ${definition.name}`);
   }
 
+  // Step 2 (355.6): targets are chosen now, and step 5 (358.1) checks them.
+  const effect = effectOf(definition);
+  if (effect !== undefined && !isValidTarget(state, player, effect.target, target)) {
+    throw new IllegalActionError(`${definition.name} has no valid target ${String(target)}`);
+  }
+  if (effect === undefined && target !== undefined) {
+    throw new IllegalActionError(`${definition.name} does not target`);
+  }
+
   // Step 4: pay (rule 357.1).
   let next = withPlayer(state, player, (current) => ({
     ...current,
@@ -180,7 +195,10 @@ function playCard(state: GameState, card: EntityId, location: Location | undefin
     next = moveEntity(next, card, playerLocation(player, 'chain'));
     next = {
       ...next,
-      chain: [...next.chain, { entity: card, controller: player, pending: false }],
+      chain: [
+        ...next.chain,
+        { entity: card, controller: player, pending: false, target: target ?? null },
+      ],
       passes: 0,
       priority: player,
       // 347.1: acting resets the sequence of passes that would end a Showdown.
@@ -203,7 +221,23 @@ function playCard(state: GameState, card: EntityId, location: Location | undefin
   }));
 
   events.push({ type: 'cardPlayed', player, entity: card, onChain: false });
+
+  // 359.2.b: execute all rules text on the card, top to bottom.
+  if (effect !== undefined) {
+    next = executeEffect(next, player, effect, target, events, drawFor);
+  }
+
   return { state: next, events };
+}
+
+/** Adapter so `effects.ts` can draw without importing the Burn Out machinery. */
+function drawFor(
+  state: GameState,
+  player: PlayerId,
+  count: number,
+  events: GameEvent[],
+): GameState {
+  return drawCards(state, player, count, events).state;
 }
 
 function resolvePermanentLocation(
@@ -278,8 +312,14 @@ function pass(state: GameState): ReduceResult {
     throw new IllegalActionError('The Chain is empty');
   }
 
-  // No card has effects yet, so resolution is the Spell going to the trash.
-  let next = moveEntity(state, top.entity, playerLocation(top.controller, 'trash'));
+  // 359.3.d: execute the Spell's rules text, then put the card in the trash.
+  let next = state;
+  const spell = entityCard(next, top.entity);
+  const spellEffect = effectOf(spell);
+  if (spellEffect !== undefined) {
+    next = executeEffect(next, top.controller, spellEffect, top.target ?? undefined, events, drawFor);
+  }
+  next = moveEntity(next, top.entity, playerLocation(top.controller, 'trash'));
   const chain = state.chain.slice(0, -1);
   const nextTop = chain[chain.length - 1];
 
@@ -920,6 +960,10 @@ function ending(state: GameState): ReduceResult {
     if (entity.damage > 0) {
       healed.push(entity.id);
       next = withEntity(next, entity.id, (current) => ({ ...current, damage: 0 }));
+    }
+    // 317.2.c: all "this turn" effects expire simultaneously.
+    if (entity.mightBonus !== 0) {
+      next = withEntity(next, entity.id, (current) => ({ ...current, mightBonus: 0 }));
     }
   }
 

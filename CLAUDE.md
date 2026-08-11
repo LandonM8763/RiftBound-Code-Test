@@ -37,9 +37,10 @@ What is built:
   the full turn phase machine (Awaken, Beginning, Channel, Draw, Main, Ending),
   Scoring by Hold, Burn Out, the win condition, Rune Pools, the Chain with
   Priority, the Process of Play, the Standard Move and Contested status,
-  Showdowns with Focus, **the full Steps of Combat**, and Scoring by Conquer
-  including the Final Point restriction, first-class legal action generation,
-  per-player observable views, and a structural invariant checker.
+  Showdowns with Focus, the full Steps of Combat, Scoring by Conquer including
+  the Final Point restriction, and **data-driven card effects**, first-class
+  legal action generation, per-player observable views, and a structural
+  invariant checker.
 
   With Combat in, the engine can play a complete game of Riftbound with vanilla
   cards: contest a Battlefield, fight over it, take Control, and score to 8.
@@ -61,13 +62,18 @@ quantity in `GameConfig` cites its rule number.
 
 What is **not** built yet, in rough dependency order:
 
-1. **Card effects.** Cards currently have costs and types but no rules text
-   behaviour, so a Spell resolving off the Chain simply goes to the trash. The
-   seams are `totalCost` in `play.ts` (rule 356's cost modification layers) and
-   the resolution branch of `pass` in `reduce.ts`.
-2. **The Mulligan** (rule 117) — verified but unimplemented: it is a player
+1. **More effect primitives.** The effect system exists (`cards/effect.ts` for
+   the data, `engine/effects.ts` for the interpreter) with draw, deal damage,
+   heal, give Might, and add resources. Adding a primitive is a variant plus a
+   case — no new code path per card. Still absent: killing, recalling, moving,
+   counters, XP, and every triggered or activated ability (rules 376-395), which
+   need a trigger system rather than another primitive.
+2. **Cost modification** (rule 356's layers: base-cost replacement, additional
+   costs, increases, discounts). `totalCost` in `play.ts` returns the printed
+   cost and is the seam.
+3. **The Mulligan** (rule 117) — verified but unimplemented: it is a player
    choice, so it needs a setup-time decision point rather than a config value.
-3. **Signature card limits and champion tag matching** (103.2.a.2, 103.2.d) —
+4. **Signature card limits and champion tag matching** (103.2.a.2, 103.2.d) —
    both need card data that carries champion tags.
 
 Focus (rule 313) *is* implemented, as part of Non-Combat Showdowns: granted to
@@ -96,8 +102,8 @@ would with the cards that exist today:
   not yet exposed. Making it one needs a sub-action protocol during the Damage
   Step.
 
-A note for whoever writes card effects: **a Recall (466.1.a.2) is unreachable
-with vanilla Units.** Might is both the damage a Unit deals and the damage it
+Now that damage prevention and Might modifiers are expressible, note that **a
+Recall (466.1.a.2) is still unreachable with vanilla Units.** Might is both the damage a Unit deals and the damage it
 survives, so one side outlives the other exactly when it has more Might — the
 comparison cannot go both ways, and Attacker and Defender can never both
 survive. Damage prevention or healing is what makes Recalls possible.

@@ -60,6 +60,8 @@ export { currentLegalActions, legalActions } from './legal.js';
 export { knownCardCount, observe, opponentsOf, pointsOf } from './view.js';
 export type { BattlefieldView, EntityView, GameView, PlayerView } from './view.js';
 
+export { executeEffect, isValidTarget, legalTargets } from './effects.js';
+
 export {
   assignDamage,
   combatResult,

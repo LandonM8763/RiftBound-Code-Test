@@ -82,6 +82,13 @@ export interface Entity {
   readonly exhausted: boolean;
   /** Damage marked on a Unit. A Unit is destroyed once this reaches its Might. */
   readonly damage: number;
+  /**
+   * Might granted until the end of the turn.
+   *
+   * Rule 317.2.c expires every "this turn" effect in the Ending Phase, which is
+   * where this is cleared. Not a Buff — see the note on `giveMight`.
+   */
+  readonly mightBonus: number;
 }
 
 /**
@@ -141,6 +148,11 @@ export interface ChainItem {
   readonly entity: EntityId;
   readonly controller: PlayerId;
   readonly pending: boolean;
+  /**
+   * The target chosen when the card was played (rule 355.8), carried until it
+   * resolves. `null` for a card that does not target.
+   */
+  readonly target: EntityId | null;
 }
 
 /**

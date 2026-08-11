@@ -61,6 +61,7 @@ export function makeUnit(
     cost: overrides.cost ?? ({ energy: might, power: [] } satisfies Cost),
     might,
     champion: overrides.champion ?? false,
+    effect: overrides.effect,
   };
 }
 
@@ -77,6 +78,7 @@ export function makeSpell(
     type: 'spell',
     cost: overrides.cost ?? FREE,
     timing: overrides.timing ?? 'action',
+    effect: overrides.effect,
   };
 }
 
@@ -92,6 +94,7 @@ export function makeGear(
     tags: overrides.tags ?? [],
     type: 'gear',
     cost: overrides.cost ?? FREE,
+    effect: overrides.effect,
   };
 }
 

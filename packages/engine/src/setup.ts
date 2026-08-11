@@ -120,6 +120,7 @@ export function createGame(options: CreateGameOptions): ReduceResult {
       location: playerLocation(owner, zone),
       exhausted: false,
       damage: 0,
+      mightBonus: 0,
     };
     return id;
   };

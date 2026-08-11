@@ -1,4 +1,5 @@
 import type { Cost } from './cost.js';
+import type { CardEffect } from './effect.js';
 import type { Domain, DomainIdentity } from './domain.js';
 
 /**
@@ -52,17 +53,23 @@ export interface UnitCard extends CardBase {
   readonly cost: Cost;
   readonly might: number;
   readonly champion: boolean;
+  /** Rules text run when the Unit is played (rule 359.2.b). */
+  readonly effect?: CardEffect | undefined;
 }
 
 export interface SpellCard extends CardBase {
   readonly type: 'spell';
   readonly cost: Cost;
   readonly timing: SpellTiming;
+  /** Rules text run when the Spell resolves off the Chain (rule 359.3.d). */
+  readonly effect?: CardEffect | undefined;
 }
 
 export interface GearCard extends CardBase {
   readonly type: 'gear';
   readonly cost: Cost;
+  /** Rules text run when the Gear is played (rule 359.2.b). */
+  readonly effect?: CardEffect | undefined;
 }
 
 /** Lives in the 12-card Rune deck and is Channelled to produce resources. */
@@ -93,4 +100,9 @@ export function isPlayable(card: CardDefinition): card is PlayableCard {
 
 export function costOf(card: CardDefinition): Cost | undefined {
   return isPlayable(card) ? card.cost : undefined;
+}
+
+/** The card's rules text, if it has any. */
+export function effectOf(card: CardDefinition): CardEffect | undefined {
+  return isPlayable(card) ? card.effect : undefined;
 }
