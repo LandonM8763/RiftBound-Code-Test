@@ -1,3 +1,4 @@
+import type { CardAbilities } from './ability.js';
 import type { Cost } from './cost.js';
 import type { CardEffect } from './effect.js';
 import type { Domain, DomainIdentity } from './domain.js';
@@ -56,6 +57,14 @@ interface CardBase {
    * Champion Unit.
    */
   readonly signature?: boolean | undefined;
+  /**
+   * Activated and Triggered abilities (rules 376-395).
+   *
+   * On the base rather than on the playable cards because a Battlefield can
+   * carry a Triggered Ability ("When you hold here, ...") and a Legend carries
+   * one as often as a Unit does.
+   */
+  readonly abilities?: CardAbilities | undefined;
 }
 
 /** Occupies the Legend Zone for the whole game and never leaves it. */

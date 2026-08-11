@@ -6,6 +6,15 @@ export type { Cost } from './cost.js';
 
 export { cardId, costOf, effectOf, isChampionUnit, isPlayable, isSignature } from './card.js';
 
+export { activatedAbilities, sameCondition, triggeredAbilities } from './ability.js';
+export type {
+  AbilityRef,
+  ActivatedAbility,
+  CardAbilities,
+  TriggerCondition,
+  TriggeredAbility,
+} from './ability.js';
+
 export { NO_TARGET, needsTarget } from './effect.js';
 export type { CardEffect, Effect, TargetSpec } from './effect.js';
 export type {

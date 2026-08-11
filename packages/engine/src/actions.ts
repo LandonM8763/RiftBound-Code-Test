@@ -40,6 +40,23 @@ export type Action =
   /** Pass Priority (rule 312.2.d). Resolves the Chain once everyone passes. */
   | { readonly type: 'pass' }
   /**
+   * Rule 377.3.a: declare activation of an Activated Ability. `source` is the
+   * Game Object the ability is printed on, `index` its position in that card's
+   * activated abilities.
+   */
+  | {
+      readonly type: 'activateAbility';
+      readonly source: EntityId;
+      readonly index: number;
+      readonly target?: EntityId;
+    }
+  /**
+   * Rule 383.3.a: a "you may" Triggered Ability is performed or declined by its
+   * controller during finalization; declining removes it from the Chain
+   * (383.3.e.2.b).
+   */
+  | { readonly type: 'resolveTrigger'; readonly perform: boolean }
+  /**
    * Take the Mulligan (rule 117): set aside these cards, draw that many, then
    * Recycle the set-aside ones. An empty list keeps the opening hand.
    */

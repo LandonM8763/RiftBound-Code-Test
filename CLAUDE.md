@@ -43,8 +43,8 @@ What is built:
   Priority, the Process of Play, the Standard Move and Contested status,
   Showdowns with Focus, the full Steps of Combat, Scoring by Conquer including
   the Final Point restriction, **data-driven card effects**, **the Mulligan**,
-  first-class legal action generation, per-player observable views, and a
-  structural invariant checker.
+  **Activated and Triggered abilities**, first-class legal action generation,
+  per-player observable views, and a structural invariant checker.
 
   With Combat in, the engine can play a complete game of Riftbound with vanilla
   cards: contest a Battlefield, fight over it, take Control, and score to 8.
@@ -87,12 +87,21 @@ What is **not** built yet, in rough dependency order:
    the data, `engine/effects.ts` for the interpreter) with draw, deal damage,
    heal, give Might, and add resources. Adding a primitive is a variant plus a
    case — no new code path per card. Still absent: killing, recalling, moving,
-   counters, XP, and every triggered or activated ability (rules 376-395), which
-   need a trigger system rather than another primitive.
-2. **Cost modification** (rule 356's layers: base-cost replacement, additional
+   counters and XP.
+2. **Turn-boundary triggers.** `TriggerCondition` covers `played`, `dies` and
+   `conquer` — every condition that fires during the Main Phase, where the
+   Chain already works. "At the end of your turn" (317) and "at the start of
+   your Beginning Phase" (315.2) are **deliberately absent from the union**
+   rather than stubbed, because those phases do their whole job inside one
+   `resolvePhase` action and then advance: a trigger placed there would have
+   nowhere to wait, and the phase would move on before anyone could respond.
+   Supporting them means making the phase machine interruptible — do the
+   phase's work, then hold the phase open until the Chain empties — which is a
+   change to the phase machine, not to the ability model.
+3. **Cost modification** (rule 356's layers: base-cost replacement, additional
    costs, increases, discounts). `totalCost` in `play.ts` returns the printed
    cost and is the seam.
-3. **Real card data.** Every construction rule is now enforced, but the card
+4. **Real card data.** Every construction rule is now enforced, but the card
    pool is still invented fixtures — see [Open questions](#open-questions).
 
 Focus (rule 313) *is* implemented, as part of Non-Combat Showdowns: granted to
@@ -102,7 +111,7 @@ handling of it (464.2.c.1.a-b).
 
 ### Simplifications in the Process of Play
 
-Both are documented at their call sites and reach the same states as the rules
+These are documented at their call sites and reach the same states as the rules
 would with the cards that exist today:
 
 - **Adding resources is a separate action from playing a card.** Rule 357.1.a
@@ -113,6 +122,11 @@ would with the cards that exist today:
   going on the Chain and finalizing, and a Permanent leaves the Chain at that
   moment (359.2), so only Spells ever linger and only they open a response
   window.
+- **A player does not order their own simultaneous triggers.** Rule 383.3.d.1
+  has each player order their own triggers, starting with the Turn Player and
+  proceeding in turn order. `triggersFor` honours the *between-player* order and
+  decides the within-player tie-break for them, deterministically. Making it a
+  choice needs the same sub-action protocol as the next item.
 - **Combat damage assignment order is fixed, not chosen.** Rule 465.2.c lets the
   assigning player pick the order, which decides *which* enemy Units die.
   `assignDamage` in `combat.ts` walks the targets in a fixed order instead. Every
@@ -416,6 +430,7 @@ builds the batch on top of it. Keep that split — a win rate computed inside
 | `mutate.ts` | Structural-sharing update helpers; the only place zone lists and `entity.location` are written |
 | `actions.ts` | The `Action` union and `IllegalActionError` |
 | `reduce.ts` | `(state, action) -> { state, events }`, the phase machine |
+| `abilities.ts` | Activated/Triggered abilities: what may be activated, what a game event triggers |
 | `legal.ts` | `legalActions(state, player)` |
 | `view.ts` | Per-player observable view; redacts hidden zones |
 | `invariants.ts` | `checkInvariants(state)`, run after every action when fuzzing |
@@ -427,6 +442,26 @@ printed on its card and a Showdown happens in the open. `might` is `null`
 exactly when `card` is, so redaction stays a single decision rather than two
 that can drift apart. It is derived (`might + mightBonus`, floored at 0 per
 143.2.b) so agents do not reimplement `mightOf` and get Combat subtly wrong.
+
+### Abilities
+
+Rules 376-395. The data lives in `cards/ability.ts`, the timing and trigger
+logic in `engine/abilities.ts`, and execution reuses `effects.ts` — an ability's
+effect is just an effect.
+
+- **An ability on the Chain has no card representing it** (377.3.a.1). That is
+  why `ChainItem.ability` exists: `entity` points at the ability's *source*, and
+  the source stays exactly where it is. A resolved Spell goes to the trash; a
+  resolved ability leaves its source alone.
+- **Activated abilities are gated by three rules, not convenience**: 381 (the
+  controller's own turn, Open State only), 380 (source on the Board) and 377
+  (the cost is payable, exhausting the source included when printed — 414).
+- **An optional trigger goes on the Chain *pending*.** Rule 383.3.a makes
+  performing a "you may" its controller's choice at finalization, and
+  383.3.e.2.b removes it from the Chain if they decline, so a pending item is
+  the only thing `legalActions` will offer its controller until they answer.
+- **`triggersUsed` counts per-turn limits** (383.3.e), keyed by source and
+  ability index and cleared in the Ending Phase.
 
 ### Engine design principles
 

@@ -16,11 +16,19 @@ import {
   cleanupControl,
   standardMoveDestinations,
 } from './move.js';
+import {
+  abilityFor,
+  activatableAbilities,
+  triggerKey,
+  triggersFor,
+  type PendingTrigger,
+} from './abilities.js';
 import { executeEffect, isValidTarget } from './effects.js';
 import { canPay, payFrom, timingAllows, totalCost, validUnitLocations } from './play.js';
 import { Rng } from './rng.js';
 import type {
   BattlefieldState,
+  ChainItem,
   EntityId,
   GameState,
   Location,
@@ -80,6 +88,10 @@ export function reduce(state: GameState, action: Action): ReduceResult {
       return moveUnits(state, action.units, action.to);
     case 'mulligan':
       return mulligan(state, action.cards);
+    case 'activateAbility':
+      return activateAbility(state, action.source, action.index, action.target);
+    case 'resolveTrigger':
+      return resolveTrigger(state, action.perform);
     default: {
       const exhaustive: never = action;
       throw new IllegalActionError(`Unknown action: ${JSON.stringify(exhaustive)}`);
@@ -199,7 +211,7 @@ function playCard(
       ...next,
       chain: [
         ...next.chain,
-        { entity: card, controller: player, pending: false, target: target ?? null },
+        { entity: card, controller: player, pending: false, target: target ?? null, ability: null },
       ],
       passes: 0,
       priority: player,
@@ -229,7 +241,178 @@ function playCard(
     next = executeEffect(next, player, effect, target, events, drawFor);
   }
 
+  // 383.4.a.2: Play Effects go on the Chain as Pending Items once the Permanent
+  // has been finalized and entered the Board — that is, right here.
+  next = queueTriggers(next, triggersFor(next, { kind: 'played' }, { sources: [card] }), events);
+
   return { state: next, events };
+}
+
+/**
+ * Activate an Activated Ability (rule 377.3).
+ *
+ * The ability goes on the Chain with no card to represent it (377.3.a.1), so
+ * the source stays exactly where it is and only the *cost* touches it. Like a
+ * Spell, it then waits for every player to pass before resolving.
+ */
+function activateAbility(
+  state: GameState,
+  source: EntityId,
+  index: number,
+  target: EntityId | undefined,
+): ReduceResult {
+  const player = requirePriority(state);
+  const available = activatableAbilities(state, player);
+  const chosen = available.find(
+    (candidate: { source: EntityId; index: number }) =>
+      candidate.source === source && candidate.index === index,
+  );
+
+  if (chosen === undefined) {
+    throw new IllegalActionError(
+      `Ability ${index} of ${source} cannot be activated by player ${player} now`,
+    );
+  }
+  if (!isValidTarget(state, player, chosen.ability.effect.target, target)) {
+    throw new IllegalActionError(`Ability ${index} of ${source} has no valid target ${String(target)}`);
+  }
+
+  const events: GameEvent[] = [];
+  let next = state;
+
+  // 377: pay the cost. Exhausting the source is part of it when printed (414).
+  next = withPlayer(next, player, (current) => ({
+    ...current,
+    pool: payFrom(current.pool, chosen.ability.cost),
+  }));
+  if (chosen.ability.exhaustSelf === true) {
+    next = withEntity(next, source, (current) => ({ ...current, exhausted: true }));
+  }
+
+  next = {
+    ...next,
+    chain: [
+      ...next.chain,
+      {
+        entity: source,
+        controller: player,
+        pending: false,
+        target: target ?? null,
+        ability: { kind: 'activated', index },
+      },
+    ],
+    passes: 0,
+    priority: player,
+    ...(next.showdown === null ? {} : { showdown: { ...next.showdown, passes: 0 } }),
+  };
+
+  events.push(
+    { type: 'abilityActivated', player, source, index },
+    { type: 'chainItemAdded', entity: source, controller: player },
+  );
+  return { state: next, events };
+}
+
+/**
+ * Perform or decline a "you may" Triggered Ability (rule 383.3.a).
+ *
+ * Declining removes it from the Chain without effect (383.3.e.2.b). Performing
+ * resolves it immediately: the choice happens at finalization, after which the
+ * ability is an ordinary Chain item that has already been passed on.
+ */
+function resolveTrigger(state: GameState, perform: boolean): ReduceResult {
+  const player = requirePriority(state);
+  const top = state.chain[state.chain.length - 1];
+
+  if (top === undefined || !top.pending) {
+    throw new IllegalActionError('No Triggered Ability is waiting to be finalized');
+  }
+  if (top.controller !== player) {
+    throw new IllegalActionError(`Player ${player} does not control the pending Triggered Ability`);
+  }
+
+  const events: GameEvent[] = [];
+  const chain = state.chain.slice(0, -1);
+
+  if (!perform) {
+    events.push({ type: 'triggerDeclined', player, source: top.entity });
+    return {
+      state: { ...state, chain, passes: 0, priority: chainPriority(state, chain) },
+      events,
+    };
+  }
+
+  // Finalized: it stops being pending and waits on the Chain like any item.
+  const finalized: ChainItem = { ...top, pending: false };
+  return {
+    state: {
+      ...state,
+      chain: [...chain, finalized],
+      passes: 0,
+      priority: state.activePlayer,
+    },
+    events,
+  };
+}
+
+/** Priority after an item leaves the Chain (rule 312.2.a, 312.2.c). */
+function chainPriority(state: GameState, chain: readonly ChainItem[]): PlayerId {
+  const top = chain[chain.length - 1];
+  return top === undefined ? state.activePlayer : top.controller;
+}
+
+/**
+ * Put newly triggered abilities on the Chain (rule 383.3).
+ *
+ * An optional ability goes on as a *pending* item, because 383.3.a makes
+ * performing it a choice its controller takes at finalization. A mandatory one
+ * is finalized straight away.
+ */
+function queueTriggers(
+  state: GameState,
+  pending: readonly PendingTrigger[],
+  events: GameEvent[],
+): GameState {
+  if (pending.length === 0) {
+    return state;
+  }
+
+  let next = state;
+  for (const trigger of pending) {
+    const ability = abilityFor(next, trigger.source, trigger.ability);
+    if (ability === undefined) {
+      continue;
+    }
+    const optional = 'optional' in ability && ability.optional === true;
+
+    next = {
+      ...next,
+      chain: [
+        ...next.chain,
+        {
+          entity: trigger.source,
+          controller: trigger.controller,
+          pending: optional,
+          // Triggered abilities choose their target on resolution rather than
+          // on the way onto the Chain, so nothing is carried here yet.
+          target: null,
+          ability: trigger.ability,
+        },
+      ],
+      passes: 0,
+    };
+    events.push({
+      type: 'abilityTriggered',
+      player: trigger.controller,
+      source: trigger.source,
+      index: trigger.ability.index,
+    });
+  }
+
+  // 312.2.c: Priority sits with the controller of the top Chain item; a pending
+  // item needs its controller to finalize it before anyone else can act.
+  const top = next.chain[next.chain.length - 1];
+  return { ...next, priority: top?.controller ?? next.activePlayer };
 }
 
 /**
@@ -387,14 +570,40 @@ function pass(state: GameState): ReduceResult {
     throw new IllegalActionError('The Chain is empty');
   }
 
-  // 359.3.d: execute the Spell's rules text, then put the card in the trash.
   let next = state;
-  const spell = entityCard(next, top.entity);
-  const spellEffect = effectOf(spell);
-  if (spellEffect !== undefined) {
-    next = executeEffect(next, top.controller, spellEffect, top.target ?? undefined, events, drawFor);
+
+  if (top.ability !== null) {
+    // 377.3.b.3 / 383.3: an ability resolves by executing its effect. It has no
+    // card on the Chain (377.3.a.1), so its source stays exactly where it is —
+    // the one place an ability differs from a Spell on resolution.
+    const ability = abilityFor(next, top.entity, top.ability);
+    if (ability !== undefined) {
+      next = executeEffect(
+        next,
+        top.controller,
+        ability.effect,
+        top.target ?? undefined,
+        events,
+        drawFor,
+      );
+      if (top.ability.kind === 'triggered') {
+        // 383.3.e: count it against any "N times each turn" limit.
+        const key = triggerKey(top.entity, top.ability.index);
+        next = {
+          ...next,
+          triggersUsed: { ...next.triggersUsed, [key]: (next.triggersUsed[key] ?? 0) + 1 },
+        };
+      }
+    }
+  } else {
+    // 359.3.d: execute the Spell's rules text, then put the card in the trash.
+    const spell = entityCard(next, top.entity);
+    const spellEffect = effectOf(spell);
+    if (spellEffect !== undefined) {
+      next = executeEffect(next, top.controller, spellEffect, top.target ?? undefined, events, drawFor);
+    }
+    next = moveEntity(next, top.entity, playerLocation(top.controller, 'trash'));
   }
-  next = moveEntity(next, top.entity, playerLocation(top.controller, 'trash'));
   const chain = state.chain.slice(0, -1);
   const nextTop = chain[chain.length - 1];
 
@@ -648,6 +857,14 @@ function conquer(
     return { state: { ...next, outcome: won }, events };
   }
 
+  // "When you conquer here": the Conquer has been processed, so the Trigger's
+  // Condition can be evaluated (383.2.c).
+  next = queueTriggers(
+    next,
+    triggersFor(next, { kind: 'conquer' }, { controller: player, battlefield: index }),
+    events,
+  );
+
   return { state: next, events };
 }
 
@@ -723,6 +940,9 @@ function resolveCombat(
   }
   if (killed.length > 0) {
     events.push({ type: 'unitsKilled', units: killed });
+    // 383.2.c: a Trigger's Condition is evaluated after the inciting event has
+    // been processed, so the deaths are already resolved when these fire.
+    next = queueTriggers(next, triggersFor(next, { kind: 'dies' }, { sources: killed }), events);
   }
 
   // 466.1.a.1: heal all Units.
@@ -1053,6 +1273,8 @@ function ending(state: GameState): ReduceResult {
 
   // 317.2.e: every Rune Pool empties again at the end of the turn.
   next = emptyPools(next, events);
+  // 383.3.e: "N times each turn" counters reset with the turn.
+  next = { ...next, triggersUsed: {} };
 
   return passTurn(next, events);
 }

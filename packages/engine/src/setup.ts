@@ -174,6 +174,7 @@ export function createGame(options: CreateGameOptions): ReduceResult {
     priority: startingPlayer,
     showdown: null,
     mulligansTaken: 0,
+    triggersUsed: {},
     passes: 0,
     outcome: null,
   };

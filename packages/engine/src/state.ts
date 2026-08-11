@@ -1,4 +1,10 @@
-import { DOMAINS, type CardDefinition, type CardId, type Domain } from '@riftbound/cards';
+import {
+  DOMAINS,
+  type AbilityRef,
+  type CardDefinition,
+  type CardId,
+  type Domain,
+} from '@riftbound/cards';
 
 import type { RngState } from './rng.js';
 
@@ -145,6 +151,7 @@ export interface PlayerState {
  * flag exists so the distinction survives when Pending windows arrive.
  */
 export interface ChainItem {
+  /** The played card, or the source of the ability. */
   readonly entity: EntityId;
   readonly controller: PlayerId;
   readonly pending: boolean;
@@ -153,6 +160,15 @@ export interface ChainItem {
    * resolves. `null` for a card that does not target.
    */
   readonly target: EntityId | null;
+  /**
+   * Which ability this item is, or `null` when the item is a played card.
+   *
+   * Rule 377.3.a.1: an ability on the Chain "has no card to represent it", so
+   * `entity` points at its *source* and the source stays wherever it is. That
+   * is the difference that matters on resolution — a resolved Spell goes to the
+   * trash, a resolved ability leaves its source alone.
+   */
+  readonly ability: AbilityRef | null;
 }
 
 /**
@@ -336,6 +352,14 @@ export interface GameState {
    * First Player (118).
    */
   readonly mulligansTaken: number;
+  /**
+   * How many times each Triggered Ability has been performed this turn, keyed
+   * by `${source}:${abilityIndex}` (rule 383.3.e).
+   *
+   * Cleared in the Ending Phase. A plain record rather than a Map so the state
+   * stays JSON-serializable for golden-game tests.
+   */
+  readonly triggersUsed: Readonly<Record<string, number>>;
   /** Consecutive passes since the last Chain item was added or resolved. */
   readonly passes: number;
   /** `null` while the game is still running. */

@@ -60,6 +60,15 @@ export { currentLegalActions, legalActions } from './legal.js';
 export { knownCardCount, observe, opponentsOf, pointsOf } from './view.js';
 export type { BattlefieldView, EntityView, GameView, PlayerView, ShowdownView } from './view.js';
 
+export {
+  abilityFor,
+  activatableAbilities,
+  triggerKey,
+  triggersFor,
+  withinTurnLimit,
+} from './abilities.js';
+export type { PendingTrigger } from './abilities.js';
+
 export { executeEffect, isValidTarget, legalTargets } from './effects.js';
 
 export {

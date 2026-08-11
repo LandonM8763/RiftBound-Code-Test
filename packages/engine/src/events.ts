@@ -64,6 +64,22 @@ export type GameEvent =
       readonly entity: EntityId;
       readonly onChain: boolean;
     }
+  /** Rule 377.3.a: a player activated an Activated Ability. */
+  | {
+      readonly type: 'abilityActivated';
+      readonly player: PlayerId;
+      readonly source: EntityId;
+      readonly index: number;
+    }
+  /** Rule 383.3: a Triggered Ability's condition was met and it went on the Chain. */
+  | {
+      readonly type: 'abilityTriggered';
+      readonly player: PlayerId;
+      readonly source: EntityId;
+      readonly index: number;
+    }
+  /** Rule 383.3.e.2.b: a "you may" trigger was declined and left the Chain. */
+  | { readonly type: 'triggerDeclined'; readonly player: PlayerId; readonly source: EntityId }
   /** Rule 328: an item was added to the Chain. */
   | { readonly type: 'chainItemAdded'; readonly entity: EntityId; readonly controller: PlayerId }
   /** Rule 359.3.d: a Chain item resolved. */

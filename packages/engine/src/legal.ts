@@ -1,6 +1,7 @@
 import type { Action } from './actions.js';
 import { effectOf } from '@riftbound/cards';
 
+import { activatableAbilities } from './abilities.js';
 import { legalTargets } from './effects.js';
 import { standardMoves } from './move.js';
 import { playableFromHand, validUnitLocations } from './play.js';
@@ -36,6 +37,29 @@ export function legalActions(state: GameState, player: PlayerId): readonly Actio
   const closed = isClosed(state);
   const showdown = isShowdown(state);
   const actions: Action[] = [];
+
+  // 383.3.a: a pending "you may" trigger blocks everything else — its
+  // controller finalizes it, or it leaves the Chain (383.3.e.2.b).
+  const top = state.chain[state.chain.length - 1];
+  if (top !== undefined && top.pending && top.controller === player) {
+    return [
+      { type: 'resolveTrigger', perform: true },
+      { type: 'resolveTrigger', perform: false },
+    ];
+  }
+
+  // 377: Activated Abilities. One action per legal target, for the same reason
+  // cards get one — 355.8 needs a valid choice before it can go on the Chain.
+  for (const { source, index, ability } of activatableAbilities(state, player)) {
+    const spec = ability.effect.target;
+    if (spec.kind === 'none') {
+      actions.push({ type: 'activateAbility', source, index });
+      continue;
+    }
+    for (const target of legalTargets(state, player, spec)) {
+      actions.push({ type: 'activateAbility', source, index, target });
+    }
+  }
 
   // Rule 164.2: a Basic Rune's two Add abilities are Reactions, so they are
   // available whenever their controller has Priority, Chain or no Chain.
