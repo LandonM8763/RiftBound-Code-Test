@@ -41,6 +41,8 @@ export function makeLegend(
     domains: overrides.domains ?? domainIdentity,
     text: overrides.text ?? '',
     tags: overrides.tags ?? [],
+    championTag: overrides.championTag,
+    signature: overrides.signature,
     type: 'legend',
     domainIdentity,
   };
@@ -57,6 +59,8 @@ export function makeUnit(
     domains,
     text: overrides.text ?? '',
     tags: overrides.tags ?? [],
+    championTag: overrides.championTag,
+    signature: overrides.signature,
     type: 'unit',
     cost: overrides.cost ?? ({ energy: might, power: [] } satisfies Cost),
     might,
@@ -75,6 +79,8 @@ export function makeSpell(
     domains,
     text: overrides.text ?? '',
     tags: overrides.tags ?? [],
+    championTag: overrides.championTag,
+    signature: overrides.signature,
     type: 'spell',
     cost: overrides.cost ?? FREE,
     timing: overrides.timing ?? 'action',
@@ -92,6 +98,8 @@ export function makeGear(
     domains,
     text: overrides.text ?? '',
     tags: overrides.tags ?? [],
+    championTag: overrides.championTag,
+    signature: overrides.signature,
     type: 'gear',
     cost: overrides.cost ?? FREE,
     effect: overrides.effect,
@@ -108,6 +116,8 @@ export function makeRune(
     domains: overrides.domains ?? [domain],
     text: overrides.text ?? '',
     tags: overrides.tags ?? [],
+    championTag: overrides.championTag,
+    signature: overrides.signature,
     type: 'rune',
     domain,
   };
@@ -122,6 +132,8 @@ export function makeBattlefield(
     domains: overrides.domains ?? [],
     text: overrides.text ?? '',
     tags: overrides.tags ?? [],
+    championTag: overrides.championTag,
+    signature: overrides.signature,
     type: 'battlefield',
   };
 }

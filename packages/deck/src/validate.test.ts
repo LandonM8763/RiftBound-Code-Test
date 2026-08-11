@@ -9,15 +9,24 @@ import {
 } from '@riftbound/cards/testing';
 import { describe, expect, it } from 'vitest';
 
-import type { Deck } from './deck.js';
+import type { Deck, DeckEntry } from './deck.js';
 import { CONSTRUCTED_BO1, CONSTRUCTED_BO3 } from './format.js';
 import { validateDeck } from './validate.js';
 
-const LEGEND = makeLegend(['fury', 'calm'], { id: cardId('OGN-001'), name: 'Test Legend' });
+/** Champion Tags (rule 133.8.b) link the Legend to its Champion and Signatures. */
+const TAG = 'Testarossa';
+const OTHER_TAG = 'Someone Else';
+
+const LEGEND = makeLegend(['fury', 'calm'], {
+  id: cardId('OGN-001'),
+  name: 'Test Legend',
+  championTag: TAG,
+});
 const CHAMPION = makeUnit(4, ['fury'], {
   id: cardId('OGN-002'),
   name: 'Test Champion',
   champion: true,
+  championTag: TAG,
 });
 
 /** 14 distinct Units: 13 at three copies plus one single makes exactly 40. */
@@ -38,6 +47,55 @@ const SPELL = makeSpell(['fury'], { id: cardId('OGN-401'), name: 'Fury Spell' })
 const GEAR = makeGear(['calm'], { id: cardId('OGN-402'), name: 'Calm Gear' });
 const NOT_A_CHAMPION = makeUnit(2, ['fury'], { id: cardId('OGN-403'), name: 'Plain Unit' });
 
+/** A Champion Unit belonging to a different Legend (rule 103.2.a.2). */
+const WRONG_CHAMPION = makeUnit(4, ['fury'], {
+  id: cardId('OGN-404'),
+  name: 'Borrowed Champion',
+  champion: true,
+  championTag: OTHER_TAG,
+});
+
+/**
+ * Signature cards (rule 133.7.b). The supertype applies to any card type, so
+ * there is a Signature Spell here as well as a Signature Unit.
+ */
+const SIGNATURE_UNIT = makeUnit(3, ['fury'], {
+  id: cardId('OGN-500'),
+  name: 'Signature Unit',
+  championTag: TAG,
+  signature: true,
+});
+const SIGNATURE_SPELL = makeSpell(['fury'], {
+  id: cardId('OGN-501'),
+  name: 'Signature Spell',
+  championTag: TAG,
+  signature: true,
+});
+const OFF_TAG_SIGNATURE = makeUnit(3, ['fury'], {
+  id: cardId('OGN-502'),
+  name: 'Borrowed Signature',
+  championTag: OTHER_TAG,
+  signature: true,
+});
+/** Contradictory card data: rule 103.2.d.3 makes these mutually exclusive. */
+const SIGNATURE_CHAMPION = makeUnit(4, ['fury'], {
+  id: cardId('OGN-503'),
+  name: 'Impossible Card',
+  champion: true,
+  championTag: TAG,
+  signature: true,
+});
+/** Card data with no Champion Tag at all, as an ingest that omits it produces. */
+const UNTAGGED_LEGEND = makeLegend(['fury', 'calm'], {
+  id: cardId('OGN-600'),
+  name: 'Untagged Legend',
+});
+const UNTAGGED_CHAMPION = makeUnit(4, ['fury'], {
+  id: cardId('OGN-601'),
+  name: 'Untagged Champion',
+  champion: true,
+});
+
 const REGISTRY = CardRegistry.from([
   LEGEND,
   CHAMPION,
@@ -50,6 +108,13 @@ const REGISTRY = CardRegistry.from([
   SPELL,
   GEAR,
   NOT_A_CHAMPION,
+  WRONG_CHAMPION,
+  SIGNATURE_UNIT,
+  SIGNATURE_SPELL,
+  OFF_TAG_SIGNATURE,
+  SIGNATURE_CHAMPION,
+  UNTAGGED_LEGEND,
+  UNTAGGED_CHAMPION,
 ] as CardDefinition[]);
 
 function legalDeck(overrides: Partial<Deck> = {}): Deck {
@@ -72,6 +137,21 @@ function legalDeck(overrides: Partial<Deck> = {}): Deck {
 
 const codes = (deck: Deck, format = CONSTRUCTED_BO1): string[] =>
   validateDeck(deck, REGISTRY, format).issues.map((issue) => issue.code);
+
+/** A 40-card main deck holding `extra`, padded to size with plain Units. */
+function mainWith(extra: readonly DeckEntry[]): DeckEntry[] {
+  let remaining = 40 - extra.reduce((sum, entry) => sum + entry.count, 0);
+  const filler: DeckEntry[] = [];
+  for (const unit of UNITS) {
+    if (remaining <= 0) {
+      break;
+    }
+    const count = Math.min(3, remaining);
+    filler.push({ card: unit.id, count });
+    remaining -= count;
+  }
+  return [...filler, ...extra];
+}
 
 describe('validateDeck', () => {
   it('accepts a legal best-of-one deck', () => {
@@ -172,6 +252,144 @@ describe('copy limit', () => {
 
     expect(issues.map((issue) => issue.code)).toEqual(['copy-limit']);
     expect(issues[0]?.cards).toEqual([(UNITS[0] as CardDefinition).id]);
+  });
+});
+
+describe('Champion Tags (rule 103.2.a.2)', () => {
+  it('accepts a Chosen Champion whose tag matches the Legend', () => {
+    expect(codes(legalDeck())).not.toContain('champion-tag-mismatch');
+  });
+
+  it('rejects a Chosen Champion carrying a different tag', () => {
+    expect(codes(legalDeck({ champion: WRONG_CHAMPION.id }))).toContain('champion-tag-mismatch');
+  });
+
+  it('names both tags and both cards in the message', () => {
+    const result = validateDeck(legalDeck({ champion: WRONG_CHAMPION.id }), REGISTRY);
+    const issue = result.issues.find((candidate) => candidate.code === 'champion-tag-mismatch');
+
+    expect(issue?.message).toContain(TAG);
+    expect(issue?.message).toContain(OTHER_TAG);
+    expect(issue?.cards).toEqual([WRONG_CHAMPION.id, LEGEND.id]);
+  });
+
+  it('warns rather than errors when the card data carries no tag', () => {
+    // A missing field is a gap in the card data, not an illegal deck.
+    const deck = legalDeck({ legend: UNTAGGED_LEGEND.id, champion: UNTAGGED_CHAMPION.id });
+    const result = validateDeck(deck, REGISTRY);
+    const issue = result.issues.find((candidate) => candidate.code === 'champion-tag-unknown');
+
+    expect(issue?.severity).toBe('warning');
+    expect(result.legal).toBe(true);
+  });
+
+  it('warns when only the Champion is untagged', () => {
+    const result = validateDeck(legalDeck({ champion: UNTAGGED_CHAMPION.id }), REGISTRY);
+    const issue = result.issues.find((candidate) => candidate.code === 'champion-tag-unknown');
+
+    expect(issue?.cards).toEqual([UNTAGGED_CHAMPION.id]);
+  });
+
+  it('does not check the tag on a card that is not a Champion Unit at all', () => {
+    // The 'champion-not-a-champion' error already says everything useful.
+    const found = codes(legalDeck({ champion: NOT_A_CHAMPION.id }));
+    expect(found).toContain('champion-not-a-champion');
+    expect(found).not.toContain('champion-tag-mismatch');
+    expect(found).not.toContain('champion-tag-unknown');
+  });
+});
+
+describe('Signature cards (rule 103.2.d)', () => {
+  it('accepts three Signature cards', () => {
+    const deck = legalDeck({ main: mainWith([{ card: SIGNATURE_UNIT.id, count: 3 }]) });
+    expect(codes(deck)).toEqual([]);
+  });
+
+  it('rejects a fourth', () => {
+    const deck = legalDeck({
+      main: mainWith([
+        { card: SIGNATURE_UNIT.id, count: 3 },
+        { card: SIGNATURE_SPELL.id, count: 1 },
+      ]),
+    });
+    expect(codes(deck)).toContain('signature-limit');
+  });
+
+  it('counts the limit across names, not per name (103.2.d.1)', () => {
+    // Two copies each of two different Signature cards: legal under the 3-copy
+    // rule, over the Signature budget.
+    const deck = legalDeck({
+      main: mainWith([
+        { card: SIGNATURE_UNIT.id, count: 2 },
+        { card: SIGNATURE_SPELL.id, count: 2 },
+      ]),
+    });
+    const found = codes(deck);
+
+    expect(found).toContain('signature-limit');
+    expect(found).not.toContain('copy-limit');
+  });
+
+  it('counts the sideboard against the same budget', () => {
+    const deck = legalDeck({
+      main: mainWith([{ card: SIGNATURE_UNIT.id, count: 3 }]),
+      sideboard: [
+        { card: SIGNATURE_SPELL.id, count: 1 },
+        { card: SPELL.id, count: 3 },
+        { card: GEAR.id, count: 3 },
+        { card: (UNITS[13] as CardDefinition).id, count: 1 },
+      ],
+    });
+    expect(codes(deck, CONSTRUCTED_BO3)).toContain('signature-limit');
+  });
+
+  it('requires every Signature card to carry the Legend`s tag (103.2.d.2)', () => {
+    const deck = legalDeck({ main: mainWith([{ card: OFF_TAG_SIGNATURE.id, count: 1 }]) });
+    const result = validateDeck(deck, REGISTRY);
+    const issue = result.issues.find((candidate) => candidate.code === 'signature-tag-mismatch');
+
+    expect(issue?.cards).toEqual([OFF_TAG_SIGNATURE.id, LEGEND.id]);
+    expect(result.legal).toBe(false);
+  });
+
+  it('applies the supertype to any card type, Spells included (133.7.b)', () => {
+    const deck = legalDeck({ main: mainWith([{ card: SIGNATURE_SPELL.id, count: 3 }]) });
+    expect(codes(deck)).toEqual([]);
+
+    const overBudget = legalDeck({
+      main: mainWith([
+        { card: SIGNATURE_SPELL.id, count: 3 },
+        { card: SIGNATURE_UNIT.id, count: 1 },
+      ]),
+    });
+    expect(codes(overBudget)).toContain('signature-limit');
+  });
+
+  it('rejects a Signature Chosen Champion (103.2.d.3)', () => {
+    expect(codes(legalDeck({ champion: SIGNATURE_CHAMPION.id }))).toContain('champion-is-signature');
+  });
+
+  it('rejects card data claiming both supertypes (103.2.d.3)', () => {
+    const deck = legalDeck({ main: mainWith([{ card: SIGNATURE_CHAMPION.id, count: 1 }]) });
+    expect(codes(deck)).toContain('signature-champion-unit');
+  });
+
+  it('warns rather than errors when a Signature card carries no tag', () => {
+    const deck = legalDeck({
+      legend: UNTAGGED_LEGEND.id,
+      champion: UNTAGGED_CHAMPION.id,
+      main: mainWith([{ card: SIGNATURE_UNIT.id, count: 1 }]),
+    });
+    const result = validateDeck(deck, REGISTRY);
+    const issue = result.issues.find((candidate) => candidate.code === 'signature-tag-unknown');
+
+    expect(issue?.severity).toBe('warning');
+    expect(result.legal).toBe(true);
+  });
+
+  it('says nothing at all about a deck with no Signature cards', () => {
+    const found = codes(legalDeck());
+    expect(found.filter((code) => code.startsWith('signature'))).toEqual([]);
   });
 });
 

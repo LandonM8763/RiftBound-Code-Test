@@ -1,9 +1,12 @@
 import {
+  isChampionUnit,
+  isSignature,
   withinIdentity,
   type CardDefinition,
   type CardId,
   type CardRegistry,
   type DomainIdentity,
+  type LegendCard,
 } from '@riftbound/cards';
 
 import { totalCount, uniqueCards, type Deck, type DeckEntry } from './deck.js';
@@ -41,6 +44,9 @@ export function validateDeck(
   const error = (code: string, message: string, cards: readonly CardId[] = []): void => {
     issues.push({ code, severity: 'error', message, cards });
   };
+  const warn = (code: string, message: string, cards: readonly CardId[] = []): void => {
+    issues.push({ code, severity: 'warning', message, cards });
+  };
 
   const unknown = uniqueCards(deck).filter((card) => !registry.has(card));
   if (unknown.length > 0) {
@@ -48,13 +54,15 @@ export function validateDeck(
   }
 
   checkSizes(deck, format, error);
-  const identity = checkLegendAndChampion(deck, registry, error);
+  const legend = checkLegendAndChampion(deck, registry, error);
+  checkChampionTag(deck, registry, legend, error, warn);
+  checkSignatures(deck, registry, legend, format, error, warn);
   checkPileTypes(deck, registry, error);
   checkCopyLimit(deck, format, error);
   checkDistinctBattlefields(deck, registry, error);
 
-  if (identity !== undefined) {
-    checkDomainIdentity(deck, registry, identity, error);
+  if (legend !== undefined) {
+    checkDomainIdentity(deck, registry, legend.domainIdentity, error);
   }
 
   return { legal: !issues.some((issue) => issue.severity === 'error'), issues };
@@ -99,19 +107,30 @@ function checkSizes(deck: Deck, format: Format, error: Report): void {
   }
 }
 
-/** Returns the Legend's Domain Identity when it can be determined. */
+/** Returns the Champion Legend when the deck has a usable one. */
 function checkLegendAndChampion(
   deck: Deck,
   registry: CardRegistry,
   error: Report,
-): DomainIdentity | undefined {
+): LegendCard | undefined {
   const legend = registry.get(deck.legend);
   const champion = registry.get(deck.champion);
 
-  if (champion !== undefined && (champion.type !== 'unit' || !champion.champion)) {
+  if (champion !== undefined && !isChampionUnit(champion)) {
     error(
       'champion-not-a-champion',
       `${champion.name} is not a Champion Unit and cannot be the Chosen Champion`,
+      [deck.champion],
+    );
+  }
+
+  // Rule 103.2.d.3: a Signature card is never a Champion Unit, so it can never
+  // occupy the Champion Zone — the rulebook's own Tibbers/Annie example.
+  if (champion !== undefined && isSignature(champion)) {
+    error(
+      'champion-is-signature',
+      `${champion.name} is a Signature card; Signature cards are not Champion Units ` +
+        'and cannot be the Chosen Champion',
       [deck.champion],
     );
   }
@@ -127,7 +146,141 @@ function checkLegendAndChampion(
     error('legend-no-identity', `${legend.name} declares no Domain Identity`, [deck.legend]);
     return undefined;
   }
-  return legend.domainIdentity;
+  return legend;
+}
+
+/**
+ * Rule 103.2.a.2: the Chosen Champion must be a Champion Unit whose Champion
+ * Tag matches the tag on the Champion Legend.
+ *
+ * The rule is only checkable when both cards carry a `championTag`. Card data
+ * that omits it gets a warning rather than an error: a missing field is a gap
+ * in the data, not an illegal deck, and failing every deck built from tagless
+ * data would make the validator useless against the sample set. The warning is
+ * there so the gap is visible instead of silently passing.
+ */
+function checkChampionTag(
+  deck: Deck,
+  registry: CardRegistry,
+  legend: LegendCard | undefined,
+  error: Report,
+  warn: Report,
+): void {
+  const champion = registry.get(deck.champion);
+  if (legend === undefined || champion === undefined || !isChampionUnit(champion)) {
+    return;
+  }
+
+  const legendTag = legend.championTag;
+  const championTag = champion.championTag;
+
+  if (legendTag === undefined || championTag === undefined) {
+    const missing = legendTag === undefined ? legend : champion;
+    warn(
+      'champion-tag-unknown',
+      `${missing.name} carries no Champion Tag, so rule 103.2.a.2 could not be checked`,
+      [missing.id],
+    );
+    return;
+  }
+
+  if (legendTag !== championTag) {
+    error(
+      'champion-tag-mismatch',
+      `${champion.name} has the Champion Tag "${championTag}" but ${legend.name} has ` +
+        `"${legendTag}"; a Chosen Champion must match its Legend`,
+      [deck.champion, deck.legend],
+    );
+  }
+}
+
+/**
+ * Rule 103.2.d: Signature cards.
+ *
+ * 103.2.d.1 caps them at 3 in total "regardless of name" — a sum across the
+ * deck, not a per-name limit, which is why this is counted separately from the
+ * 3-copy rule. 103.2.d.2 requires every one of them to carry the Legend's
+ * Champion Tag.
+ *
+ * Counted over the same population as the copy limit (Chosen Champion, main
+ * deck, sideboard) so the two rules never disagree about what "your deck"
+ * means. A Signature Chosen Champion is already an error from 103.2.d.3.
+ */
+function checkSignatures(
+  deck: Deck,
+  registry: CardRegistry,
+  legend: LegendCard | undefined,
+  format: Format,
+  error: Report,
+  warn: Report,
+): void {
+  const entries = [{ card: deck.champion, count: 1 }, ...deck.main, ...deck.sideboard];
+  const signatures: { card: CardDefinition; count: number }[] = [];
+
+  for (const entry of entries) {
+    const card = registry.get(entry.card);
+    if (card !== undefined && isSignature(card)) {
+      signatures.push({ card, count: entry.count });
+    }
+  }
+
+  if (signatures.length === 0) {
+    return;
+  }
+
+  const total = signatures.reduce((sum, entry) => sum + entry.count, 0);
+  if (total > format.maxSignatureCards) {
+    error(
+      'signature-limit',
+      `Deck contains ${total} Signature cards; at most ${format.maxSignatureCards} are allowed ` +
+        'in total, regardless of name',
+      signatures.map((entry) => entry.card.id),
+    );
+  }
+
+  // Rule 103.2.d.3: the Champion supertype and the Signature supertype are
+  // mutually exclusive, so a card claiming both is contradictory card data.
+  for (const { card } of signatures) {
+    if (isChampionUnit(card)) {
+      error(
+        'signature-champion-unit',
+        `${card.name} is marked as both a Signature card and a Champion Unit; ` +
+          'rule 103.2.d.3 makes those mutually exclusive',
+        [card.id],
+      );
+    }
+  }
+
+  if (legend === undefined) {
+    return;
+  }
+
+  const legendTag = legend.championTag;
+  if (legendTag === undefined) {
+    warn(
+      'signature-tag-unknown',
+      `${legend.name} carries no Champion Tag, so rule 103.2.d.2 could not be checked`,
+      [legend.id],
+    );
+    return;
+  }
+
+  for (const { card } of signatures) {
+    if (card.championTag === undefined) {
+      warn(
+        'signature-tag-unknown',
+        `${card.name} carries no Champion Tag, so rule 103.2.d.2 could not be checked`,
+        [card.id],
+      );
+    } else if (card.championTag !== legendTag) {
+      error(
+        'signature-tag-mismatch',
+        `${card.name} has the Champion Tag "${card.championTag}" but ${legend.name} has ` +
+          `"${legendTag}"; every Signature card must match the Legend`,
+        [card.id, legend.id],
+      );
+    }
+  }
 }
 
 function checkPileTypes(deck: Deck, registry: CardRegistry, error: Report): void {

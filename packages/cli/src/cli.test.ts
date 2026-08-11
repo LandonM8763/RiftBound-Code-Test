@@ -75,6 +75,30 @@ describe('card data loading', () => {
     ).toThrow(/action.*reaction/);
   });
 
+  it('reads the Champion Tag and Signature supertype (rules 133.7.b, 133.8.b)', () => {
+    const [card] = parseCardsJson(
+      '[{"id":"S","name":"S","type":"spell","cost":{"energy":1},"timing":"action",' +
+        '"championTag":"Jinx","signature":true}]',
+    );
+    expect(card?.championTag).toBe('Jinx');
+    expect(card?.signature).toBe(true);
+  });
+
+  it('leaves the Champion Tag undefined when the data omits it', () => {
+    const [card] = parseCardsJson('[{"id":"B","name":"B","type":"battlefield"}]');
+    expect(card?.championTag).toBeUndefined();
+    expect(card?.signature).toBe(false);
+  });
+
+  it('rejects a malformed Champion Tag or Signature flag', () => {
+    expect(() =>
+      parseCardsJson('[{"id":"B","name":"B","type":"battlefield","championTag":7}]'),
+    ).toThrow(/"championTag" must be a non-empty string/);
+    expect(() =>
+      parseCardsJson('[{"id":"B","name":"B","type":"battlefield","signature":"yes"}]'),
+    ).toThrow(/"signature" must be a boolean/);
+  });
+
   it('rejects duplicate ids through the registry', () => {
     const duplicate = '[{"id":"B","name":"One","type":"battlefield"},{"id":"B","name":"Two","type":"battlefield"}]';
     const result = run(['validate', 'deck.txt', '--cards', 'dup.json'], (path) =>
@@ -187,6 +211,20 @@ describe('validate', () => {
 
     expect(parsed.legal).toBe(true);
     expect(parsed.issues).toEqual([]);
+  });
+
+  it('shows warnings on a deck that is still legal', () => {
+    // `replace` hits the first occurrence only, which is the Legend's tag.
+    // Without it rule 103.2.a.2 cannot be checked — a gap worth surfacing.
+    const untagged = CARDS.replace(',\n    "championTag": "Ember Warden"', '');
+    const result = run(['validate', 'deck.txt', '--cards', 'untagged.json'], (path) =>
+      path === 'deck.txt' ? DECK : untagged,
+    );
+
+    expect(result.code).toBe(EXIT.ok);
+    expect(result.stdout).toMatch(/^LEGAL/);
+    expect(result.stdout).toMatch(/Warnings:/);
+    expect(result.stdout).toMatch(/champion-tag-unknown/);
   });
 });
 

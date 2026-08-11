@@ -95,11 +95,18 @@ export function formatReport(input: ReportInput): string {
       `${deck.battlefields.reduce((sum, entry) => sum + entry.count, 0)} Battlefields`,
   );
 
-  if (!validation.legal) {
+  const errors = validation.issues.filter((issue) => issue.severity === 'error');
+  const warnings = validation.issues.filter((issue) => issue.severity === 'warning');
+
+  if (errors.length > 0) {
     lines.push(...heading('Legality problems'));
-    for (const issue of validation.issues) {
-      lines.push(`  [${issue.code}] ${issue.message}`);
-    }
+    lines.push(...errors.map((issue) => `  [${issue.code}] ${issue.message}`));
+  }
+  // Warnings are shown even for a legal deck: they say a rule could not be
+  // checked, which is exactly what a silent pass would hide.
+  if (warnings.length > 0) {
+    lines.push(...heading('Warnings'));
+    lines.push(...warnings.map((issue) => `  [${issue.code}] ${issue.message}`));
   }
 
   lines.push(...curveSection('Cost curve (Energy)', analysis.curve.byEnergy));
@@ -198,12 +205,23 @@ export function formatReport(input: ReportInput): string {
 }
 
 export function formatValidation(validation: ValidationResult, format: Format): string {
-  if (validation.legal) {
+  const errors = validation.issues.filter((issue) => issue.severity === 'error');
+  const warnings = validation.issues.filter((issue) => issue.severity === 'warning');
+
+  if (validation.legal && warnings.length === 0) {
     return `LEGAL for ${format.name}\n`;
   }
-  const lines = [`ILLEGAL for ${format.name}`, ''];
-  for (const issue of validation.issues) {
-    lines.push(`  [${issue.code}] ${issue.message}`);
+
+  const lines = [`${validation.legal ? 'LEGAL' : 'ILLEGAL'} for ${format.name}`, ''];
+  lines.push(...errors.map((issue) => `  [${issue.code}] ${issue.message}`));
+  if (warnings.length > 0) {
+    if (errors.length > 0) {
+      lines.push('');
+    }
+    // A warning means a rule could not be checked, not that the deck is
+    // illegal — it is reported so the gap in the card data is visible.
+    lines.push('  Warnings:');
+    lines.push(...warnings.map((issue) => `  [${issue.code}] ${issue.message}`));
   }
   return `${lines.join('\n')}\n`;
 }

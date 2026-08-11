@@ -32,6 +32,30 @@ interface CardBase {
   readonly text: string;
   /** Free-form classifiers from the card (unit types, keywords, and so on). */
   readonly tags: readonly string[];
+  /**
+   * The card's Champion Tag (rule 133.8.b), when it carries one.
+   *
+   * Champion Tags are the tags that link a Champion Legend to its Champion
+   * Units and Signature cards, and they are the only tags with rules meaning —
+   * 133.8.a gives ordinary tags none. They are kept in their own field rather
+   * than left inside `tags` precisely because of that: deck validation has to
+   * know *which* tag is the Champion Tag, and picking one out of an untyped
+   * string list would be a guess.
+   *
+   * Modelled as a single tag because rules 103.2.a.2 and 103.2.d.2 both speak
+   * of "the tag on your Champion Legend". If real card data ever shows a card
+   * carrying two, this becomes an array and the matches become intersections.
+   */
+  readonly championTag?: string | undefined;
+  /**
+   * The Signature supertype (rule 133.7.b), which may apply to a card of *any*
+   * type — hence its place here rather than on `UnitCard`.
+   *
+   * Rule 103.2.d limits a deck to 3 Signature cards in total, all matching the
+   * Legend's Champion Tag, and 103.2.d.3 says a Signature card is never a
+   * Champion Unit.
+   */
+  readonly signature?: boolean | undefined;
 }
 
 /** Occupies the Legend Zone for the whole game and never leaves it. */
@@ -105,4 +129,18 @@ export function costOf(card: CardDefinition): Cost | undefined {
 /** The card's rules text, if it has any. */
 export function effectOf(card: CardDefinition): CardEffect | undefined {
   return isPlayable(card) ? card.effect : undefined;
+}
+
+/** Rule 133.7.b: does the Signature supertype apply to this card? */
+export function isSignature(card: CardDefinition): boolean {
+  return card.signature === true;
+}
+
+/**
+ * Rule 133.7.a: the Champion supertype, which applies exclusively to Units.
+ *
+ * Only a Champion Unit may be a Chosen Champion (103.2.a.2).
+ */
+export function isChampionUnit(card: CardDefinition): card is UnitCard {
+  return card.type === 'unit' && card.champion;
 }

@@ -140,12 +140,25 @@ export function parseCardsJson(text: string): CardDefinition[] {
     }
     const tags = stringList(entry['tags'], label, 'tags', problems);
 
+    // Rule 133.8.b: the Champion Tag, and rule 133.7.b: the Signature
+    // supertype. Both apply to any card type, so both are read into the base.
+    const championTag = entry['championTag'];
+    if (championTag !== undefined && (typeof championTag !== 'string' || championTag === '')) {
+      problems.push(`${label}: "championTag" must be a non-empty string`);
+    }
+    const signature = entry['signature'];
+    if (signature !== undefined && typeof signature !== 'boolean') {
+      problems.push(`${label}: "signature" must be a boolean`);
+    }
+
     const base = {
       id: cardId(typeof id === 'string' ? id : `invalid-${index}`),
       name: typeof name === 'string' ? name : '',
       domains,
       text: typeof cardText === 'string' ? cardText : '',
       tags,
+      championTag: typeof championTag === 'string' && championTag !== '' ? championTag : undefined,
+      signature: signature === true,
     };
 
     switch (type) {

@@ -27,12 +27,14 @@ the architecture below is still a plan.
 What is built:
 
 - **`@riftbound/cards`** — the six Domains, the Energy/Power `Cost` model, card
-  definition types (Legend, Unit, Spell, Gear, Rune, Battlefield), and a
-  duplicate-rejecting `CardRegistry`. No real card data yet.
+  definition types (Legend, Unit, Spell, Gear, Rune, Battlefield), the Champion
+  and Signature supertypes with Champion Tags, and a duplicate-rejecting
+  `CardRegistry`. No real card data yet.
 - **`@riftbound/deck`** — the deck model, a plain-text deck list parser behind a
   pluggable importer interface, and format legality validation (main deck minimum
   of 40, 12 Runes, 3 distinct Battlefields, the 3-copy limit including the Chosen
-  Champion, and Domain Identity).
+  Champion, Domain Identity, Champion Tag matching, and the 3-card Signature
+  budget).
 - **`@riftbound/engine`** — a deterministic seeded PRNG, the game state model,
   the full turn phase machine (Awaken, Beginning, Channel, Draw, Main, Ending),
   Scoring by Hold, Burn Out, the win condition, Rune Pools, the Chain with
@@ -71,8 +73,8 @@ What is **not** built yet, in rough dependency order:
 2. **Cost modification** (rule 356's layers: base-cost replacement, additional
    costs, increases, discounts). `totalCost` in `play.ts` returns the printed
    cost and is the seam.
-3. **Signature card limits and champion tag matching** (103.2.a.2, 103.2.d) —
-   both need card data that carries champion tags.
+3. **Real card data.** Every construction rule is now enforced, but the card
+   pool is still invented fixtures — see [Open questions](#open-questions).
 
 Focus (rule 313) *is* implemented, as part of Non-Combat Showdowns: granted to
 the contesting player (345), passing on a pass (347.2.b) and when the last Chain
@@ -216,6 +218,33 @@ and can take a player to 8 on its own.
 
 Cards with more than one Domain are legal only in an identity containing *all*
 of them (103.1.b.4).
+
+**Champion Tags and the two supertypes.** Rule 133.8.b: a Champion Tag is the
+tag that links a Champion Legend to its Champion Units and Signature cards, and
+it is the only kind of tag with rules meaning — 133.8.a gives ordinary tags
+none. **Champion** (133.7.a) is a supertype applying exclusively to Units;
+**Signature** (133.7.b) applies to a card of *any* type, which is why
+`signature` sits on the card base rather than on `UnitCard`. The two are
+mutually exclusive: 103.2.d.3 says a Signature card is never a Champion Unit and
+cannot occupy the Champion Zone — the rulebook's own Tibbers/Annie example.
+
+The Signature budget is a **sum, not a per-name limit**: 103.2.d.1 caps a deck
+at 3 Signature cards "regardless of name", so three *different* Signature cards
+exhaust it exactly as three copies of one do. It is counted separately from the
+3-copy rule for that reason.
+
+`championTag` is its own field on the card rather than a string inside `tags`,
+because validation has to know *which* tag is the Champion Tag and picking one
+out of an untyped list would be a guess. It is modelled as a single tag, since
+103.2.a.2 and 103.2.d.2 both speak of "the tag" on the Legend; if real card data
+ever shows a card carrying two, it becomes an array and the matches become
+intersections.
+
+Card data that omits the tag gets a **warning**, not an error: a missing field
+is a gap in the data, not an illegal deck, and erroring would fail every deck
+built from a tagless ingest. The warning exists so the gap is visible rather
+than silently passing — and the CLI prints warnings even for a legal deck, which
+is the whole point of raising them.
 
 **The Core Rules describe no sideboard.** Rule 486 defines the best-of-three
 Match without one. The 8-card sideboard this codebase validates comes from
@@ -523,6 +552,10 @@ The rulebook resolved the ones that were blocking. What remains:
    supported? Every hosted API in [Reference sources](#reference-sources) is
    blocked by this environment's egress proxy; only `raw.githubusercontent.com`
    is reachable, so a GitHub-hosted dataset is currently the only open route.
+   Whichever source is chosen must carry **Champion Tags and the Signature
+   supertype**, or rules 103.2.a.2 and 103.2.d degrade to warnings — the
+   validator says so per deck rather than passing silently, but the rules go
+   unchecked either way. Worth confirming before pinning a source.
 2. **Find the tournament/competitive rules document.** The Core Rules describe no
    sideboard, so the 8-card sideboard this codebase validates is unverified.
 3. **Is the deck list format canonical?** Importers are pluggable via

@@ -17,8 +17,17 @@ import { IllegalAgentChoiceError, isOffered, type Agent } from './agent.js';
 import { playGame } from './match.js';
 import { FirstActionAgent, RandomAgent } from './random.js';
 
-const LEGEND = makeLegend(['fury', 'calm'], { id: cardId('OGN-001'), name: 'Legend' });
-const CHAMPION = makeUnit(4, ['fury'], { id: cardId('OGN-002'), name: 'Champion', champion: true });
+const LEGEND = makeLegend(['fury', 'calm'], {
+  id: cardId('OGN-001'),
+  name: 'Legend',
+  championTag: 'Testarossa',
+});
+const CHAMPION = makeUnit(4, ['fury'], {
+  id: cardId('OGN-002'),
+  name: 'Champion',
+  champion: true,
+  championTag: 'Testarossa',
+});
 const UNITS = Array.from({ length: 14 }, (_, i) =>
   makeUnit(2, ['fury'], { id: cardId(`OGN-1${String(i).padStart(2, '0')}`), name: `Unit ${i}` }),
 );

@@ -4,7 +4,8 @@ import { cardId } from './card.js';
 import { cost, powerOf, totalRuneCost } from './cost.js';
 import { DOMAINS, isDomain, withinIdentity } from './domain.js';
 import { CardRegistry } from './registry.js';
-import { makeRune, makeUnit, resetCardIds } from './testing.js';
+import { isChampionUnit, isSignature } from './card.js';
+import { makeLegend, makeRune, makeSpell, makeUnit, resetCardIds } from './testing.js';
 
 describe('domains', () => {
   it('has exactly the six Riftbound domains', () => {
@@ -77,5 +78,31 @@ describe('CardRegistry', () => {
     const second = makeRune('calm', { id: cardId('OGN-1'), name: 'Second' });
 
     expect(() => CardRegistry.from([first, second])).toThrow(/Duplicate card id OGN-1/);
+  });
+});
+
+describe('supertypes (rule 133.7)', () => {
+  it('recognises a Champion Unit', () => {
+    expect(isChampionUnit(makeUnit(3, ['fury'], { champion: true }))).toBe(true);
+    expect(isChampionUnit(makeUnit(3, ['fury'], { champion: false }))).toBe(false);
+  });
+
+  it('applies exclusively to Units (133.7.a)', () => {
+    // A Legend is the deck's Champion Legend, not a Champion Unit.
+    expect(isChampionUnit(makeLegend(['fury']))).toBe(false);
+  });
+
+  it('recognises the Signature supertype on any card type (133.7.b)', () => {
+    expect(isSignature(makeUnit(3, ['fury'], { signature: true }))).toBe(true);
+    expect(isSignature(makeSpell(['fury'], { signature: true }))).toBe(true);
+    expect(isSignature(makeSpell(['fury']))).toBe(false);
+  });
+
+  it('carries a Champion Tag in its own field, not among the free-form tags', () => {
+    // Rule 133.8.a gives ordinary tags no rules meaning, so the tag that does
+    // have one is kept apart from them.
+    const card = makeUnit(3, ['fury'], { championTag: 'Jinx', tags: ['rebel'] });
+    expect(card.championTag).toBe('Jinx');
+    expect(card.tags).toEqual(['rebel']);
   });
 });

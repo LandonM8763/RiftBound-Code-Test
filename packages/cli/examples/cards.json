@@ -6,7 +6,8 @@
     "domains": ["fury", "calm"],
     "domainIdentity": ["fury", "calm"],
     "text": "Sample data. Not a real Riftbound card.",
-    "tags": []
+    "tags": [],
+    "championTag": "Ember Warden"
   },
   {
     "id": "SAMPLE-002",
@@ -17,7 +18,8 @@
     "might": 4,
     "champion": true,
     "text": "Sample data. Not a real Riftbound card.",
-    "tags": ["champion"]
+    "tags": ["champion"],
+    "championTag": "Ember Warden"
   },
   {
     "id": "SAMPLE-010",

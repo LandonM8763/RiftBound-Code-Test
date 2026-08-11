@@ -10,6 +10,7 @@
  *   included (103.2.b.1).
  * - Rule 485.4.a: each player provides 3 Battlefields, of which one is used.
  * - Rule 103.4.c: those Battlefields must have distinct names.
+ * - Rule 103.2.d.1: at most 3 Signature cards in total, regardless of name.
  */
 export interface Format {
   readonly name: string;
@@ -19,6 +20,14 @@ export interface Format {
   /** Battlefields carried in the deck, not the number placed in play. */
   readonly battlefieldCount: number;
   readonly maxCopies: number;
+  /**
+   * Rule 103.2.d.1: Signature cards a deck may hold in total.
+   *
+   * A separate budget from `maxCopies`: it is a *sum* across every Signature
+   * card, "regardless of name", so three different Signature cards exhaust it
+   * just as three copies of one do.
+   */
+  readonly maxSignatureCards: number;
   /**
    * Sideboard size when one is allowed.
    *
@@ -38,6 +47,7 @@ export const CONSTRUCTED_BO1: Format = {
   runeDeckSize: 12,
   battlefieldCount: 3,
   maxCopies: 3,
+  maxSignatureCards: 3,
   sideboardSize: 0,
   allowSideboard: false,
 };
@@ -49,6 +59,7 @@ export const CONSTRUCTED_BO3: Format = {
   runeDeckSize: 12,
   battlefieldCount: 3,
   maxCopies: 3,
+  maxSignatureCards: 3,
   sideboardSize: 8,
   allowSideboard: true,
 };
