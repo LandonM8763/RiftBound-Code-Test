@@ -16,6 +16,8 @@
 import {
   NO_TARGET,
   UNMODELLED_KEYWORDS,
+  tokenByName,
+  tokenMight,
   type CardAbilities,
   type Domain,
   type CardEffect,
@@ -186,6 +188,63 @@ const CLAUSES: readonly ClauseRule[] = [
       return {
         effects: [{ kind: 'giveMight', amount: n }],
         target: scope === 'friendly' ? UNIT_FRIENDLY : scope === 'enemy' ? UNIT_ENEMY : UNIT_ANY,
+      };
+    },
+  },
+  {
+    /**
+     * "Play a ready 3 Might Sprite unit token with TEMPORARY here" (180-184).
+     *
+     * The token's name is looked up in rule 187's table and everything the card
+     * prints about it is *checked* against that entry rather than believed. A
+     * card asking for a "4 Might Recruit token" does not describe the Recruit
+     * the rules define, so it is refused and recorded — inventing one would put
+     * a Unit on the Board that no rule describes, which is exactly the
+     * plausible-and-wrong card the gap model exists to prevent.
+     *
+     * The location is rule 184.2's restriction. With none printed the token
+     * goes to the controller's Base: "Recruit the Vanguard" reads "(They can be
+     * played to your base or a battlefield you control)", so the unrestricted
+     * form is a player *choice*, and choosing the Base for them is the same
+     * documented simplification as the discard and damage-assignment orders.
+     */
+    pattern:
+      /^play (?:(a|an|one|two|three|four|five|\d+) )?(ready )?(\d+) might ([a-z' ]+?) (unit|gear) tokens?(?: with ([a-z]+))?(?: (here|(?:in|at|into|to) (?:your |their )?base))?$/i,
+    build: (m) => {
+      const n = m[1] === undefined ? 1 : count(m[1] === 'a' || m[1] === 'an' ? '1' : m[1]);
+      const might = count(m[3] ?? '');
+      const found = tokenByName(m[4] ?? '');
+      if (n === undefined || might === undefined || found === undefined) {
+        return undefined;
+      }
+      // 185.2.d: a token follows the rules for its type, so the printed type
+      // has to be the one rule 187 gives it.
+      if (found.spec.type !== (m[5] ?? '').toLowerCase()) {
+        return undefined;
+      }
+      if (tokenMight(found.spec) !== might) {
+        return undefined;
+      }
+      // A keyword printed alongside is confirmatory — 187.2 already gives the
+      // Sprite Temporary. One the table does not list would be a different
+      // token, so it is refused rather than granted.
+      const printed = (m[6] ?? '').toLowerCase();
+      if (printed !== '' && !(printed === 'temporary' && found.key === 'sprite')) {
+        return undefined;
+      }
+      const where = m[7] !== undefined && /^here$/i.test(m[7]) ? 'here' : 'base';
+      return {
+        effects: [
+          {
+            kind: 'createToken',
+            token: found.key,
+            count: n,
+            where,
+            // 184.1: the effect may say it enters ready, against the default.
+            ...(m[2] === undefined ? {} : { ready: true }),
+          },
+        ],
+        target: NO_TARGET,
       };
     },
   },

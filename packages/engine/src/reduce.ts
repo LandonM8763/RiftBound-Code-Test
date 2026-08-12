@@ -30,6 +30,7 @@ import { totalCost } from './costs.js';
 import { canPay, payFrom, timingAllows, validUnitLocations } from './play.js';
 import { canPayAdditional, payAdditional as performPayment } from './additional.js';
 import { entersReady } from './statics.js';
+import { sendToNonBoardZone } from './token.js';
 import { Rng } from './rng.js';
 import type {
   BattlefieldState,
@@ -686,7 +687,7 @@ function payAdditionalCost(
       const queued = queueDeaths(current, [unit], events);
       const owner = getEntity(queued, unit).owner;
       events.push({ type: 'unitsKilled', units: [unit] });
-      return withEntity(moveEntity(queued, unit, playerLocation(owner, 'trash')), unit, (e) => ({
+      return withEntity(sendToNonBoardZone(queued, unit, playerLocation(owner, 'trash')), unit, (e) => ({
         ...e,
         damage: 0,
         exhausted: false,
@@ -860,7 +861,7 @@ function pass(state: GameState): ReduceResult {
         EFFECT_CONTEXT,
       );
     }
-    next = moveEntity(next, top.entity, playerLocation(top.controller, 'trash'));
+    next = sendToNonBoardZone(next, top.entity, playerLocation(top.controller, 'trash'));
   }
   const chain = state.chain.slice(0, -1);
   const nextTop = chain[chain.length - 1];
@@ -1242,7 +1243,7 @@ function resolveCombat(
   }
   for (const unit of killed) {
     const owner = getEntity(next, unit).owner;
-    next = moveEntity(next, unit, playerLocation(owner, 'trash'));
+    next = sendToNonBoardZone(next, unit, playerLocation(owner, 'trash'));
     // 705: a Unit leaving play loses its Buffs, along with the damage and the
     // turn's Might modifiers, none of which mean anything off the Board.
     next = withEntity(next, unit, (current) => ({

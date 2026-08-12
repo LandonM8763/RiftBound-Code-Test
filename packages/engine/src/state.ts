@@ -46,6 +46,20 @@ export const PLAYER_ZONES = [
    * the invariant checker need no special case.
    */
   'chain',
+  /**
+   * Banishment (rule 438.5), and where a Token goes when it stops existing.
+   *
+   * Rule 186.1 says a Token put into any Non-Board Zone but the Chain ceases to
+   * exist immediately. "Ceases to exist" is modelled as permanent occupancy
+   * here rather than by deleting the entity, so that a reference held elsewhere
+   * — a Chain item, `playedThisTurn`, a trigger source — still resolves instead
+   * of throwing. Nothing ever leaves this zone.
+   *
+   * It is deliberately not the trash: a banished Token must not be counted by
+   * "for each card in your trash", recycled by a Burn Out (431.2.b), or read as
+   * a card in any other way.
+   */
+  'banishment',
 ] as const;
 
 export type PlayerZone = (typeof PLAYER_ZONES)[number];

@@ -1,3 +1,4 @@
+import { TOKEN_DEFINITIONS } from '@riftbound/cards';
 import type { CardDefinition, CardId, CardRegistry } from '@riftbound/cards';
 
 import type { GameEvent } from './events.js';
@@ -98,7 +99,13 @@ export function createGame(options: CreateGameOptions): ReduceResult {
   const rng = Rng.fromSeed(options.seed);
 
   const entities: Record<number, Entity> = {};
-  const definitions: Record<string, CardDefinition> = {};
+  /**
+   * Tokens are present in every game regardless of the decks (181): rule 187
+   * defines them, they are supplied by the game rather than deck-built, and 180
+   * has them Created during play. So their definitions are seeded here instead
+   * of being discovered from a deck list, which they never appear in.
+   */
+  const definitions: Record<string, CardDefinition> = { ...TOKEN_DEFINITIONS };
   let nextEntityId = 0;
 
   const define = (card: CardId): void => {

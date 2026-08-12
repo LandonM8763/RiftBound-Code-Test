@@ -126,7 +126,30 @@ export type Effect =
    * costs no exhaust — that is the Standard Move's price (420.3.a), not this
    * one's. The Destination comes from `CardEffect.destination`.
    */
-  | { readonly kind: 'move' };
+  | { readonly kind: 'move' }
+  /**
+   * Rules 179-187: Create Token Game Objects on the Board.
+   *
+   * `token` keys `STANDARD_TOKENS`, because rule 187 defines the tokens that
+   * exist by name and a token whose characteristics were guessed would be a
+   * Unit on the Board that no rule describes.
+   *
+   * `where` is rule 184.2's restriction on the location a token may be played
+   * to — `here` is the source's own location, which is the common printing
+   * ("play a Recruit token **here**"), and `base` is the controller's Base. It
+   * is deliberately not a `DestinationSpec`: that is a choice the player makes
+   * for a `move`, whereas this one is fixed by the card doing the creating.
+   *
+   * 184.1 lets the creating effect override the default entry state, which is
+   * what `ready` carries; without it a Unit enters exhausted (359.2.c).
+   */
+  | {
+      readonly kind: 'createToken';
+      readonly token: string;
+      readonly count: number;
+      readonly where: 'here' | 'base';
+      readonly ready?: boolean | undefined;
+    };
 
 /** The rules text of a card: what it targets, and what it then does. */
 export interface CardEffect {

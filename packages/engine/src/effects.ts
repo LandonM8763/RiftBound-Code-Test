@@ -11,6 +11,7 @@ import type { TriggerEventInstance } from './abilities.js';
 import { conditionMet } from './condition.js';
 import type { GameEvent } from './events.js';
 import { moveEntity, withEntity, withPlayer } from './mutate.js';
+import { createTokens, sendToNonBoardZone } from './token.js';
 import type { EntityId, GameState, Location, PlayerId } from './state.js';
 import {
   addEnergyTo,
@@ -198,7 +199,7 @@ export function executeEffect(
 
   let next = state;
   for (const step of effect.effects) {
-    next = applyEffect(next, invocation.controller, step, choices, events, context);
+    next = applyEffect(next, invocation.controller, invocation.source, step, choices, events, context);
   }
   return next;
 }
@@ -206,6 +207,7 @@ export function executeEffect(
 function applyEffect(
   state: GameState,
   controller: PlayerId,
+  source: EntityId,
   effect: Effect,
   choices: EffectChoices,
   events: GameEvent[],
@@ -288,7 +290,7 @@ function applyEffect(
       const owner = getEntity(withTriggers, target).owner;
       events.push({ type: 'unitsKilled', units: [target] });
       return clearCounters(
-        moveEntity(withTriggers, target, playerLocation(owner, 'trash')),
+        sendToNonBoardZone(withTriggers, target, playerLocation(owner, 'trash')),
         target,
       );
     }
@@ -439,6 +441,33 @@ function applyEffect(
         battlefield: destination.kind === 'battlefield' ? destination.index : null,
       });
       return context.afterMove(moved, controller, destination, [target], events);
+    }
+
+    // 180-184: Create Tokens. Not a Move and not a play from hand — a Token is
+    // Created directly on the Board (186), so nothing is Contested and no
+    // Showdown opens. A card that wants the token to arrive fighting says
+    // "play … here", which is `where: 'here'` resolved against the source.
+    case 'createToken': {
+      const where =
+        effect.where === 'base'
+          ? playerLocation(controller, 'base')
+          : getEntity(state, source).location;
+      // 186: a Token can only exist on the Board. A source that has already
+      // left it — a resolving Spell sitting on the Chain — has no "here" to
+      // speak of, so the Base is the only Board location its controller has.
+      const location =
+        where.kind === 'battlefield' || (where.kind === 'player' && where.zone === 'base')
+          ? where
+          : playerLocation(controller, 'base');
+      return createTokens(
+        state,
+        controller,
+        effect.token,
+        effect.count,
+        location,
+        effect.ready === true,
+        events,
+      ).state;
     }
 
     default: {

@@ -412,6 +412,69 @@ describe('activated abilities (rule 377)', () => {
   });
 });
 
+describe('tokens (rules 179-187)', () => {
+  it('reads the plain form and looks the token up in rule 187', () => {
+    expect(parseCardText('Play a 1 Might Recruit unit token here.').effect).toEqual({
+      target: { kind: 'none' },
+      effects: [{ kind: 'createToken', token: 'recruit', count: 1, where: 'here' }],
+    });
+  });
+
+  it('reads a count, written as a word or a digit', () => {
+    const two = parseCardText('Play two 1 Might Recruit unit token here.').effect;
+    expect(two?.effects[0]).toMatchObject({ count: 2 });
+
+    const four = parseCardText('Play four 1 Might Recruit unit tokens.').effect;
+    expect(four?.effects[0]).toMatchObject({ count: 4 });
+  });
+
+  it('184.1: "ready" overrides the default of entering exhausted', () => {
+    const parsed = parseCardText('Play a ready 3 Might Sprite unit token with TEMPORARY here.');
+    expect(parsed.effect?.effects[0]).toMatchObject({ token: 'sprite', ready: true, where: 'here' });
+  });
+
+  it('184.2: reads the location, defaulting to the Base when none is printed', () => {
+    const base = parseCardText('Play a 1 Might Recruit unit token in your base.').effect;
+    expect(base?.effects[0]).toMatchObject({ where: 'base' });
+
+    const into = parseCardText('Play three 1 might Recruit unit tokens into your base.').effect;
+    expect(into?.effects[0]).toMatchObject({ where: 'base', count: 3 });
+
+    const bare = parseCardText('Play a 1 Might Recruit unit token.').effect;
+    expect(bare?.effects[0]).toMatchObject({ where: 'base' });
+  });
+
+  it('refuses a token rule 187 does not define', () => {
+    // Inventing a Dragon token would put a Unit on the Board that no rule
+    // describes — the plausible-and-wrong card the gap model exists to stop.
+    expect(parseCardText('Play a 5 Might Dragon unit token here.').unparsed).toHaveLength(1);
+  });
+
+  it('refuses a Might that disagrees with rule 187', () => {
+    // 187.1 fixes the Recruit at 1 Might. A card printing 4 is not describing
+    // that token, so believing either number would be a guess.
+    expect(parseCardText('Play a 4 Might Recruit unit token here.').unparsed).toHaveLength(1);
+  });
+
+  it('refuses a keyword rule 187 does not give that token', () => {
+    expect(parseCardText('Play a 1 Might Recruit unit token with TEMPORARY here.').unparsed)
+      .toHaveLength(1);
+  });
+
+  it('refuses a type that disagrees with rule 187', () => {
+    expect(parseCardText('Play a 1 Might Recruit gear token here.').unparsed).toHaveLength(1);
+  });
+
+  it('combines with a trigger, which is how the corpus prints it', () => {
+    const parsed = parseCardText('When you play me, play a 1 Might Recruit unit token here.');
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.triggered?.[0]).toMatchObject({
+      condition: { event: 'played', subject: 'self' },
+      effect: { effects: [{ kind: 'createToken', token: 'recruit' }] },
+    });
+  });
+});
+
 describe('the all-or-nothing rule', () => {
   it('refuses a card whose clause carries a condition it cannot express', () => {
     // Reducing this to "deal 6" would produce a card that plays, looks right

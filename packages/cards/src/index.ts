@@ -55,4 +55,15 @@ export type {
   UnitCard,
 } from './card.js';
 
+export {
+  STANDARD_TOKENS,
+  TOKEN_DEFINITIONS,
+  isTokenCard,
+  tokenByName,
+  tokenCardId,
+  tokenDefinition,
+  tokenMight,
+} from './token.js';
+export type { TokenSpec } from './token.js';
+
 export { CardRegistry } from './registry.js';

@@ -76,6 +76,20 @@ interface CardBase {
    * untyped string list would be a guess.
    */
   readonly keywords?: readonly Keyword[] | undefined;
+  /**
+   * This definition describes a **Token**, not a card (rules 179-187).
+   *
+   * Tokens are Game Objects with a type, a Might and tags, so they are read
+   * through the same definition table as cards and share every engine read
+   * site. Rule 185 makes them a different category all the same, and the
+   * difference is load-bearing in three places: 186.1 makes a token cease to
+   * exist rather than reach a Non-Board Zone, 350.2 keeps "played" from meaning
+   * "played a card" (so a token never satisfies Legion), and deck construction
+   * has no place for one at all.
+   *
+   * See `token.ts`. Nothing reads this field directly — `isTokenCard` does.
+   */
+  readonly token?: boolean | undefined;
 }
 
 /** Occupies the Legend Zone for the whole game and never leaves it. */

@@ -139,6 +139,13 @@ export type GameEvent =
   | { readonly type: 'xpChanged'; readonly player: PlayerId; readonly amount: number }
   /** Rule 428: Units died. */
   | { readonly type: 'unitsKilled'; readonly units: readonly EntityId[] }
+  /** Rules 180-184: Tokens were Created on the Board. `token` keys rule 187. */
+  | {
+      readonly type: 'tokensCreated';
+      readonly player: PlayerId;
+      readonly token: string;
+      readonly entities: readonly EntityId[];
+    }
   /** Rule 466.1.a.2: surviving Attackers were Recalled to their Base. */
   | { readonly type: 'unitsRecalled'; readonly units: readonly EntityId[] }
   /** Rule 466.3: the Combat result. */
