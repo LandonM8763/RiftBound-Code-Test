@@ -1,3 +1,4 @@
+import type { Condition } from './condition.js';
 import type { Domain } from './domain.js';
 
 /**
@@ -140,6 +141,13 @@ export interface CardEffect {
   readonly destination?: DestinationSpec | undefined;
   /** Executed in order, which is how rule 359.2.b reads a card top to bottom. */
   readonly effects: readonly Effect[];
+  /**
+   * "When you play me, **if you control a Poro**, buff me and draw 1."
+   *
+   * A condition on the whole clause: when it fails, nothing in `effects` runs.
+   * Shared with statics and cost modifiers — see `condition.ts`.
+   */
+  readonly condition?: Condition | undefined;
 }
 
 export const NO_TARGET: TargetSpec = { kind: 'none' };

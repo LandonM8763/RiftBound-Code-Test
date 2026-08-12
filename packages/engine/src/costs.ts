@@ -24,6 +24,7 @@ import {
   type CostTarget,
 } from '@riftbound/cards';
 
+import { conditionMet } from './condition.js';
 import { dependencyMet } from './dependency.js';
 import {
   entityCard,
@@ -73,6 +74,9 @@ export function activeModifiers(state: GameState): readonly ActiveModifier[] {
       if (!dependencyMet(state, entity, controller, modifier.dependsOn)) {
         continue;
       }
+      if (!conditionMet(state, controller, entity, modifier.condition)) {
+        continue;
+      }
       found.push({ controller, modifier });
     }
   };
@@ -111,6 +115,11 @@ function modifiersFor(
       continue;
     }
     if (!dependencyMet(state, undefined, player, modifier.dependsOn)) {
+      continue;
+    }
+    // The card is still in hand, so a source-relative condition is false and a
+    // state predicate is answerable — the same split `entersReady` makes.
+    if (!conditionMet(state, player, undefined, modifier.condition)) {
       continue;
     }
     own.push({ controller: player, modifier, own: true });

@@ -4,6 +4,7 @@ import {
   type CardDefinition,
   type CardId,
   type Domain,
+  type TriggerEvent,
 } from '@riftbound/cards';
 
 import type { RngState } from './rng.js';
@@ -167,6 +168,16 @@ export interface PlayerState {
    * first card played. Cleared in the Ending Phase.
    */
   readonly playedThisTurn: readonly EntityId[];
+  /**
+   * How many times each kind of event this player was the actor of has happened
+   * this turn.
+   *
+   * What "if you've discarded a card this turn" and "if an enemy unit has died
+   * this turn" are answered from. Keyed by `TriggerEvent`, counted where the
+   * events are raised, and cleared in the Ending Phase alongside
+   * `playedThisTurn` — 812.1.c's "the same turn" is the same scope.
+   */
+  readonly turnEvents: Readonly<Partial<Record<TriggerEvent, number>>>;
 }
 
 /**

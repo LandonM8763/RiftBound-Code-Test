@@ -23,7 +23,7 @@ import {
   type Effect,
   type Keyword,
   type StaticAbility,
-  type StaticCondition,
+  type Condition,
   type StaticScope,
   type TargetSpec,
   type TriggerCondition,
@@ -497,6 +497,120 @@ const COST_MODIFIERS: readonly {
 ];
 
 /**
+ * State predicates: "if you control a Poro", "if an opponent's score is within
+ * 3 points of the Victory Score", "if you've discarded a card this turn".
+ *
+ * One grammar for all four places the corpus asks these — gating a static, an
+ * "enters ready", a cost modifier or an effect. Only predicates the engine can
+ * answer are here; one that needs a mechanic the model lacks is refused rather
+ * than read as a condition that quietly never holds.
+ */
+const STATE_PREDICATES: readonly {
+  readonly pattern: RegExp;
+  readonly build: (match: RegExpMatchArray) => Condition | undefined;
+}[] = [
+  {
+    // "if you control a Poro", "if you control another Dragon",
+    // "if you control two or more gear"
+    pattern:
+      /^you control (a|an|another|one|two|three|\d+)(?: or more)? ([A-Za-z'-]+?)s?$/i,
+    build: (m) => {
+      const word = (m[1] ?? '').toLowerCase();
+      const min = word === 'a' || word === 'an' || word === 'another' ? 1 : count(word);
+      if (min === undefined) {
+        return undefined;
+      }
+      const noun = (m[2] ?? '').toLowerCase();
+      const what = CARD_TYPES.find((type) => type === noun);
+      return {
+        kind: 'controls',
+        who: 'you',
+        // A noun that is not a card type is a tag — "Poro", "Dragon", "Mech" —
+        // and those only ever appear on Units.
+        what: what ?? 'unit',
+        min,
+        ...(what === undefined ? { tag: m[2] ?? '' } : {}),
+        ...(word === 'another' ? { excludeSelf: true } : {}),
+      };
+    },
+  },
+  {
+    pattern: /^an opponent controls a battlefield$/i,
+    build: () => ({ kind: 'controls', who: 'opponent', what: 'battlefield', min: 1 }),
+  },
+  {
+    // "if an opponent's score is within 3 points of the Victory Score"
+    pattern:
+      /^an opponent'?s score is within (\d+) points? of the victory score$/i,
+    build: (m) => {
+      const points = count(m[1] ?? '');
+      return points === undefined ? undefined : { kind: 'scoreWithin', who: 'opponent', points };
+    },
+  },
+  {
+    pattern: /^your score is within (\d+) points? of the victory score$/i,
+    build: (m) => {
+      const points = count(m[1] ?? '');
+      return points === undefined ? undefined : { kind: 'scoreWithin', who: 'you', points };
+    },
+  },
+  {
+    // "if you've discarded a card this turn"
+    pattern: /^you'?ve discarded (?:a card|\d+ cards?) this turn$/i,
+    build: () => ({ kind: 'didThisTurn', event: 'discard', who: 'you', min: 1 }),
+  },
+  {
+    // "if an enemy unit has died this turn"
+    pattern: /^an enemy unit has died this turn$/i,
+    build: () => ({ kind: 'didThisTurn', event: 'dies', who: 'opponent', min: 1 }),
+  },
+  {
+    pattern: /^a friendly unit has died this turn$/i,
+    build: () => ({ kind: 'didThisTurn', event: 'dies', who: 'you', min: 1 }),
+  },
+];
+
+const CARD_TYPES = ['legend', 'unit', 'spell', 'gear', 'rune', 'battlefield'] as const;
+
+/** Read a state predicate, or `undefined` if it is outside the grammar. */
+export function parseStatePredicate(phrase: string): Condition | undefined {
+  const text = phrase.trim().replace(/[.]+$/, '');
+  for (const rule of STATE_PREDICATES) {
+    const match = text.match(rule.pattern);
+    if (match !== null) {
+      return rule.build(match);
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Peel a leading or trailing "if <predicate>," off a clause.
+ *
+ * Returns the condition and the rest, or `undefined` when there is an "if" the
+ * grammar cannot read — which must fail the card rather than drop the
+ * condition, since a card that ignores its own condition is strictly stronger
+ * than printed.
+ */
+export function splitCondition(
+  line: string,
+): { readonly condition?: Condition | undefined; readonly rest: string } | undefined {
+  const leading = line.match(/^if ([^,]+),\s*(.+)$/i);
+  if (leading !== null) {
+    const condition = parseStatePredicate(leading[1] ?? '');
+    return condition === undefined ? undefined : { condition, rest: leading[2] ?? '' };
+  }
+
+  const trailing = line.match(/^(.+?) if ([^,]+?)[.]?$/i);
+  if (trailing !== null) {
+    const condition = parseStatePredicate(trailing[2] ?? '');
+    return condition === undefined ? undefined : { condition, rest: trailing[1] ?? '' };
+  }
+
+  return { rest: line };
+}
+
+/**
  * Static and Passive abilities (rules 363-365).
  *
  * Written as a scope plus a grant rather than one pattern per sentence, the
@@ -542,7 +656,7 @@ function grantedKeywords(text: string): readonly Keyword[] | undefined {
 /** Read one static clause, or `undefined` if it is outside the grammar. */
 export function parseStatic(line: string): StaticAbility | undefined {
   let text = line.replace(/[.]+$/, '').trim();
-  let condition: StaticCondition | undefined;
+  let condition: Condition | undefined;
 
   const whileClause = text.match(/^while i'?m (buffed|at a battlefield),\s*(.+)$/i);
   if (whileClause !== null) {
@@ -550,6 +664,15 @@ export function parseStatic(line: string): StaticAbility | undefined {
       ? { kind: 'buffed' }
       : { kind: 'atBattlefield' };
     text = whileClause[2] ?? '';
+  } else {
+    // "If you control another Dragon, I enter ready" and "I enter ready if you
+    // control another Dragon" are the same statement written two ways.
+    const split = splitCondition(text);
+    if (split === undefined) {
+      return undefined;
+    }
+    condition = split.condition;
+    text = split.rest;
   }
 
   // "<scope> enter(s) ready" (359.2.c is what this replaces).
@@ -708,13 +831,22 @@ function parseLine(line: string): {
   // comes off here because these patterns match a whole sentence, where the
   // effect clauses are split out of one by `parseEffects` first.
   const sentence = line.replace(/[.]+$/, '');
+  const costSplit = splitCondition(sentence);
   for (const rule of COST_MODIFIERS) {
-    const match = sentence.match(rule.pattern);
+    const match = (costSplit?.rest ?? sentence).match(rule.pattern);
     if (match === null) {
       continue;
     }
     const costModifier = rule.build(match);
-    return costModifier === undefined ? undefined : { costModifier };
+    if (costModifier === undefined) {
+      return undefined;
+    }
+    return {
+      costModifier:
+        costSplit?.condition === undefined
+          ? costModifier
+          : { ...costModifier, condition: costSplit.condition },
+    };
   }
 
   // A Passive that modifies Might or grants a keyword (363-365). Tried before
@@ -767,7 +899,12 @@ function parseLine(line: string): {
     if (optional) {
       body = body.replace(/^you may\s+/i, '');
     }
-    const effect = parseEffects(body);
+    // "When you play me, **if you control a Poro**, buff me and draw 1."
+    const split = splitCondition(body);
+    if (split === undefined) {
+      return undefined;
+    }
+    const effect = parseEffects(split.rest);
     if (effect === undefined) {
       return undefined;
     }
@@ -776,7 +913,7 @@ function parseLine(line: string): {
         condition: parsed.condition,
         ...(optional ? { optional } : {}),
         ...(parsed.limitPerTurn === undefined ? {} : { limitPerTurn: parsed.limitPerTurn }),
-        effect,
+        effect: split.condition === undefined ? effect : { ...effect, condition: split.condition },
       },
     };
   }

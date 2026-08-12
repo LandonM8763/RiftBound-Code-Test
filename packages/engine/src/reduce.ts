@@ -253,7 +253,7 @@ function playCard(
     // A Spell has no Play Effect of its own (383.4.a is about Permanents), but
     // "when you play a spell" watches this same moment. The trigger goes on the
     // Chain above the Spell and so resolves before it.
-    next = queueTriggers(next, triggersFor(next, played), events);
+    next = raiseEvent(next, played, events);
     return { state: next, events };
   }
 
@@ -292,12 +292,9 @@ function playCard(
   // has been finalized and entered the Board — that is, right here. The same
   // event also reaches everything else watching, which is what makes "when you
   // play another unit" work.
-  next = queueTriggers(
+  next = raiseEvent(
     next,
-    triggersFor(next, {
-      ...played,
-      ...(entersAt.kind === 'battlefield' ? { battlefield: entersAt.index } : {}),
-    }),
+    { ...played, ...(entersAt.kind === 'battlefield' ? { battlefield: entersAt.index } : {}) },
     events,
   );
 
@@ -373,11 +370,7 @@ function activateAbility(
   // "When you use an activated ability of a gear" (377.3): the activation is
   // the event, so this fires whether or not the ability ever resolves. The
   // source is the object, which is what a `cardType` filter reads.
-  next = queueTriggers(
-    next,
-    triggersFor(next, { event: 'activateAbility', actor: player, objects: [source] }),
-    events,
-  );
+  next = raiseEvent(next, { event: 'activateAbility', actor: player, objects: [source] }, events);
   return { state: next, events };
 }
 
@@ -448,6 +441,30 @@ function afterChainPriority(state: GameState): PlayerId | null {
  * performing it a choice its controller takes at finalization. A mandatory one
  * is finalized straight away.
  */
+/**
+ * Announce that something happened (rule 383.2).
+ *
+ * One function rather than a `queueTriggers(triggersFor(...))` pair at every
+ * site, because two things have to happen for every event and splitting them
+ * is how one gets forgotten: the Triggered Abilities watching it reach the
+ * Chain, *and* the per-turn tally that state predicates read gets incremented.
+ */
+function raiseEvent(
+  state: GameState,
+  instance: TriggerEventInstance,
+  events: GameEvent[],
+  options: { readonly extraSources?: readonly EntityId[] | undefined } = {},
+): GameState {
+  const counted = withPlayer(state, instance.actor, (seat) => ({
+    ...seat,
+    turnEvents: {
+      ...seat.turnEvents,
+      [instance.event]: (seat.turnEvents[instance.event] ?? 0) + 1,
+    },
+  }));
+  return queueTriggers(counted, triggersFor(counted, instance, options), events);
+}
+
 function queueTriggers(
   state: GameState,
   pending: readonly PendingTrigger[],
@@ -581,7 +598,7 @@ const EFFECT_CONTEXT: EffectContext = {
   queueDeaths: (state, units, events) => queueDeaths(state, units, events),
   afterMove: (state, player, to, units, events) =>
     afterMove(state, player, to, events, units),
-  raise: (state, instance, events) => queueTriggers(state, triggersFor(state, instance), events),
+  raise: (state, instance, events) => raiseEvent(state, instance, events),
 };
 
 /**
@@ -600,19 +617,16 @@ function queueDeaths(
   let next = state;
   for (const unit of units) {
     const location = next.entities[unit]?.location;
-    next = queueTriggers(
+    next = raiseEvent(
       next,
-      triggersFor(
-        next,
-        {
-          event: 'dies',
-          actor: next.entities[unit]?.controller ?? next.activePlayer,
-          objects: [unit],
-          ...(location?.kind === 'battlefield' ? { battlefield: location.index } : {}),
-        },
-        { extraSources: [unit] },
-      ),
+      {
+        event: 'dies',
+        actor: next.entities[unit]?.controller ?? next.activePlayer,
+        objects: [unit],
+        ...(location?.kind === 'battlefield' ? { battlefield: location.index } : {}),
+      },
       events,
+      { extraSources: [unit] },
     );
   }
   return next;
@@ -867,14 +881,14 @@ function afterMove(
   // move" trigger sees settled Control, and before the Showdown opens so the
   // trigger is on the Chain when it does.
   for (const unit of moved) {
-    next = queueTriggers(
+    next = raiseEvent(
       next,
-      triggersFor(next, {
+      {
         event: 'move',
         actor: player,
         objects: [unit],
         ...(to.kind === 'battlefield' ? { battlefield: to.index } : {}),
-      }),
+      },
       events,
     );
   }
@@ -1035,11 +1049,7 @@ function conquer(
   // "When you conquer here": the Conquer has been processed, so the Trigger's
   // Condition can be evaluated (383.2.c). The Battlefield is carried so a
   // `here` filter can tell this Conquer from one somewhere else.
-  next = queueTriggers(
-    next,
-    triggersFor(next, { event: 'conquer', actor: player, battlefield: index }),
-    events,
-  );
+  next = raiseEvent(next, { event: 'conquer', actor: player, battlefield: index }, events);
 
   return { state: next, events };
 }
@@ -1189,14 +1199,9 @@ function resolveCombat(
   if (result.kind === 'won') {
     const survivors =
       result.winner === attacker ? settled.attackingUnits : settled.defendingUnits;
-    next = queueTriggers(
+    next = raiseEvent(
       next,
-      triggersFor(next, {
-        event: 'winCombat',
-        actor: result.winner,
-        objects: survivors,
-        battlefield: index,
-      }),
+      { event: 'winCombat', actor: result.winner, objects: survivors, battlefield: index },
       events,
     );
   }
@@ -1298,11 +1303,7 @@ function beginning(state: GameState): ReduceResult {
     // 315.2.a, the Beginning Step: "at the start of your Beginning Phase".
     // These resolve before the Scoring Step, so a trigger that takes Control of
     // a Battlefield changes what is Held below.
-    next = queueTriggers(
-      next,
-      triggersFor(next, { event: 'beginningPhase', actor: player }),
-      events,
-    );
+    next = raiseEvent(next, { event: 'beginningPhase', actor: player }, events);
     if (next.chain.length > 0) {
       return { state: { ...next, phaseStep: 1 }, events };
     }
@@ -1339,11 +1340,7 @@ function beginning(state: GameState): ReduceResult {
     // "When you hold here" (469.2). One event per Battlefield Held, since the
     // `here` filter is what distinguishes them.
     for (const index of held) {
-      next = queueTriggers(
-        next,
-        triggersFor(next, { event: 'hold', actor: player, battlefield: index }),
-        events,
-      );
+      next = raiseEvent(next, { event: 'hold', actor: player, battlefield: index }, events);
     }
     if (next.chain.length > 0) {
       return { state: { ...next, phaseStep: 2 }, events };
@@ -1513,11 +1510,7 @@ function ending(state: GameState): ReduceResult {
 
   if (next.phaseStep < 1) {
     // 317.1: end-of-turn effects, before the 317.2 Cleanup below.
-    next = queueTriggers(
-      next,
-      triggersFor(next, { event: 'endOfTurn', actor: next.activePlayer }),
-      preEvents,
-    );
+    next = raiseEvent(next, { event: 'endOfTurn', actor: next.activePlayer }, preEvents);
     if (next.chain.length > 0) {
       return { state: { ...next, phaseStep: 1 }, events: preEvents };
     }
@@ -1552,7 +1545,7 @@ function ending(state: GameState): ReduceResult {
   // Finalized resets here too.
   next = {
     ...next,
-    players: next.players.map((seat) => ({ ...seat, playedThisTurn: [] })),
+    players: next.players.map((seat) => ({ ...seat, playedThisTurn: [], turnEvents: {} })),
   };
 
   return passTurn(next, events);

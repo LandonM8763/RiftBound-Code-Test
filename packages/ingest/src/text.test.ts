@@ -518,6 +518,18 @@ describe('cost modifiers (rules 356, 363)', () => {
     ]);
   });
 
+  it('gates a discount on a state predicate', () => {
+    // "If an enemy unit has died this turn, this costs 2 less" — the condition
+    // is the same type a static or an effect would carry.
+    expect(modifiersOf('If an enemy unit has died this turn, this costs 2 less.')).toEqual([
+      {
+        applies: { scope: 'self' },
+        change: { kind: 'discount', energy: 2 },
+        condition: { kind: 'didThisTurn', event: 'dies', who: 'opponent', min: 1 },
+      },
+    ]);
+  });
+
   it('gates a discount on Legion, which is a passive as much as a trigger', () => {
     expect(modifiersOf('LEGION - I cost 2 less.')).toEqual([
       {
@@ -536,7 +548,6 @@ describe('cost modifiers (rules 356, 363)', () => {
     const beyond = [
       'I cost 2 less to play from anywhere other than your hand.',
       'When you play me, the next spell you play this turn costs 5 less.',
-      'If an enemy unit has died this turn, this costs 2 less.',
       'I cost 2 less for each of your MIGHTY units.',
       'While you control this battlefield, friendly gear costs 1 less.',
     ];

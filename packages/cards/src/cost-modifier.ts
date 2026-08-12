@@ -9,6 +9,7 @@
  */
 import type { AbilityDependency } from './ability.js';
 import type { CardType } from './card.js';
+import type { Condition } from './condition.js';
 import type { Cost } from './cost.js';
 import type { Domain } from './domain.js';
 
@@ -123,6 +124,13 @@ export interface CostModifier {
    * modifier absent, not merely inert.
    */
   readonly dependsOn?: AbilityDependency | undefined;
+  /**
+   * "If an enemy unit has died this turn, this costs 2 less."
+   *
+   * A modifier whose condition fails is *absent* from the Total Cost rather
+   * than applied as zero, which is the same treatment an unmet dependency gets.
+   */
+  readonly condition?: Condition | undefined;
 }
 
 /** Rule 356's layer order. Lower numbers are applied first. */

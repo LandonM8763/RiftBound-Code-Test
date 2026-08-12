@@ -136,7 +136,7 @@ export function createGame(options: CreateGameOptions): ReduceResult {
     for (const card of deck.runes) {
       zones.runeDeck.push(create(card, id, 'runeDeck'));
     }
-    return { id, points: 0, zones, pool: EMPTY_POOL, xp: 0, playedThisTurn: [] };
+    return { id, points: 0, zones, pool: EMPTY_POOL, xp: 0, playedThisTurn: [], turnEvents: {} };
   });
 
   for (let seat = 0; seat < playerCount; seat += 1) {

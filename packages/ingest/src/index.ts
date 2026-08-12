@@ -4,7 +4,9 @@ export {
   parseCardText,
   parseCondition,
   parseEffects,
+  parseStatePredicate,
   parseStatic,
+  splitCondition,
   stripReminders,
 } from './text.js';
 export type { ParsedText } from './text.js';

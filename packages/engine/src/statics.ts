@@ -16,14 +16,15 @@ import {
   hasKeyword,
   keywordValue,
   staticAbilities,
+  isSourceCondition,
   type CardDefinition,
   type Keyword,
   type StaticAbility,
-  type StaticCondition,
   type StaticScope,
   type ValuedKeywordKind,
 } from '@riftbound/cards';
 
+import { conditionMet } from './condition.js';
 import { dependencyMet } from './dependency.js';
 import { entityCard, getEntity, type EntityId, type GameState, type PlayerId } from './state.js';
 
@@ -51,7 +52,7 @@ export function activeStatics(state: GameState): readonly ActiveStatic[] {
     }
     const controller = getEntity(state, source).controller;
     for (const ability of abilities) {
-      if (!conditionMet(state, source, ability.condition)) {
+      if (!conditionMet(state, controller, source, ability.condition)) {
         continue;
       }
       if (!dependencyMet(state, source, controller, ability.dependsOn)) {
@@ -73,24 +74,6 @@ export function activeStatics(state: GameState): readonly ActiveStatic[] {
   }
 
   return found;
-}
-
-/** "While I'm buffed …" — a condition on the source, never on its objects. */
-function conditionMet(
-  state: GameState,
-  source: EntityId,
-  condition: StaticCondition | undefined,
-): boolean {
-  if (condition === undefined) {
-    return true;
-  }
-  const entity = state.entities[source];
-  if (entity === undefined) {
-    return false;
-  }
-  return condition.kind === 'buffed'
-    ? entity.buffs > 0
-    : entity.location.kind === 'battlefield';
 }
 
 /** Does `ability` on `source` reach `unit`? */
@@ -214,13 +197,17 @@ export function entersReady(
     if (ability.grant.entersReady !== true || ability.affects.who !== 'self') {
       continue;
     }
-    // The card is not a Game Object on the Board yet, so a condition about
-    // where it is cannot hold and a Legion dependency reads the timing that
-    // `dependencyMet` documents.
-    if (ability.condition !== undefined) {
+    // A *source-relative* condition cannot hold: the card is not a Game Object
+    // on the Board yet, so it is neither buffed nor at a Battlefield. A state
+    // predicate is a different matter — "I enter ready if you control another
+    // Dragon" is answerable right now, and is the common wording.
+    if (ability.condition !== undefined && isSourceCondition(ability.condition)) {
       continue;
     }
-    if (dependencyMet(state, undefined, player, ability.dependsOn)) {
+    if (
+      conditionMet(state, player, undefined, ability.condition) &&
+      dependencyMet(state, undefined, player, ability.dependsOn)
+    ) {
       return true;
     }
   }

@@ -8,6 +8,7 @@
 import type { CardEffect, DestinationSpec, Effect, TargetSpec } from '@riftbound/cards';
 
 import type { TriggerEventInstance } from './abilities.js';
+import { conditionMet } from './condition.js';
 import type { GameEvent } from './events.js';
 import { moveEntity, withEntity, withPlayer } from './mutate.js';
 import type { EntityId, GameState, Location, PlayerId } from './state.js';
@@ -170,6 +171,13 @@ export function executeEffect(
   events: GameEvent[],
   context: EffectContext,
 ): GameState {
+  // "When you play me, **if you control a Poro**, buff me and draw 1" — the
+  // condition gates the whole clause, so nothing runs when it fails. Asked
+  // here, at resolution, because that is when the rules ask it.
+  if (!conditionMet(state, invocation.controller, invocation.source, effect.condition)) {
+    return state;
+  }
+
   // 355.6 is about choices; "me" is not one, so it is resolved here rather
   // than enumerated when the card was played.
   const choices: EffectChoices =

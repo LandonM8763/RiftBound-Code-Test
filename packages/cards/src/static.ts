@@ -18,6 +18,7 @@
  * have.
  */
 import type { AbilityDependency } from './ability.js';
+import type { Condition } from './condition.js';
 import type { Keyword } from './keyword.js';
 
 /**
@@ -66,23 +67,17 @@ export interface StaticGrant {
   readonly entersReady?: boolean | undefined;
 }
 
-/**
- * "While I'm buffed …", "While I'm at a battlefield …" — a condition on the
- * *source*, not on the objects it affects.
- *
- * Deliberately narrow, and deliberately unable to look at Might: `mightOf`
- * consults statics, so a condition that read Might back would recurse.
- */
-export type StaticCondition =
-  /** "While I'm buffed" (702). */
-  | { readonly kind: 'buffed' }
-  /** "While I'm at a battlefield". */
-  | { readonly kind: 'atBattlefield' };
-
 export interface StaticAbility {
   readonly affects: StaticScope;
   readonly grant: StaticGrant;
-  readonly condition?: StaticCondition | undefined;
+  /**
+   * "While I'm buffed …", "If you control another Dragon …" — a condition on
+   * the *source* or on the game state, never on the objects it affects.
+   *
+   * Shared with cost modifiers and effects, because the corpus asks the same
+   * questions in all three places. See `condition.ts`.
+   */
+  readonly condition?: Condition | undefined;
   /** A Dependent Keyword gating the whole statement (801.1, 812, 824). */
   readonly dependsOn?: AbilityDependency | undefined;
 }

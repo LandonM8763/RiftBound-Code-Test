@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 68 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 74 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -50,7 +50,8 @@ What is built:
   XP, Channel), **the Mulligan**,
   **Activated and Triggered abilities** on an **interruptible phase machine**,
   **event-driven trigger conditions**, **rule 356 cost modification**,
-  **static and passive abilities**, the **keywords** Assault, Shield, Tank,
+  **static and passive abilities**, **state predicates**, the **keywords**
+  Assault, Shield, Tank,
   Backline and Ganking, the **Dependent Keywords** Legion and Level,
   first-class legal action generation, per-player observable views, and a
   structural invariant checker.
@@ -468,6 +469,8 @@ builds the batch on top of it. Keep that split — a win rate computed inside
 | `reduce.ts` | `(state, action) -> { state, events }`, the interruptible phase machine |
 | `abilities.ts` | Activated/Triggered abilities: what may be activated, what a game event triggers |
 | `dependency.ts` | Dependent Keywords (812, 824); its own module because both abilities and cost modifiers are gateable and `costs.ts` sits below `abilities.ts` |
+| `condition.ts` | State predicates, asked by statics, cost modifiers, effects and "enters ready" alike |
+| `statics.ts` | Static and Passive abilities: Might, granted keywords, entering ready |
 | `costs.ts` | Rule 356's layers: what a card or ability actually costs to play |
 | `legal.ts` | `legalActions(state, player)` |
 | `view.ts` | Per-player observable view; redacts hidden zones |
@@ -588,6 +591,40 @@ rather than an entity, so there is no Game Object for `activeStatics` or
 records a gap: shipping them would leave a card that looks modelled while the
 engine silently never ran it, which is precisely the plausible-and-wrong outcome
 the gap model exists to prevent.
+
+### State predicates
+
+`cards/condition.ts` holds the data, `engine/condition.ts` evaluates it.
+
+**One `Condition` type, because the corpus asks the same questions in four
+places**: gating a static ("If you've discarded a card this turn, I have
+ASSAULT"), gating "enters ready" ("I enter ready if you control another
+Dragon"), gating a cost modifier ("If an enemy unit has died this turn, this
+costs 2 less") and gating an effect ("When you play me, if you control a Poro,
+buff me and draw 1"). Four subsystems that already existed, one predicate.
+
+A condition is *asked*, never executed — the same discipline as a static.
+
+| Variant | What it reads |
+|---|---|
+| `controls` | Board sweep: card type or `tag`, a `min`, whose, and `excludeSelf` for "another" |
+| `scoreWithin` | Points against `config.victoryScore`, so a Mode of Play that changes it (483.3) still reads right |
+| `didThisTurn` | `PlayerState.turnEvents`, a per-turn tally cleared alongside `playedThisTurn` |
+| `buffed` / `atBattlefield` | The source. These were `StaticCondition` and are folded in so callers need not know which kind they hold |
+
+Three things are load-bearing:
+
+- **A source-relative condition is false without a source, and that is correct
+  rather than a limitation.** A card in hand is not buffed and is not at a
+  Battlefield. A *state* predicate has no such problem, which is what lets "I
+  enter ready if you control another Dragon" work from hand.
+- **`turnEvents` is counted in one place.** `raiseEvent` in `reduce.ts` both
+  queues the triggers and increments the tally, because two things must happen
+  for every event and splitting them is how one gets forgotten.
+- **A predicate the state cannot answer is refused at ingest**, never read as a
+  condition that quietly never holds — that would make the card permanently
+  weaker than printed. "If you control a facedown card", "if I have moved twice
+  this turn" and "if you've spent at least 2 Runes this turn" are all refused.
 
 ### Keywords
 
@@ -1106,14 +1143,14 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 68 of the 468 cards that have text**, and the shape of what is
+**Coverage is 74 of the 468 cards that have text**, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 68 |
-| Blocked | 400 |
+| Fully parsed | 74 |
+| Blocked | 394 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 3 or 4 times, everything else once or
@@ -1146,6 +1183,31 @@ a duration, a condition, a Battlefield static, or a count of something invisible
 **Static abilities then took it 58 → 68**, the largest single step since the
 keyword and trigger work, and the one whose category was measured furthest in
 advance. See [Static and passive abilities](#static-and-passive-abilities).
+
+**State predicates took it 68 → 74**, again matching the measurement exactly.
+See [State predicates](#state-predicates).
+
+#### What is left, ranked by measurement
+
+Re-measured from the 68 baseline, one mechanic at a time and then cumulatively:
+
+| Mechanic | Alone |
+|---|---|
+| The 8 refused keywords | +11 |
+| **Additional Costs (356.2)** | **+8** |
+| **State predicates** — now built | **+6** |
+| Non-standard ability costs | +3 |
+| Counting / dynamic values | +2 |
+| Effect-outcome predicates ("if this kills it") | +1 |
+| Attach (Equip, Weaponmaster, Quick-Draw) | +0 |
+
+**The keyword figure is a trap.** Individually they are Accelerate +5, Hidden
++3, Vision +2, Deflect +1 and the other four +0 — and each wants a *different*
+deep mechanic (Optional Additional Costs, facedown cards, Predict, Attach). The
++11 only arrives after building four of them.
+
+Additional Costs and state predicates were the two best single investments and
+**do not overlap**: together they measured +14. The predicates half is done.
 
 **The trigger tail is now genuinely spent.** The 8 cards a wider condition would
 still buy want 8 *distinct* wordings, and most need a mechanic that does not

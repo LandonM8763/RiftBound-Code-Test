@@ -19,13 +19,11 @@ export type {
   TriggeredAbility,
 } from './ability.js';
 
+export { isSourceCondition } from './condition.js';
+export type { Condition, ControlledKind } from './condition.js';
+
 export { UNMODELLED_KEYWORDS, hasKeyword, keywordValue } from './keyword.js';
-export type {
-  StaticAbility,
-  StaticCondition,
-  StaticGrant,
-  StaticScope,
-} from './static.js';
+export type { StaticAbility, StaticGrant, StaticScope } from './static.js';
 export type { Keyword, KeywordKind, ValuedKeywordKind } from './keyword.js';
 
 export { layerOf, modifierApplies } from './cost-modifier.js';
