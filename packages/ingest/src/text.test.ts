@@ -349,10 +349,20 @@ describe('keywords (rules 800-828)', () => {
     });
   });
 
-  it('refuses a Legion clause that gates something other than an ability', () => {
-    // "LEGION - I cost 2 less" is a passive cost modifier. 812 gates an
-    // ability, and there is nothing here to hang the dependency on.
-    expect(parseCardText('LEGION - I cost 2 less.').unparsed).toHaveLength(1);
+  it('gates a passive as readily as a trigger (812.1.b)', () => {
+    // The Legion Ability is the whole clause after the keyword, whatever kind
+    // of ability that is — a cost modifier counts.
+    expect(parseCardText('LEGION - I cost 2 less.').abilities?.costModifiers?.[0]).toEqual({
+      applies: { scope: 'self' },
+      change: { kind: 'discount', energy: 2 },
+      dependsOn: { kind: 'legion' },
+    });
+  });
+
+  it('refuses a Legion clause with nothing to hang the dependency on', () => {
+    // A bare effect is not an ability: there is nowhere to record the gate, so
+    // reading it would make the effect unconditional.
+    expect(parseCardText('LEGION - Draw 1.').unparsed).toHaveLength(1);
   });
 
   it('refuses a keyword the engine does not model, with a stated reason', () => {
@@ -467,5 +477,70 @@ describe('real cards from the export', () => {
     );
     expect(parsed.unparsed).toEqual(['ACCELERATE']);
     expect(parsed.effect).toBeUndefined();
+  });
+});
+
+describe('cost modifiers (rules 356, 363)', () => {
+  const modifiersOf = (text: string) => parseCardText(text).abilities?.costModifiers;
+
+  it('reads a flat self-discount', () => {
+    expect(modifiersOf('I cost 2 less.')).toEqual([
+      { applies: { scope: 'self' }, change: { kind: 'discount', energy: 2 } },
+    ]);
+  });
+
+  it('reads the "this costs" wording as the same thing', () => {
+    expect(modifiersOf('This costs 2 less.')).toEqual(modifiersOf('I cost 2 less.'));
+  });
+
+  it('reads a counted discount rather than a flat one', () => {
+    expect(modifiersOf('I cost 1 less for each card in your trash.')).toEqual([
+      {
+        applies: { scope: 'self' },
+        change: { kind: 'discount', per: { count: { kind: 'cardsInTrash' }, energy: 1 } },
+      },
+    ]);
+  });
+
+  it('reads a per-discount minimum (356.4.e)', () => {
+    expect(
+      modifiersOf("I cost 1 less for each card you've played this turn, to a minimum of 1."),
+    ).toEqual([
+      {
+        applies: { scope: 'self' },
+        change: {
+          kind: 'discount',
+          per: { count: { kind: 'cardsPlayedThisTurn' }, energy: 1 },
+          minimumEnergy: 1,
+        },
+      },
+    ]);
+  });
+
+  it('gates a discount on Legion, which is a passive as much as a trigger', () => {
+    expect(modifiersOf('LEGION - I cost 2 less.')).toEqual([
+      {
+        applies: { scope: 'self' },
+        change: { kind: 'discount', energy: 2 },
+        dependsOn: { kind: 'legion' },
+      },
+    ]);
+  });
+
+  it('refuses the cost clauses that want a mechanic instead', () => {
+    // Every one of these is a real card. Each needs something the model has no
+    // representation for — a zone condition, a duration, a count of something
+    // invisible, a Battlefield static — so each is refused rather than
+    // approximated into a discount that fires at the wrong time.
+    const beyond = [
+      'I cost 2 less to play from anywhere other than your hand.',
+      'When you play me, the next spell you play this turn costs 5 less.',
+      'If an enemy unit has died this turn, this costs 2 less.',
+      'I cost 2 less for each of your MIGHTY units.',
+      'While you control this battlefield, friendly gear costs 1 less.',
+    ];
+    for (const text of beyond) {
+      expect(parseCardText(text).unparsed).toHaveLength(1);
+    }
   });
 });

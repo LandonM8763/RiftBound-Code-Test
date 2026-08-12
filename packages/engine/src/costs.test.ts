@@ -322,6 +322,48 @@ function inMainPhase(seed = 'costs', energy = 2): GameState {
   };
 }
 
+/**
+ * Mint a card into a zone from its definition, for cards the shared registry
+ * does not know about.
+ */
+function mint(
+  state: GameState,
+  card: CardDefinition,
+  zone: 'base' | 'hand' | 'trash',
+  owner?: PlayerId,
+): [GameState, EntityId] {
+  const player = owner ?? state.activePlayer;
+  const entity = state.nextEntityId as EntityId;
+  const placed: GameState = {
+    ...state,
+    nextEntityId: state.nextEntityId + 1,
+    definitions: { ...state.definitions, [card.id]: card },
+    entities: {
+      ...state.entities,
+      [entity]: {
+        id: entity,
+        card: card.id,
+        owner: player,
+        controller: player,
+        location: playerLocation(player, 'base'),
+        exhausted: false,
+        damage: 0,
+        mightBonus: 0,
+        buffs: 0,
+      },
+    },
+    players: state.players.map((seat) =>
+      seat.id === player
+        ? { ...seat, zones: { ...seat.zones, base: [...seat.zones.base, entity] } }
+        : seat,
+    ),
+  };
+  return [
+    zone === 'base' ? placed : moveEntity(placed, entity, playerLocation(player, zone)),
+    entity,
+  ];
+}
+
 /** Mint a card into a zone under `owner`. */
 function withCard(
   state: GameState,
@@ -517,5 +559,173 @@ describe('ability cost modification in play', () => {
       (action) => action.type === 'activateAbility' && action.source === source,
     );
     expect(offered).toHaveLength(1);
+  });
+});
+
+describe('self cost modifiers ("I cost 2 less")', () => {
+  /** The only modifier kind read off a card in hand rather than the Board. */
+  const SELF_DISCOUNT = makeUnit(2, ['fury'], {
+    id: cardId('C-030'),
+    name: 'Self Discount',
+    cost: cost(3),
+    abilities: {
+      costModifiers: [{ applies: { scope: 'self' }, change: { kind: 'discount', energy: 2 } }],
+    },
+  });
+
+  /** "I cost 1 less for each card in your trash." */
+  const TRASH_SCALER = makeUnit(2, ['fury'], {
+    id: cardId('C-031'),
+    name: 'Trash Scaler',
+    cost: cost(4),
+    abilities: {
+      costModifiers: [
+        {
+          applies: { scope: 'self' },
+          change: { kind: 'discount', per: { count: { kind: 'cardsInTrash' }, energy: 1 } },
+        },
+      ],
+    },
+  });
+
+  /** "I cost 1 less for each card you've played this turn, to a minimum of 1." */
+  const TEMPO = makeUnit(2, ['fury'], {
+    id: cardId('C-032'),
+    name: 'Tempo',
+    cost: cost(4),
+    abilities: {
+      costModifiers: [
+        {
+          applies: { scope: 'self' },
+          change: {
+            kind: 'discount',
+            per: { count: { kind: 'cardsPlayedThisTurn' }, energy: 1 },
+            minimumEnergy: 1,
+          },
+        },
+      ],
+    },
+  });
+
+  /** "LEGION - I cost 2 less." (812) */
+  const LEGION_DISCOUNT = makeUnit(2, ['fury'], {
+    id: cardId('C-033'),
+    name: 'Legion Discount',
+    cost: cost(3),
+    abilities: {
+      costModifiers: [
+        {
+          applies: { scope: 'self' },
+          change: { kind: 'discount', energy: 2 },
+          dependsOn: { kind: 'legion' },
+        },
+      ],
+    },
+  });
+
+  /** `inMainPhase` with the self-modifier cards known to the game. */
+  function withSelfCards(state: GameState): GameState {
+    return {
+      ...state,
+      definitions: {
+        ...state.definitions,
+        [SELF_DISCOUNT.id]: SELF_DISCOUNT,
+        [TRASH_SCALER.id]: TRASH_SCALER,
+        [TEMPO.id]: TEMPO,
+        [LEGION_DISCOUNT.id]: LEGION_DISCOUNT,
+      },
+    };
+  }
+
+  it('discounts the card it is printed on, from hand', () => {
+    // The card is in hand at cost-determination time, so a board sweep would
+    // never see this modifier at all.
+    const state = withSelfCards(inMainPhase());
+    expect(totalCost(state, state.activePlayer, SELF_DISCOUNT)).toEqual(cost(1));
+  });
+
+  it('does not discount anything else', () => {
+    const [state] = mint(withSelfCards(inMainPhase()), SELF_DISCOUNT, 'base');
+    expect(totalCost(state, state.activePlayer, EXPENSIVE)).toEqual(cost(3));
+  });
+
+  it('is inert once the card is on the Board', () => {
+    // "I cost 2 less" has already been paid by then. Leaving it in the board
+    // sweep would silently discount every other card instead.
+    const [state] = mint(withSelfCards(inMainPhase()), SELF_DISCOUNT, 'base');
+    expect(activeModifiers(state)).toEqual([]);
+  });
+
+  it('does not discount an opponent`s copy of the same card', () => {
+    const state = withSelfCards(inMainPhase());
+    const opponent = playerId((state.activePlayer + 1) % state.players.length);
+    // Both see it, because each is paying for their own copy — `self` is about
+    // the card, and each player playing it has their own.
+    expect(totalCost(state, opponent, SELF_DISCOUNT)).toEqual(cost(1));
+  });
+
+  it('counts cards in the trash (356.4, "for each")', () => {
+    let state = withSelfCards(inMainPhase());
+    expect(totalCost(state, state.activePlayer, TRASH_SCALER)).toEqual(cost(4));
+
+    for (const expected of [3, 2, 1]) {
+      state = withCard(state, EXPENSIVE.id, 'trash')[0];
+      expect(totalCost(state, state.activePlayer, TRASH_SCALER)).toEqual(cost(expected));
+    }
+  });
+
+  it('floors a counted discount at 0 (356.6)', () => {
+    let state = withSelfCards(inMainPhase());
+    for (let i = 0; i < 9; i += 1) {
+      state = withCard(state, EXPENSIVE.id, 'trash')[0];
+    }
+    expect(totalCost(state, state.activePlayer, TRASH_SCALER)).toEqual(cost(0));
+  });
+
+  it('counts the cards played this turn, and honours the discount`s minimum', () => {
+    // 356.4.e: the minimum belongs to this discount, so counting past it stops
+    // at 1 rather than running to 0.
+    let state = withSelfCards(inMainPhase());
+    const player = state.activePlayer;
+    expect(totalCost(state, player, TEMPO)).toEqual(cost(4));
+
+    const played = (n: number): GameState => ({
+      ...state,
+      players: state.players.map((seat) =>
+        seat.id === player
+          ? { ...seat, playedThisTurn: Array.from({ length: n }, (_, i) => i as EntityId) }
+          : seat,
+      ),
+    });
+
+    expect(totalCost(played(1), player, TEMPO)).toEqual(cost(3));
+    expect(totalCost(played(3), player, TEMPO)).toEqual(cost(1));
+    expect(totalCost(played(9), player, TEMPO)).toEqual(cost(1));
+  });
+
+  it('withholds a Legion-gated discount until another card has been played', () => {
+    const state = withSelfCards(inMainPhase());
+    const player = state.activePlayer;
+
+    // 812.1.c: nothing Finalized this turn, so the modifier is not there.
+    expect(totalCost(state, player, LEGION_DISCOUNT)).toEqual(cost(3));
+
+    const after: GameState = {
+      ...state,
+      players: state.players.map((seat) =>
+        seat.id === player ? { ...seat, playedThisTurn: [0 as EntityId] } : seat,
+      ),
+    };
+    expect(totalCost(after, player, LEGION_DISCOUNT)).toEqual(cost(1));
+  });
+
+  it('charges the discounted cost through the reducer', () => {
+    const start = withSelfCards(inMainPhase('self-charge', 3));
+    const [state, card] = mint(start, SELF_DISCOUNT, 'hand');
+    const player = state.activePlayer;
+
+    const played = reduce(state, { type: 'playCard', card }).state;
+    // 3 Energy in the pool, 3 printed, 2 discounted away: 2 Energy left.
+    expect(getPlayer(played, player).pool.energy).toBe(2);
   });
 });

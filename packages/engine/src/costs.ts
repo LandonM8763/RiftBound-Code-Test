@@ -18,16 +18,31 @@ import {
   type CardDefinition,
   type Cost,
   type CostChange,
+  type CostCount,
   type CostModifier,
+  type CostPayer,
   type CostTarget,
 } from '@riftbound/cards';
 
-import { entityCard, getEntity, type EntityId, type GameState, type PlayerId } from './state.js';
+import { dependencyMet } from './dependency.js';
+import {
+  entityCard,
+  getEntity,
+  getPlayer,
+  type EntityId,
+  type GameState,
+  type PlayerId,
+} from './state.js';
 
 /** A modifier in play, with the player whose Passive Ability is supplying it. */
 export interface ActiveModifier {
   readonly controller: PlayerId;
   readonly modifier: CostModifier;
+  /**
+   * True when this came off the very card whose cost is being determined, which
+   * is what a `self` filter asks about. Board modifiers are never `self`.
+   */
+  readonly own?: boolean | undefined;
 }
 
 /**
@@ -36,6 +51,11 @@ export interface ActiveModifier {
  * Rule 365.1: a Permanent's Passive Abilities are active while it is on the
  * Board, so this walks the Bases, the Battlefields and the Legend Zone — a
  * modifier on a card in hand or trash does nothing.
+ *
+ * `self` modifiers are deliberately skipped here. "I cost 2 less" is about the
+ * cost of playing *that* card, so it has already been paid by the time the card
+ * reaches the Board; leaving it in would discount every other card instead.
+ * `modifiersFor` picks it up from the card being played.
  */
 export function activeModifiers(state: GameState): readonly ActiveModifier[] {
   const found: ActiveModifier[] = [];
@@ -47,6 +67,12 @@ export function activeModifiers(state: GameState): readonly ActiveModifier[] {
     }
     const controller = getEntity(state, entity).controller;
     for (const modifier of modifiers) {
+      if (modifier.applies.scope === 'self') {
+        continue;
+      }
+      if (!dependencyMet(state, entity, controller, modifier.dependsOn)) {
+        continue;
+      }
       found.push({ controller, modifier });
     }
   };
@@ -66,6 +92,33 @@ export function activeModifiers(state: GameState): readonly ActiveModifier[] {
 }
 
 /**
+ * The modifiers bearing on one card's cost: everything on the Board, plus the
+ * card's own `self` modifiers.
+ *
+ * The card is in hand at this point, which is why its own modifiers cannot come
+ * from the board sweep. `source` is `undefined` for the same reason — the card
+ * is not a Game Object on the Board yet, and `dependencyMet` documents what that
+ * means for Legion.
+ */
+function modifiersFor(
+  state: GameState,
+  player: PlayerId,
+  card: CardDefinition,
+): readonly ActiveModifier[] {
+  const own: ActiveModifier[] = [];
+  for (const modifier of card.abilities?.costModifiers ?? []) {
+    if (modifier.applies.scope !== 'self') {
+      continue;
+    }
+    if (!dependencyMet(state, undefined, player, modifier.dependsOn)) {
+      continue;
+    }
+    own.push({ controller: player, modifier, own: true });
+  }
+  return own.length === 0 ? activeModifiers(state) : [...activeModifiers(state), ...own];
+}
+
+/**
  * The Total Cost of playing `card` as `player` (rule 356).
  *
  * Returns `undefined` for a card that is never paid for — Legends, Runes and
@@ -79,7 +132,7 @@ export function totalCost(
   if (!isPlayable(card)) {
     return undefined;
   }
-  return applyModifiers(card.cost, card.type, player, activeModifiers(state));
+  return applyModifiers(card.cost, card.type, player, modifiersFor(state, player, card), state);
 }
 
 /**
@@ -90,7 +143,38 @@ export function totalCost(
  * name abilities apply, since "cards cost 1 less" is not about abilities.
  */
 export function abilityCost(state: GameState, player: PlayerId, base: Cost): Cost {
-  return applyModifiers(base, 'ability', player, activeModifiers(state));
+  return applyModifiers(base, 'ability', player, activeModifiers(state), state);
+}
+
+/**
+ * Resolve a counted amount against the state (rule 356.4's "for each …").
+ *
+ * `of` is the modifier's controller, because "your trash" on a card is that
+ * card's controller's trash.
+ */
+export function countFor(state: GameState, of: PlayerId, count: CostCount): number {
+  const seat = getPlayer(state, of);
+  return count.kind === 'cardsInTrash'
+    ? seat.zones.trash.length
+    : seat.playedThisTurn.length;
+}
+
+/**
+ * Turn a counted discount into a fixed one before the layers run.
+ *
+ * Kept separate so rule 356's layer machinery stays a pure function of numbers
+ * and the counting is one step that can be tested on its own.
+ */
+function resolveCount(
+  change: CostChange,
+  controller: PlayerId,
+  state: GameState | undefined,
+): CostChange {
+  if (change.kind !== 'discount' || change.per === undefined || state === undefined) {
+    return change;
+  }
+  const counted = change.per.energy * countFor(state, controller, change.per.count);
+  return { ...change, energy: (change.energy ?? 0) + counted };
 }
 
 /** The printed cost, ignoring everything in play. Rule 356.1.c's "Base Cost". */
@@ -110,12 +194,14 @@ export function applyModifiers(
   target: CostTarget,
   player: PlayerId,
   active: readonly ActiveModifier[],
+  /** Needed only to resolve counted amounts; omit for fixed-amount modifiers. */
+  state?: GameState,
 ): Cost {
   const relevant = active
-    .filter(({ controller, modifier }) =>
-      modifierApplies(modifier.applies, target, controller === player),
+    .filter(({ controller, modifier, own }) =>
+      modifierApplies(modifier.applies, target, payerFor(controller, player, own)),
     )
-    .map(({ modifier }) => modifier.change);
+    .map(({ controller, modifier }) => resolveCount(modifier.change, controller, state));
 
   // Sort by rule 356's layer, then put bounded discounts before unbounded ones.
   //
@@ -175,6 +261,18 @@ export function applyModifiers(
 
   // 356.6: Energy and Power costs can't be reduced below 0.
   return { energy: Math.max(0, cost.energy), power: cost.power };
+}
+
+/** Which of rule 356's three payer cases this modifier is looking at. */
+function payerFor(
+  controller: PlayerId,
+  player: PlayerId,
+  own: boolean | undefined,
+): CostPayer {
+  if (own === true) {
+    return 'self';
+  }
+  return controller === player ? 'controller' : 'opponent';
 }
 
 /** Bounded discounts sort ahead of unbounded ones; see the note in `applyModifiers`. */

@@ -20,7 +20,8 @@ import {
 } from '@riftbound/cards/testing';
 import { describe, expect, it } from 'vitest';
 
-import { activatableAbilities, dependencyMet, triggersFor } from './abilities.js';
+import { activatableAbilities, triggersFor } from './abilities.js';
+import { dependencyMet } from './dependency.js';
 import { currentLegalActions, legalActions } from './legal.js';
 import { Rng } from './rng.js';
 import { IllegalActionError } from './actions.js';

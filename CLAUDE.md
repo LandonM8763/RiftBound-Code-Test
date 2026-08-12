@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 55 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 58 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -456,6 +456,7 @@ builds the batch on top of it. Keep that split — a win rate computed inside
 | `actions.ts` | The `Action` union and `IllegalActionError` |
 | `reduce.ts` | `(state, action) -> { state, events }`, the interruptible phase machine |
 | `abilities.ts` | Activated/Triggered abilities: what may be activated, what a game event triggers |
+| `dependency.ts` | Dependent Keywords (812, 824); its own module because both abilities and cost modifiers are gateable and `costs.ts` sits below `abilities.ts` |
 | `costs.ts` | Rule 356's layers: what a card or ability actually costs to play |
 | `legal.ts` | `legalActions(state, player)` |
 | `view.ts` | Per-player observable view; redacts hidden zones |
@@ -687,6 +688,54 @@ name `'ability'` — "cards cost 1 less" is not a statement about Activated
 Abilities, so an unqualified modifier deliberately does not reach them.
 
 Layer 2, additional costs, is absent; see the list under Current status for why.
+
+#### Where a modifier is read from
+
+Almost all of them come off the Board, because 365.1 makes a Permanent's Passive
+Abilities active while it is there. **`scope: 'self'` is the exception, and it is
+the common wording on real cards**: "I cost 2 less" is about the cost of playing
+*that* card, so it has to be read off a card still in hand. `activeModifiers`
+sweeps the Board and deliberately skips `self`; `totalCost` adds the played
+card's own.
+
+Skipping it in the sweep is not tidiness. A `self` modifier left in would apply
+once the card reached the Board — where its own cost has already been paid — and
+silently discount everything else its controller played afterwards.
+
+`self` is also why `CostPayer` has three cases rather than being a boolean. A
+player can hold two copies of the same card, and only the one being played
+carries its own discount, so "the controller is paying" is not the same question.
+
+#### Counted amounts
+
+"I cost 1 less **for each** card in your trash" is a discount whose size is read
+off the state. `CostChange.discount.per` carries the count, and `costs.ts`
+resolves it to a fixed number *before* rule 356's layers run — so the layer
+machinery stays a pure function of numbers, and the counting is one step that
+can be tested on its own. Only counts the state already holds exist
+(`cardsInTrash`, `cardsPlayedThisTurn`); a count of something the model cannot
+see is refused at ingest rather than approximated.
+
+A counted discount is still floored at 0 by 356.6, and `minimumEnergy` still
+binds only itself per 356.4.e — which is what makes "for each card you've played
+this turn, to a minimum of 1" stop at 1.
+
+#### Cost modifiers can be gated
+
+`CostModifier.dependsOn` takes the same `AbilityDependency` as an ability, so
+"LEGION - I cost 2 less" works: 812.1.b makes the whole clause after the keyword
+the Legion Ability, and a passive is as gateable as a triggered one. An unmet
+dependency makes the modifier *absent* rather than inert, so it never enters the
+Total Cost.
+
+Because both abilities and cost modifiers can be gated, `dependencyMet` lives in
+its own `dependency.ts` — `abilities.ts` asks `costs.ts` for an ability's Total
+Cost, so it cannot also own the check without a cycle.
+
+For a card whose own cost is being determined, `dependencyMet` gets no source
+entity: the card is Finalized at step 6 (329.2) and its cost settled at step 3,
+so it genuinely is not yet among the cards played this turn. That is not a
+special case, it is the timing.
 
 ### The interruptible phase machine
 
@@ -941,14 +990,14 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 55 of the 468 cards that have text**, and the shape of what is
+**Coverage is 58 of the 468 cards that have text**, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 55 |
-| Blocked | 413 |
+| Fully parsed | 58 |
+| Blocked | 410 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 3 or 4 times, everything else once or
@@ -971,6 +1020,13 @@ the new baseline:
 | `TriggerCondition` widened further | +8 (55 → 63) |
 | Both together | +21 (55 → 76) |
 
+Self cost modifiers were then added on top of that baseline for **+3, 55 → 58**
+— and that number was known before the work started, which is the point. Of the
+24 clauses in the corpus that mention a cost, *every one is distinct*, and only
+three are about the card's own cost in a way the state can answer. The rest want
+a duration, a condition, a Battlefield static, or a count of something invisible
+— so they are refused. See [Cost modification](#cost-modification).
+
 **The trigger tail is now genuinely spent.** The 8 cards a wider condition would
 still buy want 8 *distinct* wordings, and most need a mechanic that does not
 exist — Stun, Hidden, and an event for choosing a target. There is no third
@@ -980,8 +1036,9 @@ What the corpus is blocked on now, in the order measurement puts them:
 
 1. **Static and passive abilities** — "Units here have +1 Might", "I enter
    ready", "My Might is increased by your points". 137 cards. `CostModifier` is
-   the only passive the model has, and it is also what the remaining keywords
-   mostly reduce to.
+   still the only passive the model has, and it is also what the remaining
+   keywords mostly reduce to. Its `self` scope and counted amounts are the shape
+   the rest will want; what they need beyond it is a *condition*.
 2. **The eight refused keywords**, each blocked on a mechanic: Optional
    Additional Costs (Accelerate, Repeat, and Deflect, which also wants Power of
    any Domain), facedown cards (Hidden), Attach (Equip, Weaponmaster,

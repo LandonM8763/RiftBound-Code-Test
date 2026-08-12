@@ -23,7 +23,14 @@ export { UNMODELLED_KEYWORDS, hasKeyword, keywordValue } from './keyword.js';
 export type { Keyword, KeywordKind, ValuedKeywordKind } from './keyword.js';
 
 export { layerOf, modifierApplies } from './cost-modifier.js';
-export type { CostChange, CostFilter, CostModifier, CostTarget } from './cost-modifier.js';
+export type {
+  CostChange,
+  CostCount,
+  CostFilter,
+  CostModifier,
+  CostPayer,
+  CostTarget,
+} from './cost-modifier.js';
 
 export { NO_TARGET, needsDestination, needsTarget, needsTargetChoice } from './effect.js';
 export type { CardEffect, DestinationSpec, Effect, TargetSpec } from './effect.js';

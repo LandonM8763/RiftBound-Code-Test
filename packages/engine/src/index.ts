@@ -63,13 +63,14 @@ export type { BattlefieldView, EntityView, GameView, PlayerView, ShowdownView } 
 export {
   abilityFor,
   activatableAbilities,
-  dependencyMet,
   matchesTrigger,
   triggerKey,
   triggersFor,
   withinTurnLimit,
 } from './abilities.js';
 export type { PendingTrigger, TriggerEventInstance } from './abilities.js';
+
+export { dependencyMet } from './dependency.js';
 
 export { executeEffect, isValidTarget, legalTargets } from './effects.js';
 export type { EffectContext } from './effects.js';
@@ -102,7 +103,7 @@ export {
   validUnitLocations,
 } from './play.js';
 
-export { activeModifiers, applyModifiers, baseCost, totalCost } from './costs.js';
+export { activeModifiers, applyModifiers, baseCost, countFor, totalCost } from './costs.js';
 export type { ActiveModifier } from './costs.js';
 
 export { InvariantError, checkInvariants } from './invariants.js';

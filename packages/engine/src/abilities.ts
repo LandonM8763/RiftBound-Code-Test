@@ -17,7 +17,6 @@ import {
   activatedAbilities,
   costOf,
   triggeredAbilities,
-  type AbilityDependency,
   type AbilityRef,
   type ActivatedAbility,
   type Cost,
@@ -27,6 +26,7 @@ import {
 } from '@riftbound/cards';
 
 import { abilityCost } from './costs.js';
+import { dependencyMet } from './dependency.js';
 import { canPay } from './play.js';
 import {
   entityCard,
@@ -88,34 +88,6 @@ export function abilityFor(
   return ref.kind === 'activated'
     ? activatedAbilities(card.abilities)[ref.index]
     : triggeredAbilities(card.abilities)[ref.index];
-}
-
-/**
- * Is a Dependent Keyword's condition currently met (801.1, 812, 824)?
- *
- * An unmet dependency makes the ability *absent*, not merely unusable: 812.1.c
- * says the Dependent Ability is Active only while the condition holds, so a
- * Legion trigger whose condition fails never goes on the Chain in the first
- * place.
- */
-export function dependencyMet(
-  state: GameState,
-  source: EntityId,
-  controller: PlayerId,
-  dependency: AbilityDependency | undefined,
-): boolean {
-  if (dependency === undefined) {
-    return true;
-  }
-  const seat = getPlayer(state, controller);
-  if (dependency.kind === 'legion') {
-    // 812.1.c: "a card different than the one with the Legion ability has been
-    // Finalized by you on the same turn". The card carrying Legion is itself in
-    // this list when its own Play Effect is being checked, which is exactly why
-    // this compares identities rather than counting.
-    return seat.playedThisTurn.some((played) => played !== source);
-  }
-  return seat.xp >= dependency.xp;
 }
 
 /**

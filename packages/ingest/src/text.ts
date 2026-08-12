@@ -19,6 +19,7 @@ import {
   type CardAbilities,
   type Domain,
   type CardEffect,
+  type CostModifier,
   type Effect,
   type Keyword,
   type TargetSpec,
@@ -427,6 +428,71 @@ const CONDITIONS: readonly {
   },
 ];
 
+/**
+ * Cost modifiers a card states about *itself* (rule 356.4, 363).
+ *
+ * Only the self-referential forms are here, and that is the measurement rather
+ * than a stopping point: of the 24 clauses in the corpus that mention a cost,
+ * every one is distinct, and the ones that are not about the card's own cost
+ * want a mechanic instead — a duration ("the next spell you play this turn"), a
+ * condition ("if an opponent's score is within 3 points"), a Battlefield static
+ * ("while you control this battlefield"), or a count of something the state
+ * cannot see. Those are refused, not approximated.
+ */
+const COST_MODIFIERS: readonly {
+  readonly pattern: RegExp;
+  readonly build: (match: RegExpMatchArray) => CostModifier | undefined;
+}[] = [
+  {
+    // "I cost 2 less." / "This costs 2 less."
+    pattern: /^(?:i cost|this costs) (\d+) less$/i,
+    build: (m) => {
+      const energy = count(m[1] ?? '');
+      return energy === undefined
+        ? undefined
+        : { applies: { scope: 'self' }, change: { kind: 'discount', energy } };
+    },
+  },
+  {
+    // "I cost 1 less for each card in your trash."
+    pattern: /^(?:i cost|this costs) (\d+) less for each card in your trash$/i,
+    build: (m) => {
+      const energy = count(m[1] ?? '');
+      return energy === undefined
+        ? undefined
+        : {
+            applies: { scope: 'self' },
+            change: { kind: 'discount', per: { count: { kind: 'cardsInTrash' }, energy } },
+          };
+    },
+  },
+  {
+    // "I cost 1 less for each card you've played this turn, to a minimum of 1."
+    // 356.4.e's minimum binds this discount alone, which is why it rides on the
+    // change rather than on the total.
+    pattern:
+      /^(?:i cost|this costs) (\d+) less for each card you'?ve played this turn(?:, to a minimum of (\d+))?$/i,
+    build: (m) => {
+      const energy = count(m[1] ?? '');
+      if (energy === undefined) {
+        return undefined;
+      }
+      const minimum = m[2] === undefined ? undefined : count(m[2]);
+      if (m[2] !== undefined && minimum === undefined) {
+        return undefined;
+      }
+      return {
+        applies: { scope: 'self' },
+        change: {
+          kind: 'discount',
+          per: { count: { kind: 'cardsPlayedThisTurn' }, energy },
+          ...(minimum === undefined ? {} : { minimumEnergy: minimum }),
+        },
+      };
+    },
+  },
+];
+
 /** A trigger condition together with any per-turn limit its wording implies. */
 interface ParsedCondition {
   readonly condition: TriggerCondition;
@@ -535,10 +601,25 @@ function parseLine(line: string): {
   effect?: CardEffect;
   triggered?: TriggeredAbility;
   activated?: NonNullable<CardAbilities['activated']>[number];
+  costModifier?: CostModifier;
 } | undefined {
   // A timing marker is not an effect; it became `SpellCard.timing` at ingest.
   if (/^(action|reaction)$/i.test(line)) {
     return {};
+  }
+
+  // A Passive cost modifier is a standing statement, not something that fires,
+  // so it is recognised before the ability shapes below. The trailing period
+  // comes off here because these patterns match a whole sentence, where the
+  // effect clauses are split out of one by `parseEffects` first.
+  const sentence = line.replace(/[.]+$/, '');
+  for (const rule of COST_MODIFIERS) {
+    const match = sentence.match(rule.pattern);
+    if (match === null) {
+      continue;
+    }
+    const costModifier = rule.build(match);
+    return costModifier === undefined ? undefined : { costModifier };
   }
 
   // An Activated Ability is recognised by the colon (377.1). Its cost may be
@@ -645,6 +726,7 @@ export function parseCardText(text: string): ParsedText {
   let target: TargetSpec = NO_TARGET;
   const triggered: TriggeredAbility[] = [];
   const activated: NonNullable<CardAbilities['activated']>[number][] = [];
+  const costModifiers: CostModifier[] = [];
   const keywords: Keyword[] = [];
 
   for (const rawLine of text.split('\n')) {
@@ -690,10 +772,14 @@ export function parseCardText(text: string): ParsedText {
       continue;
     }
     if (legion !== null) {
-      // 812 gates an *ability*. A card whose Legion clause is its own rules text
-      // rather than an ability — "LEGION - I cost 2 less" — has nothing to hang
-      // the dependency on, so it stays unparsed.
-      if (parsed.triggered === undefined && parsed.activated === undefined) {
+      // 812.1.b makes the whole clause the Legion Ability, and a passive is as
+      // gateable as a triggered one. What cannot be gated is a bare effect —
+      // there is nothing for the dependency to sit on — so that stays unparsed.
+      if (
+        parsed.triggered === undefined &&
+        parsed.activated === undefined &&
+        parsed.costModifier === undefined
+      ) {
         unparsed.push(line);
         continue;
       }
@@ -702,6 +788,9 @@ export function parseCardText(text: string): ParsedText {
       }
       if (parsed.activated !== undefined) {
         activated.push({ ...parsed.activated, dependsOn: { kind: 'legion' } });
+      }
+      if (parsed.costModifier !== undefined) {
+        costModifiers.push({ ...parsed.costModifier, dependsOn: { kind: 'legion' } });
       }
       continue;
     }
@@ -721,11 +810,15 @@ export function parseCardText(text: string): ParsedText {
     if (parsed.activated !== undefined) {
       activated.push(parsed.activated);
     }
+    if (parsed.costModifier !== undefined) {
+      costModifiers.push(parsed.costModifier);
+    }
   }
 
   const abilities: CardAbilities = {
     ...(triggered.length > 0 ? { triggered } : {}),
     ...(activated.length > 0 ? { activated } : {}),
+    ...(costModifiers.length > 0 ? { costModifiers } : {}),
   };
 
   return {

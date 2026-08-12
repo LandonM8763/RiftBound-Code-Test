@@ -7,6 +7,7 @@
  * effect that fires — which is why it lives beside the ability model rather
  * than inside `Effect`.
  */
+import type { AbilityDependency } from './ability.js';
 import type { CardType } from './card.js';
 import type { Cost } from './cost.js';
 import type { Domain } from './domain.js';
@@ -25,14 +26,48 @@ export type CostTarget = CardType | 'ability';
  * `scope` is about who is paying, not who controls the modifier's source:
  * "units *you* play cost 1 less" is `friendly`, a symmetric tax is `any`.
  *
+ * `self` is the odd one and the common one: "I cost 2 less" is a modifier that
+ * applies to exactly one cost, the cost of playing the card it is printed on.
+ * That makes it the only kind that is read off a card in *hand* — every other
+ * modifier comes from a Permanent on the Board (365.1) — so `costs.ts` gathers
+ * it from the card being played rather than from the board sweep.
+ *
  * Omitting `types` means every *card* type but not abilities — "cards cost 1
  * less" does not discount an Activated Ability, so an ability-cost modifier has
  * to name `'ability'` explicitly.
  */
 export interface CostFilter {
   readonly types?: readonly CostTarget[] | undefined;
-  readonly scope: 'friendly' | 'any';
+  readonly scope: 'self' | 'friendly' | 'any';
 }
+
+/**
+ * Whose cost is being determined, relative to the modifier's source.
+ *
+ * Three cases rather than a boolean because `self` is not "the controller is
+ * paying" — a player can hold two copies of the same card, and only the one
+ * being played carries its own discount.
+ */
+export type CostPayer =
+  /** The very card carrying the modifier is the one being paid for. */
+  | 'self'
+  /** The modifier's controller is paying, for something else. */
+  | 'controller'
+  | 'opponent';
+
+/**
+ * A quantity read off the game state — the "for each …" of rule 356.4.
+ *
+ * Only counts the state already holds are here. A count of something the model
+ * cannot see (a Mighty Unit, say) is refused at ingest rather than approximated,
+ * for the same reason a missing card field is: a discount that is plausible and
+ * wrong makes a card playable at the wrong time.
+ */
+export type CostCount =
+  /** "for each card in your trash" */
+  | { readonly kind: 'cardsInTrash' }
+  /** "for each card you've played this turn" — the same list Legion reads (812.1.c). */
+  | { readonly kind: 'cardsPlayedThisTurn' };
 
 /**
  * What a modifier does, tagged by the rule 356 layer it belongs to.
@@ -64,6 +99,15 @@ export type CostChange =
       readonly energy?: number | undefined;
       readonly power?: readonly Domain[] | undefined;
       readonly minimumEnergy?: number | undefined;
+      /**
+       * "1 less **for each** card in your trash" — an amount counted off the
+       * state rather than printed.
+       *
+       * Resolved to a fixed `energy` before rule 356's layers run, so the layer
+       * machinery stays a pure function of numbers and the counting is one
+       * separately testable step.
+       */
+      readonly per?: { readonly count: CostCount; readonly energy: number } | undefined;
     }
   /** 356.5.a: "ignoring any and all costs" sets the Total Cost to zero. */
   | { readonly kind: 'ignoreAll' };
@@ -71,6 +115,14 @@ export type CostChange =
 export interface CostModifier {
   readonly applies: CostFilter;
   readonly change: CostChange;
+  /**
+   * A Dependent Keyword gating this modifier (801.1) — "LEGION > I cost 2 less".
+   *
+   * 812.1.b makes the whole clause after the keyword the Legion Ability, and a
+   * passive is as gateable as a triggered one. An unmet dependency makes the
+   * modifier absent, not merely inert.
+   */
+  readonly dependsOn?: AbilityDependency | undefined;
 }
 
 /** Rule 356's layer order. Lower numbers are applied first. */
@@ -108,9 +160,13 @@ export function layerOf(change: CostChange): number {
 export function modifierApplies(
   filter: CostFilter,
   target: CostTarget,
-  paidByModifierController: boolean,
+  payer: CostPayer,
 ): boolean {
-  if (filter.scope === 'friendly' && !paidByModifierController) {
+  // A self modifier speaks about one cost only: its own card's.
+  if (filter.scope === 'self') {
+    return payer === 'self' && (filter.types === undefined || filter.types.includes(target));
+  }
+  if (filter.scope === 'friendly' && payer === 'opponent') {
     return false;
   }
   const types = filter.types;
