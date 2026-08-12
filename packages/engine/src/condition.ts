@@ -29,14 +29,29 @@ import {
  * false without one, which is correct rather than a limitation: a card in hand
  * is not buffed and is not at a Battlefield.
  */
+export interface ConditionContext {
+  /**
+   * Whether the optional Additional Cost was paid (356.2.b).
+   *
+   * A choice the player made at step 2 rather than anything readable off the
+   * board, which is why it arrives alongside the state rather than in it.
+   */
+  readonly paidAdditionalCost?: boolean | undefined;
+}
+
 export function conditionMet(
   state: GameState,
   player: PlayerId,
   source: EntityId | undefined,
   condition: Condition | undefined,
+  context: ConditionContext = {},
 ): boolean {
   if (condition === undefined) {
     return true;
+  }
+
+  if (condition.kind === 'paidAdditionalCost') {
+    return context.paidAdditionalCost === true;
   }
 
   if (isSourceCondition(condition)) {

@@ -643,3 +643,83 @@ describe('static abilities (rules 363-365)', () => {
     }
   });
 });
+
+describe('additional costs (rule 356.2)', () => {
+  const costsOf = (text: string) => parseCardText(text).abilities?.additionalCosts;
+
+  it('reads the rulebook`s own worked example (356.2.b.1)', () => {
+    // "As you play me, you may discard 1 as an additional cost. If you do,
+    // reduce my cost by 2." — two sentences on one printed line.
+    const parsed = parseCardText(
+      'As you play me, you may discard a card as an additional cost. If you do, reduce my cost by 2.',
+    );
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.additionalCosts).toEqual([
+      { pay: { kind: 'discard', count: 1 }, optional: true },
+    ]);
+    expect(parsed.abilities?.costModifiers).toEqual([
+      {
+        applies: { scope: 'self' },
+        change: { kind: 'discount', energy: 2 },
+        condition: { kind: 'paidAdditionalCost' },
+      },
+    ]);
+  });
+
+  it('reads "may" as the whole difference between mandatory and optional', () => {
+    // 356.2.a.1 vs 356.2.b.1: the rulebook's own test.
+    expect(costsOf('As an additional cost to play me, kill a friendly unit.')).toEqual([
+      { pay: { kind: 'kill', what: 'unit' } },
+    ]);
+    expect(costsOf('You may kill a friendly gear as an additional cost to play me.')).toEqual([
+      { pay: { kind: 'kill', what: 'gear' }, optional: true },
+    ]);
+  });
+
+  it('covers the wordings the cards use', () => {
+    expect(
+      costsOf('You may exhaust your legend as an additional cost to play me.')?.[0]?.pay,
+    ).toEqual({ kind: 'exhaustLegend' });
+    expect(
+      costsOf("As you play this, you may spend a buff as an additional cost.")?.[0]?.pay,
+    ).toEqual({ kind: 'spendBuff' });
+    expect(
+      costsOf('As you play me, you may pay 1 Calm as an additional cost.')?.[0]?.pay,
+    ).toEqual({ kind: 'resources', cost: { energy: 0, power: ['calm'] } });
+  });
+
+  it('gates the payoff on having paid, whatever kind of payoff it is', () => {
+    const discount = parseCardText(
+      "As you play this, you may spend a buff as an additional cost. If you do, ignore this spell's cost.",
+    );
+    expect(discount.abilities?.costModifiers?.[0]?.change).toEqual({ kind: 'ignoreAll' });
+
+    const effect = parseCardText(
+      'As you play me, you may pay 1 Calm as an additional cost. If you do, draw 1.',
+    );
+    expect(effect.effect?.condition).toEqual({ kind: 'paidAdditionalCost' });
+
+    const trigger = parseCardText('When you play me, if you paid the additional cost, buff me.');
+    expect(trigger.abilities?.triggered?.[0]?.effect.condition).toEqual({
+      kind: 'paidAdditionalCost',
+    });
+  });
+
+  it('refuses a variable count, which cannot be proven payable', () => {
+    // "any number of" is a choice as well as a quantity, and a cost that might
+    // not be payable in full cannot be checked before the card is played.
+    for (const text of [
+      'As you play me, you may kill any number of friendly units as an additional cost.',
+      'As you play me, you may spend any number of buffs as an additional cost.',
+    ]) {
+      expect(parseCardText(text).unparsed.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('never merges two effect lines under different conditions', () => {
+    // `CardEffect` carries one condition, so merging would make a conditional
+    // effect unconditional — strictly stronger than the printed card.
+    const parsed = parseCardText('Draw 1.\nIf you paid the additional cost, draw 1.');
+    expect(parsed.unparsed.length).toBeGreaterThan(0);
+  });
+});

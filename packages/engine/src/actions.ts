@@ -39,6 +39,13 @@ export type Action =
       readonly target?: EntityId;
       /** Where a `move` effect on the card sends its target (rule 449.1). */
       readonly destination?: Location;
+      /**
+       * Rule 356.2.b.1: declares the optional Additional Cost will be paid.
+       *
+       * Declared here, at step 2, because choosing to pay changes the Total
+       * Cost worked out at step 3 — so it cannot be asked any later.
+       */
+      readonly payAdditional?: boolean;
     }
   /** Pass Priority (rule 312.2.d). Resolves the Chain once everyone passes. */
   | { readonly type: 'pass' }

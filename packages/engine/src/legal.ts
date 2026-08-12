@@ -101,6 +101,9 @@ export function legalActions(state: GameState, player: PlayerId): readonly Actio
         const choices = {
           ...(target === undefined ? {} : { target }),
           ...(destination === undefined ? {} : { destination }),
+          // 356.2.b.1: the declaration rides on the action, because it is made
+          // at step 2 and decides the Total Cost at step 3.
+          ...(check.payAdditional ? { payAdditional: true } : {}),
         };
         if (check.card.type === 'unit') {
           for (const location of validUnitLocations(state, player)) {

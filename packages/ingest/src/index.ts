@@ -1,6 +1,7 @@
 export { APITCG_SOURCE, canonicalName, championTagFromName, parseCardType, plainText, timingFromText } from './apitcg.js';
 export { COMMUNITY_SOURCE, stripHtml } from './community.js';
 export {
+  parseAdditionalCost,
   parseCardText,
   parseCondition,
   parseEffects,

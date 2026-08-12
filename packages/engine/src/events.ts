@@ -57,6 +57,16 @@ export type GameEvent =
     }
   /** Rule 167: the Rune Pool emptied and unspent resources were lost. */
   | { readonly type: 'poolEmptied'; readonly player: PlayerId }
+  /**
+   * An Additional Cost was paid (356.2, 357.2). `optional` distinguishes a
+   * declared 356.2.b payment from a forced 356.2.a one.
+   */
+  | {
+      readonly type: 'additionalCostPaid';
+      readonly player: PlayerId;
+      readonly entity: EntityId;
+      readonly optional: boolean;
+    }
   /** Rule 359: a card finished the Process of Play. */
   | {
       readonly type: 'cardPlayed';

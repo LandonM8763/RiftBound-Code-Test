@@ -7,6 +7,7 @@
  */
 import type { CardType } from './card.js';
 import type { Cost } from './cost.js';
+import type { AdditionalCost } from './additional-cost.js';
 import type { CostModifier } from './cost-modifier.js';
 import type { CardEffect } from './effect.js';
 import type { StaticAbility } from './static.js';
@@ -199,6 +200,14 @@ export interface CardAbilities {
    * layered ordering that Might and keywords do not have.
    */
   readonly statics?: readonly StaticAbility[] | undefined;
+  /**
+   * Additional Costs to play this card (356.2), layer 2 of Total Cost.
+   *
+   * On the card being played rather than in `CostModifier`, because they are
+   * paid with actions rather than applied as arithmetic — see
+   * `additional-cost.ts`.
+   */
+  readonly additionalCosts?: readonly AdditionalCost[] | undefined;
 }
 
 export function staticAbilities(abilities: CardAbilities | undefined): readonly StaticAbility[] {

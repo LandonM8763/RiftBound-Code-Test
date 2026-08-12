@@ -11,8 +11,17 @@
  *   are Reactions playable whenever resources are needed (429.3), requiring the
  *   pool to be filled first reaches exactly the same states.
  */
-import { isPlayable, powerOf, type CardDefinition, type Cost, type Domain } from '@riftbound/cards';
+import {
+  isMandatory,
+  isPlayable,
+  powerOf,
+  type AdditionalCost,
+  type CardDefinition,
+  type Cost,
+  type Domain,
+} from '@riftbound/cards';
 
+import { canPayAdditional } from './additional.js';
 import { totalCost } from './costs.js';
 
 import type { Entity, GameState, Location, PlayerId, RunePool } from './state.js';
@@ -80,10 +89,45 @@ export function timingAllows(
 
 export interface PlayableCheck {
   readonly card: CardDefinition;
+  /** The Total Cost after rule 356, for this choice of Additional Cost. */
   readonly cost: Cost;
+  /**
+   * Rule 356.2.b: whether this offer declares the optional Additional Cost.
+   *
+   * A card with one is offered twice — paying and not paying are genuinely
+   * different plays with different Total Costs, which is why the choice has to
+   * be made at step 2 rather than discovered later.
+   */
+  readonly payAdditional: boolean;
 }
 
-/** Cards in `player`'s hand they could legally play and afford right now. */
+/**
+ * Rule 356.2 with 357.1: the resources an Additional Cost consumes are paid
+ * from the same Rune Pool as the Total Cost, so affordability is one question
+ * about their sum rather than two questions that could each say yes.
+ */
+function withResourceCosts(cost: Cost, costs: readonly AdditionalCost[]): Cost {
+  let energy = cost.energy;
+  let power = [...cost.power];
+  for (const additional of costs) {
+    if (additional.pay.kind === 'resources') {
+      energy += additional.pay.cost.energy;
+      power = [...power, ...additional.pay.cost.power];
+    }
+  }
+  return { energy, power };
+}
+
+/**
+ * Cards in `player`'s hand they could legally play and afford right now.
+ *
+ * A card whose Additional Cost is optional appears twice — once for each
+ * declaration — because 356.2.b.1 makes that a choice at step 2 and the two
+ * choices have different Total Costs. A card whose *Mandatory* cost cannot be
+ * paid does not appear at all: 356.2.a makes paying it part of playing the
+ * card, so an unpayable one makes the card unplayable, the same shape as 422.3
+ * for a Discard that cannot be performed.
+ */
 export function playableFromHand(
   state: GameState,
   player: PlayerId,
@@ -97,13 +141,35 @@ export function playableFromHand(
     if (!timingAllows(card, timing)) {
       continue;
     }
-    const cost = totalCost(state, player, card);
-    if (cost === undefined || !canPay(pool, cost)) {
+    const entity = state.entities[id];
+    if (entity === undefined) {
       continue;
     }
-    const entity = state.entities[id];
-    if (entity !== undefined) {
-      results.push({ entity, check: { card, cost } });
+
+    const additional = card.abilities?.additionalCosts ?? [];
+    const mandatory = additional.filter(isMandatory);
+    const optional = additional.filter((cost) => !isMandatory(cost));
+
+    // 356.2.a: every Mandatory cost must be payable or the card is unplayable.
+    if (!mandatory.every((cost) => canPayAdditional(state, player, cost.pay, id))) {
+      continue;
+    }
+
+    const offer = (payAdditional: boolean): void => {
+      const paid = payAdditional ? [...mandatory, ...optional] : mandatory;
+      const cost = totalCost(state, player, card, { paidAdditionalCost: payAdditional });
+      if (cost === undefined || !canPay(pool, withResourceCosts(cost, paid))) {
+        return;
+      }
+      results.push({ entity, check: { card, cost, payAdditional } });
+    };
+
+    offer(false);
+    if (
+      optional.length > 0 &&
+      optional.every((cost) => canPayAdditional(state, player, cost.pay, id))
+    ) {
+      offer(true);
     }
   }
 

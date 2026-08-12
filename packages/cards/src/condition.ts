@@ -61,6 +61,14 @@ export type Condition =
    */
   | { readonly kind: 'scoreWithin'; readonly who: 'you' | 'opponent'; readonly points: number }
   /**
+   * "When you play me, **if you paid the additional cost**, buff me" (356.2.b).
+   *
+   * The most repeated conditional wording in the corpus, and it reads a choice
+   * the player made at step 2 rather than anything on the board — which is why
+   * `conditionMet` takes a context alongside the state.
+   */
+  | { readonly kind: 'paidAdditionalCost' }
+  /**
    * "If you've discarded a card this turn", "if an enemy unit has died this
    * turn".
    *

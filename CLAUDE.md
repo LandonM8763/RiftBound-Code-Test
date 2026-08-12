@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 74 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 78 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -100,20 +100,13 @@ quantity in `GameConfig` cites its rule number.
 
 What is **not** built yet, in rough dependency order:
 
-1. **Additional costs** (rule 356.2), the one layer of cost modification left
-   out. The non-standard costs it is paid with (356.7) — "kill a friendly
-   unit", "discard 1" — are now expressible, so what remains is the *payment
-   protocol*: a cost has to be provably payable before the card can be played
-   (compare 422.3 for Discard), and the optional form needs a decision point
-   during the Announce step (356.2.b.1) because choosing to pay changes the
-   total.
-2. **Choices for Triggered Abilities.** A Triggered Ability's target is not
+1. **Choices for Triggered Abilities.** A Triggered Ability's target is not
    chosen on the way onto the Chain — `queueTriggers` carries `null` — so a
    trigger whose effect targets currently does nothing. Rule 402.2 makes those
    choices at the Make Relevant Choices step of resolution, which needs the
    sub-action protocol. Activated abilities and played cards are unaffected:
    both choose at play time, as 355.8 requires.
-3. **The keywords that need mechanics the engine has no representation for.**
+2. **The keywords that need mechanics the engine has no representation for.**
    Assault, Shield, Tank, Backline and Ganking are built; the rest are refused
    with a stated reason in `UNMODELLED_KEYWORDS`, and each reason is a mechanic
    rather than a keyword: Accelerate and Repeat want Optional Additional Costs
@@ -121,17 +114,18 @@ What is **not** built yet, in rough dependency order:
    cannot express, Hidden wants facedown cards, Equip and Weaponmaster want
    Attach, Vision wants Predict (436) — a choice made during resolution, so
    item 2's protocol.
-4. **Statics that are not a scope plus a grant.** Might modifiers, granted
+3. **Statics that are not a scope plus a grant.** Might modifiers, granted
    keywords and "enters ready" are built; a *dynamic* Might ("increased by your
    points"), a duration ("units you play this turn enter ready") and a rule
    change ("opponents can only play units to their base") are not.
-5. **Abilities on Battlefields.** A Battlefield is not a Game Object here —
+4. **Abilities on Battlefields.** A Battlefield is not a Game Object here —
    `BattlefieldState` holds a card id, not an entity — so nothing sweeps one for
    abilities. Ingest drops them and records a gap rather than shipping a card
    that looks modelled and silently never runs. 5 cards in the corpus.
-6. **Conditional and modal effects** — "if this kills it", "unless its
-   controller…", "choose one •…", "for each…". The effect model has no
-   conditions, no counting and no modes.
+5. **Conditional and modal effects** — "if this kills it", "unless its
+   controller…", "choose one •…", "for each…". *State* predicates and "if you
+   paid the additional cost" are built; what is left is a condition on an
+   effect's own outcome, counting, and modes.
 
 Focus (rule 313) *is* implemented, as part of Non-Combat Showdowns: granted to
 the contesting player (345), passing on a pass (347.2.b) and when the last Chain
@@ -470,6 +464,7 @@ builds the batch on top of it. Keep that split — a win rate computed inside
 | `abilities.ts` | Activated/Triggered abilities: what may be activated, what a game event triggers |
 | `dependency.ts` | Dependent Keywords (812, 824); its own module because both abilities and cost modifiers are gateable and `costs.ts` sits below `abilities.ts` |
 | `condition.ts` | State predicates, asked by statics, cost modifiers, effects and "enters ready" alike |
+| `additional.ts` | Additional Costs (356.2): what can be paid, and paying it |
 | `statics.ts` | Static and Passive abilities: Might, granted keywords, entering ready |
 | `costs.ts` | Rule 356's layers: what a card or ability actually costs to play |
 | `legal.ts` | `legalActions(state, player)` |
@@ -781,7 +776,46 @@ Abilities go through the same machine (403.2-403.3), but only via modifiers that
 name `'ability'` — "cards cost 1 less" is not a statement about Activated
 Abilities, so an unqualified modifier deliberately does not reach them.
 
-Layer 2, additional costs, is absent; see the list under Current status for why.
+### Additional Costs (rule 356.2)
+
+Layer 2, and the last one built. The data is `cards/additional-cost.ts`, the
+payment `engine/additional.ts`.
+
+The delay was never the arithmetic — it is that an Additional Cost is paid with
+a *non-standard* cost (356.7): "kill a friendly unit", "discard 1", "spend a
+buff". Those are actions, so the layer needs a payment protocol rather than a
+subtraction.
+
+**The optional form is a play-time choice, not a mid-resolution one.** Rule
+356.2.b.1 declares it at *step 2*, before the Total Cost is worked out at step
+3 — because choosing to pay changes it. So it rides on the `playCard` action as
+`payAdditional`, and `legalActions` offers a card with an optional cost
+**twice**: paying and not paying are genuinely different plays with different
+totals. That is why this needed no sub-action protocol.
+
+Four things are load-bearing:
+
+- **Payability is proven before the card is played, not discovered during.**
+  356.2.a makes a Mandatory cost part of what playing the card *is*, so an
+  unpayable one makes the card unplayable — the same shape as 422.3 for a
+  Discard that cannot be performed. `playableFromHand` drops such a card
+  entirely rather than offering a play that would strand the game.
+- **A card can never pay its own cost with itself.** The played card is still in
+  hand when 357.2 runs here, so a "discard a card" cost would take the card
+  being played, leaving the cost unpaid and the card played anyway. It is
+  excluded explicitly, in both the check and the payment.
+- **Resources are one question, not two.** An Additional Cost paid in Energy or
+  Power comes out of the same Rune Pool as the Total Cost (357.1), so
+  affordability is checked against their *sum* — two separate checks would each
+  say yes to money that can only be spent once.
+- **"If you paid the additional cost" is a `Condition`, not a special case.** It
+  reads the step-2 choice rather than the board, which is why `conditionMet`
+  takes a context alongside the state and a Spell's declaration rides the Chain
+  to its resolution. It is the most repeated conditional wording in the corpus.
+
+**A variable count is refused.** "Kill any number of friendly units" and "spend
+any number of buffs" are a choice as well as a quantity, and a cost that might
+not be payable in full cannot be proven payable in advance.
 
 #### Where a modifier is read from
 
@@ -1143,14 +1177,14 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 74 of the 468 cards that have text**, and the shape of what is
+**Coverage is 78 of the 468 cards that have text**, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 74 |
-| Blocked | 394 |
+| Fully parsed | 78 |
+| Blocked | 390 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 3 or 4 times, everything else once or
@@ -1187,6 +1221,9 @@ advance. See [Static and passive abilities](#static-and-passive-abilities).
 **State predicates took it 68 → 74**, again matching the measurement exactly.
 See [State predicates](#state-predicates).
 
+**Additional Costs then took it 74 → 78**, the last of the two best-measured
+investments. See [Additional Costs](#additional-costs-rule-3562).
+
 #### What is left, ranked by measurement
 
 Re-measured from the 68 baseline, one mechanic at a time and then cumulatively:
@@ -1194,7 +1231,7 @@ Re-measured from the 68 baseline, one mechanic at a time and then cumulatively:
 | Mechanic | Alone |
 |---|---|
 | The 8 refused keywords | +11 |
-| **Additional Costs (356.2)** | **+8** |
+| **Additional Costs (356.2)** — now built | **+8** |
 | **State predicates** — now built | **+6** |
 | Non-standard ability costs | +3 |
 | Counting / dynamic values | +2 |
@@ -1207,7 +1244,10 @@ deep mechanic (Optional Additional Costs, facedown cards, Predict, Attach). The
 +11 only arrives after building four of them.
 
 Additional Costs and state predicates were the two best single investments and
-**do not overlap**: together they measured +14. The predicates half is done.
+**do not overlap**: together they measured +14 and delivered +10. The shortfall
+is the payments that are still refused — "kill *any number of* friendly units",
+"spend any number of buffs" — where a variable count is a choice as well as a
+quantity, so the cost cannot be proven payable before the card is played.
 
 **The trigger tail is now genuinely spent.** The 8 cards a wider condition would
 still buy want 8 *distinct* wordings, and most need a mechanic that does not

@@ -44,6 +44,13 @@ export interface EffectInvocation {
    */
   readonly source: EntityId;
   readonly choices: EffectChoices;
+  /**
+   * 356.2.b: whether the optional Additional Cost was declared at step 2.
+   *
+   * Carried on the invocation because "if you paid the additional cost" is a
+   * condition about a choice, and the choice is not readable off the board.
+   */
+  readonly paidAdditionalCost?: boolean | undefined;
 }
 
 /**
@@ -174,7 +181,11 @@ export function executeEffect(
   // "When you play me, **if you control a Poro**, buff me and draw 1" — the
   // condition gates the whole clause, so nothing runs when it fails. Asked
   // here, at resolution, because that is when the rules ask it.
-  if (!conditionMet(state, invocation.controller, invocation.source, effect.condition)) {
+  if (
+    !conditionMet(state, invocation.controller, invocation.source, effect.condition, {
+      paidAdditionalCost: invocation.paidAdditionalCost === true,
+    })
+  ) {
     return state;
   }
 

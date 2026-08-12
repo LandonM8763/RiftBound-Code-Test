@@ -24,7 +24,7 @@ import {
   type CostTarget,
 } from '@riftbound/cards';
 
-import { conditionMet } from './condition.js';
+import { conditionMet, type ConditionContext } from './condition.js';
 import { dependencyMet } from './dependency.js';
 import {
   entityCard,
@@ -108,6 +108,7 @@ function modifiersFor(
   state: GameState,
   player: PlayerId,
   card: CardDefinition,
+  context: ConditionContext,
 ): readonly ActiveModifier[] {
   const own: ActiveModifier[] = [];
   for (const modifier of card.abilities?.costModifiers ?? []) {
@@ -119,7 +120,7 @@ function modifiersFor(
     }
     // The card is still in hand, so a source-relative condition is false and a
     // state predicate is answerable — the same split `entersReady` makes.
-    if (!conditionMet(state, player, undefined, modifier.condition)) {
+    if (!conditionMet(state, player, undefined, modifier.condition, context)) {
       continue;
     }
     own.push({ controller: player, modifier, own: true });
@@ -137,11 +138,19 @@ export function totalCost(
   state: GameState,
   player: PlayerId,
   card: CardDefinition,
+  /** 356.2.b: whether the optional Additional Cost was declared at step 2. */
+  context: ConditionContext = {},
 ): Cost | undefined {
   if (!isPlayable(card)) {
     return undefined;
   }
-  return applyModifiers(card.cost, card.type, player, modifiersFor(state, player, card), state);
+  return applyModifiers(
+    card.cost,
+    card.type,
+    player,
+    modifiersFor(state, player, card, context),
+    state,
+  );
 }
 
 /**

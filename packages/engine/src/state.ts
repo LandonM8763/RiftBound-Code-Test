@@ -212,6 +212,14 @@ export interface ChainItem {
    * trash, a resolved ability leaves its source alone.
    */
   readonly ability: AbilityRef | null;
+  /**
+   * Rule 356.2.b: whether the optional Additional Cost was declared when this
+   * was played.
+   *
+   * Carried here because a Spell's effect resolves off the Chain later, and
+   * "if you paid the additional cost" is asked then rather than at play time.
+   */
+  readonly paidAdditionalCost?: boolean | undefined;
 }
 
 /**

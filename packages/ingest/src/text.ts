@@ -19,7 +19,9 @@ import {
   type CardAbilities,
   type Domain,
   type CardEffect,
+  type AdditionalCost,
   type CostModifier,
+  type CostPayment,
   type Effect,
   type Keyword,
   type StaticAbility,
@@ -457,6 +459,21 @@ const COST_MODIFIERS: readonly {
     },
   },
   {
+    // "Reduce my cost by 2" — the wording that pairs with an Additional Cost.
+    pattern: /^reduce (?:my|this) cost by (\d+)$/i,
+    build: (m) => {
+      const energy = count(m[1] ?? '');
+      return energy === undefined
+        ? undefined
+        : { applies: { scope: 'self' }, change: { kind: 'discount', energy } };
+    },
+  },
+  {
+    // "Ignore this spell's cost" (356.5.a).
+    pattern: /^ignore (?:my|this spell'?s|this) cost$/i,
+    build: () => ({ applies: { scope: 'self' }, change: { kind: 'ignoreAll' } }),
+  },
+  {
     // "I cost 1 less for each card in your trash."
     pattern: /^(?:i cost|this costs) (\d+) less for each card in your trash$/i,
     build: (m) => {
@@ -495,6 +512,94 @@ const COST_MODIFIERS: readonly {
     },
   },
 ];
+
+/**
+ * Additional Costs (rule 356.2).
+ *
+ * Recognised by the phrase "as an additional cost" (356.2.a.1), with the word
+ * "may" deciding Mandatory from Optional — that is the rulebook's own test, so
+ * it is the parser's too.
+ *
+ * Only payments the engine can both check and perform are read. "Kill any
+ * number of friendly units" and "spend any number of buffs" are refused: a
+ * variable count is a choice, and a cost that might not be payable in full
+ * cannot be proven payable before the card is played.
+ */
+const COST_PAYMENTS: readonly {
+  readonly pattern: RegExp;
+  readonly build: (match: RegExpMatchArray) => CostPayment | undefined;
+}[] = [
+  {
+    pattern: /^discard (\d+|a) cards?$/i,
+    build: (m) => {
+      const raw = (m[1] ?? '').toLowerCase();
+      const n = raw === 'a' ? 1 : count(raw);
+      return n === undefined ? undefined : { kind: 'discard', count: n };
+    },
+  },
+  {
+    pattern: /^pay (\d+)?\s*(fury|calm|mind|body|chaos|order)$/i,
+    build: (m) => {
+      const n = m[1] === undefined ? 1 : count(m[1]);
+      const domain = (m[2] ?? '').toLowerCase() as Domain;
+      return n === undefined
+        ? undefined
+        : { kind: 'resources', cost: { energy: 0, power: Array.from({ length: n }, () => domain) } };
+    },
+  },
+  {
+    pattern: /^pay (\d+)$/i,
+    build: (m) => {
+      const n = count(m[1] ?? '');
+      return n === undefined ? undefined : { kind: 'resources', cost: { energy: n, power: [] } };
+    },
+  },
+  { pattern: /^spend a buff$/i, build: () => ({ kind: 'spendBuff' }) },
+  { pattern: /^exhaust your legend$/i, build: () => ({ kind: 'exhaustLegend' }) },
+  {
+    pattern: /^kill a friendly (unit|gear)$/i,
+    build: (m) => ({ kind: 'kill', what: (m[1] ?? 'unit').toLowerCase() as 'unit' | 'gear' }),
+  },
+];
+
+/**
+ * Read an Additional Cost clause, in any of the three wordings the cards use.
+ *
+ * "As you play me, you may X as an additional cost."
+ * "As an additional cost to play me, X."
+ * "You may X as an additional cost to play me."
+ */
+export function parseAdditionalCost(line: string): AdditionalCost | undefined {
+  const text = line.replace(/[.]+$/, '').trim();
+
+  const forms: readonly RegExp[] = [
+    /^as (?:you play|an additional cost to play) (?:me|this),?\s*(.+?) as an additional cost$/i,
+    /^as an additional cost to play (?:me|this),?\s*(.+)$/i,
+    /^(.+?) as an additional cost to play (?:me|this)$/i,
+  ];
+
+  for (const form of forms) {
+    const match = text.match(form);
+    if (match === null) {
+      continue;
+    }
+    let body = (match[1] ?? '').trim();
+    // 356.2.a.1 vs 356.2.b.1: the word "may" is the whole difference.
+    const optional = /^you may\s+/i.test(body);
+    body = body.replace(/^you may\s+/i, '').trim();
+
+    for (const rule of COST_PAYMENTS) {
+      const payment = body.match(rule.pattern);
+      if (payment === null) {
+        continue;
+      }
+      const pay = rule.build(payment);
+      return pay === undefined ? undefined : { pay, ...(optional ? { optional } : {}) };
+    }
+    return undefined;
+  }
+  return undefined;
+}
 
 /**
  * State predicates: "if you control a Poro", "if an opponent's score is within
@@ -553,6 +658,16 @@ const STATE_PREDICATES: readonly {
       const points = count(m[1] ?? '');
       return points === undefined ? undefined : { kind: 'scoreWithin', who: 'you', points };
     },
+  },
+  {
+    // "if you paid the additional cost" (356.2.b) — the most repeated
+    // conditional wording in the corpus.
+    pattern: /^you paid the additional cost$/i,
+    build: () => ({ kind: 'paidAdditionalCost' }),
+  },
+  {
+    pattern: /^you do$/i,
+    build: () => ({ kind: 'paidAdditionalCost' }),
   },
   {
     // "if you've discarded a card this turn"
@@ -820,10 +935,18 @@ function parseLine(line: string): {
   activated?: NonNullable<CardAbilities['activated']>[number];
   costModifier?: CostModifier;
   static?: StaticAbility;
+  additionalCost?: AdditionalCost;
 } | undefined {
   // A timing marker is not an effect; it became `SpellCard.timing` at ingest.
   if (/^(action|reaction)$/i.test(line)) {
     return {};
+  }
+
+  // An Additional Cost (356.2) is recognised before anything else, because its
+  // wording wraps a payment that would otherwise read as an effect.
+  if (/as an additional cost/i.test(line)) {
+    const additionalCost = parseAdditionalCost(line);
+    return additionalCost === undefined ? undefined : { additionalCost };
   }
 
   // A Passive cost modifier is a standing statement, not something that fires,
@@ -918,9 +1041,71 @@ function parseLine(line: string): {
     };
   }
 
-  // Otherwise the whole line is the card's own rules text.
-  const effect = parseEffects(line);
-  return effect === undefined ? undefined : { effect };
+  // Otherwise the whole line is the card's own rules text — possibly gated,
+  // as in "If you do, draw 1" after an Additional Cost.
+  const gated = splitCondition(line);
+  if (gated === undefined) {
+    return undefined;
+  }
+  const effect = parseEffects(gated.rest);
+  if (effect === undefined) {
+    return undefined;
+  }
+  return {
+    effect: gated.condition === undefined ? effect : { ...effect, condition: gated.condition },
+  };
+}
+
+/**
+ * Parse a line that may hold more than one sentence.
+ *
+ * Returns the merged contribution, or `undefined` if any sentence is outside
+ * the grammar. A single-sentence line takes the fast path unchanged, so this
+ * only changes behaviour where a line genuinely has a full stop in the middle.
+ */
+function parseSentences(line: string): ReturnType<typeof parseLine> {
+  const sentences = splitSentences(line);
+  if (sentences.length <= 1) {
+    return parseLine(line);
+  }
+
+  const merged: {
+    effect?: CardEffect;
+    triggered?: TriggeredAbility;
+    activated?: NonNullable<CardAbilities['activated']>[number];
+    costModifier?: CostModifier;
+    static?: StaticAbility;
+    additionalCost?: AdditionalCost;
+  } = {};
+
+  for (const sentence of sentences) {
+    const parsed = parseLine(sentence);
+    if (parsed === undefined) {
+      return undefined;
+    }
+    // Two sentences of the same kind on one line would silently lose one, so
+    // that is a refusal rather than a merge.
+    for (const key of Object.keys(parsed) as (keyof typeof merged)[]) {
+      if (merged[key] !== undefined) {
+        return undefined;
+      }
+    }
+    Object.assign(merged, parsed);
+  }
+  return merged;
+}
+
+/**
+ * Split on a full stop that ends a sentence.
+ *
+ * Not on every period: an Activated Ability's cost and a decimal would both be
+ * cut in the wrong place, so this requires whitespace and a capital after it.
+ */
+function splitSentences(line: string): string[] {
+  return line
+    .split(/(?<=[.])\s+(?=[A-Z])/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
 }
 
 /**
@@ -964,10 +1149,12 @@ export function parseCardText(text: string): ParsedText {
   const unparsed: string[] = [];
   const effects: Effect[] = [];
   let target: TargetSpec = NO_TARGET;
+  let condition: Condition | undefined;
   const triggered: TriggeredAbility[] = [];
   const activated: NonNullable<CardAbilities['activated']>[number][] = [];
   const costModifiers: CostModifier[] = [];
   const statics: StaticAbility[] = [];
+  const additionalCosts: AdditionalCost[] = [];
   const keywords: Keyword[] = [];
 
   for (const rawLine of text.split('\n')) {
@@ -1007,7 +1194,12 @@ export function parseCardText(text: string): ParsedText {
       continue;
     }
 
-    const parsed = parseLine(line);
+    // A printed line can hold several sentences — "As you play me, you may
+    // discard a card as an additional cost. If you do, reduce my cost by 2." is
+    // one line and two statements. Split before parsing, and require every
+    // sentence to parse: the all-or-nothing rule is per *card*, so a line that
+    // half-reads still fails the card.
+    const parsed = parseSentences(line);
     if (parsed === undefined) {
       unparsed.push(line);
       continue;
@@ -1047,6 +1239,17 @@ export function parseCardText(text: string): ParsedText {
         }
         target = parsed.effect.target;
       }
+      // `CardEffect` carries one condition for the whole card, so two lines
+      // under *different* conditions cannot be merged — doing it anyway would
+      // make a conditional effect unconditional, which is strictly stronger
+      // than the printed card. Refuse instead.
+      if (JSON.stringify(condition) !== JSON.stringify(parsed.effect.condition)) {
+        if (effects.length > 0 || condition !== undefined) {
+          unparsed.push(line);
+          continue;
+        }
+        condition = parsed.effect.condition;
+      }
       effects.push(...parsed.effect.effects);
     }
     if (parsed.triggered !== undefined) {
@@ -1061,6 +1264,9 @@ export function parseCardText(text: string): ParsedText {
     if (parsed.static !== undefined) {
       statics.push(parsed.static);
     }
+    if (parsed.additionalCost !== undefined) {
+      additionalCosts.push(parsed.additionalCost);
+    }
   }
 
   const abilities: CardAbilities = {
@@ -1068,10 +1274,13 @@ export function parseCardText(text: string): ParsedText {
     ...(activated.length > 0 ? { activated } : {}),
     ...(costModifiers.length > 0 ? { costModifiers } : {}),
     ...(statics.length > 0 ? { statics } : {}),
+    ...(additionalCosts.length > 0 ? { additionalCosts } : {}),
   };
 
   return {
-    ...(effects.length > 0 ? { effect: { target, effects } } : {}),
+    ...(effects.length > 0
+      ? { effect: { target, effects, ...(condition === undefined ? {} : { condition }) } }
+      : {}),
     ...(Object.keys(abilities).length > 0 ? { abilities } : {}),
     ...(keywords.length > 0 ? { keywords } : {}),
     unparsed,

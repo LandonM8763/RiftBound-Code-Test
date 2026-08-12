@@ -19,6 +19,9 @@ export type {
   TriggeredAbility,
 } from './ability.js';
 
+export { isMandatory } from './additional-cost.js';
+export type { AdditionalCost, CostPayment } from './additional-cost.js';
+
 export { isSourceCondition } from './condition.js';
 export type { Condition, ControlledKind } from './condition.js';
 

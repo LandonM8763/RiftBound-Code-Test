@@ -1,4 +1,4 @@
-import { effectOf, type CardDefinition } from '@riftbound/cards';
+import { effectOf, isMandatory, type AdditionalCost, type CardDefinition, type Cost } from '@riftbound/cards';
 
 import { IllegalActionError, type Action } from './actions.js';
 import type { GameEvent } from './events.js';
@@ -28,6 +28,7 @@ import {
 import { executeEffect, isValidTarget, type EffectContext } from './effects.js';
 import { totalCost } from './costs.js';
 import { canPay, payFrom, timingAllows, validUnitLocations } from './play.js';
+import { canPayAdditional, payAdditional as performPayment } from './additional.js';
 import { entersReady } from './statics.js';
 import { Rng } from './rng.js';
 import type {
@@ -85,7 +86,14 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     case 'addPower':
       return addPower(state, action.rune);
     case 'playCard':
-      return playCard(state, action.card, action.location, action.target, action.destination);
+      return playCard(
+        state,
+        action.card,
+        action.location,
+        action.target,
+        action.destination,
+        action.payAdditional === true,
+      );
     case 'pass':
       return pass(state);
     case 'moveUnits':
@@ -167,6 +175,7 @@ function playCard(
   location: Location | undefined,
   target: EntityId | undefined,
   destination: Location | undefined,
+  payAdditional: boolean,
 ): ReduceResult {
   const player = requirePriority(state);
   const entity = getEntity(state, card);
@@ -184,11 +193,30 @@ function playCard(
     );
   }
 
-  const cost = totalCost(state, player, definition);
+  // 356.2: Additional Costs are settled before the Total Cost, because the
+  // optional one's declaration changes it (356.2.b.1).
+  const additional = definition.abilities?.additionalCosts ?? [];
+  const mandatory = additional.filter(isMandatory);
+  const optional = additional.filter((entry) => !isMandatory(entry));
+  const owed = payAdditional ? [...mandatory, ...optional] : mandatory;
+
+  if (payAdditional && optional.length === 0) {
+    throw new IllegalActionError(`${definition.name} has no optional additional cost to pay`);
+  }
+  // 356.2.a: a Mandatory cost that cannot be paid makes the card unplayable.
+  for (const entry of owed) {
+    if (!canPayAdditional(state, player, entry.pay, card)) {
+      throw new IllegalActionError(
+        `Cannot pay the additional cost to play ${definition.name}`,
+      );
+    }
+  }
+
+  const cost = totalCost(state, player, definition, { paidAdditionalCost: payAdditional });
   if (cost === undefined) {
     throw new IllegalActionError(`${definition.name} is not a playable card`);
   }
-  if (!canPay(getPlayer(state, player).pool, cost)) {
+  if (!canPay(getPlayer(state, player).pool, withAdditionalResources(cost, owed))) {
     throw new IllegalActionError(`Cannot pay for ${definition.name}`);
   }
 
@@ -208,6 +236,15 @@ function playCard(
   }));
 
   const events: GameEvent[] = [];
+
+  // 357.2: pay the Additional Costs. After the Total Cost so a resource
+  // payment comes out of the pool the Total Cost already drew from.
+  for (const entry of owed) {
+    next = payAdditionalCost(next, player, entry.pay, card, events);
+  }
+  if (owed.length > 0) {
+    events.push({ type: 'additionalCostPaid', player, entity: card, optional: payAdditional });
+  }
 
   // 329.2: the card is Finalized here, whatever its type. Recorded before the
   // split below because a Spell is Finalized onto the Chain and a Permanent
@@ -239,6 +276,10 @@ function playCard(
           target: target ?? null,
           destination: destination ?? null,
           ability: null,
+          // 356.2.b: a Spell resolves off the Chain later, so the declaration
+          // has to travel with it — "if you paid the additional cost" is asked
+          // at resolution, long after the choice was made.
+          ...(payAdditional ? { paidAdditionalCost: true } : {}),
         },
       ],
       passes: 0,
@@ -281,7 +322,12 @@ function playCard(
   if (effect !== undefined) {
     next = executeEffect(
       next,
-      { controller: player, source: card, choices: { target, destination } },
+      {
+        controller: player,
+        source: card,
+        choices: { target, destination },
+        paidAdditionalCost: payAdditional,
+      },
       effect,
       events,
       EFFECT_CONTEXT,
@@ -602,6 +648,66 @@ const EFFECT_CONTEXT: EffectContext = {
 };
 
 /**
+ * Rule 357.1: an Additional Cost's resources come out of the same Rune Pool as
+ * the Total Cost, so affordability is one question about their sum.
+ */
+function withAdditionalResources(cost: Cost, owed: readonly AdditionalCost[]): Cost {
+  let energy = cost.energy;
+  let power = [...cost.power];
+  for (const entry of owed) {
+    if (entry.pay.kind === 'resources') {
+      energy += entry.pay.cost.energy;
+      power = [...power, ...entry.pay.cost.power];
+    }
+  }
+  return { energy, power };
+}
+
+/**
+ * Pay one Additional Cost (357.2).
+ *
+ * The kill and discard payments are handed the reducer's own machinery, because
+ * a Kill Instruction has to queue Deathknells before the Unit reaches the trash
+ * (428.1.a.1.b) and a Discard is an ordinary effect.
+ */
+function payAdditionalCost(
+  state: GameState,
+  player: PlayerId,
+  payment: AdditionalCost['pay'],
+  source: EntityId,
+  events: GameEvent[],
+): GameState {
+  return performPayment(
+    state,
+    player,
+    payment,
+    source,
+    (current, unit) => {
+      const queued = queueDeaths(current, [unit], events);
+      const owner = getEntity(queued, unit).owner;
+      events.push({ type: 'unitsKilled', units: [unit] });
+      return withEntity(moveEntity(queued, unit, playerLocation(owner, 'trash')), unit, (e) => ({
+        ...e,
+        damage: 0,
+        exhausted: false,
+        mightBonus: 0,
+        buffs: 0,
+      }));
+    },
+    (current, who, cards) => {
+      let next = current;
+      for (const discarded of cards) {
+        next = moveEntity(next, discarded, playerLocation(who, 'trash'));
+      }
+      events.push({ type: 'cardsDiscarded', player: who, cards: [...cards] });
+      // 383.2: a Discard is a Discard however it was caused, so "when you
+      // discard" watches a cost payment as much as an effect.
+      return raiseEvent(next, { event: 'discard', actor: who }, events);
+    },
+  );
+}
+
+/**
  * Queue the death triggers for a set of Units (rule 428).
  *
  * One event per Unit rather than one for the batch: 383.2 makes each death its
@@ -745,6 +851,9 @@ function pass(state: GameState): ReduceResult {
           controller: top.controller,
           source: top.entity,
           choices: { target: top.target ?? undefined, destination: top.destination ?? undefined },
+          // 356.2.b: the declaration was made when the Spell was played, and
+          // rode the Chain to here.
+          paidAdditionalCost: top.paidAdditionalCost === true,
         },
         spellEffect,
         events,
