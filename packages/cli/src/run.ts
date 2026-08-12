@@ -42,7 +42,7 @@ export const USAGE = `riftbound — deck testing tools
 Usage:
   riftbound analyze  <deck-file> --cards <cards.json> [options]
   riftbound validate <deck-file> --cards <cards.json> [options]
-  riftbound ingest   <raw-file> [--source <name>] [--json]
+  riftbound ingest   <raw-file>... [--source <name>] [--json]
   riftbound sim      <deck-file> --cards <cards.json> [options]
   riftbound help
 
@@ -61,6 +61,9 @@ stdout. It drops any card whose source is missing a field the rules need rather
 than inventing one, and reports every such gap on stderr. The apitcg source
 carries Might, the supertypes and printed Spell timing; the community source
 carries none of those and yields no Units or Spells at all.
+
+Give ingest several files to take in more than one set at once — the card data
+is published one file per set, and a deck is not limited to one set.
 
 sim plays the deck against itself, heuristic agent versus random, and reports
 win rates with 95% intervals. Seats rotate each game so the result is not
@@ -115,25 +118,42 @@ const SOURCES: Readonly<Record<string, CardSource>> = {
  * exactly which cards the source could not supply and why.
  */
 function runIngest(
-  rawPath: string,
+  rawPaths: readonly string[],
   readFile: FileReader,
   asJson: boolean,
   source: CardSource,
 ): CliResult {
-  let text: string;
-  try {
-    text = readFile(rawPath);
-  } catch (error) {
-    return fail(`Cannot read card data "${rawPath}": ${messageOf(error)}`, EXIT.input);
+  // Several files because the card data is published one file per set, and a
+  // deck is not limited to one set. Concatenating before normalizing rather
+  // than merging afterwards is what lets 103.2.b.2's same-name-is-the-same-card
+  // rule collapse a reprint that appears in two sets.
+  const records: unknown[] = [];
+  for (const rawPath of rawPaths) {
+    let text: string;
+    try {
+      text = readFile(rawPath);
+    } catch (error) {
+      return fail(`Cannot read card data "${rawPath}": ${messageOf(error)}`, EXIT.input);
+    }
+
+    let raw: unknown;
+    try {
+      raw = JSON.parse(text);
+    } catch (error) {
+      return fail(`"${rawPath}" is not valid JSON: ${messageOf(error)}`, EXIT.input);
+    }
+    if (!Array.isArray(raw)) {
+      // One file that is not an array is the source's problem to report, and it
+      // words the message better than this layer could.
+      return normalized(source, raw, asJson);
+    }
+    records.push(...raw);
   }
 
-  let raw: unknown;
-  try {
-    raw = JSON.parse(text);
-  } catch (error) {
-    return fail(`"${rawPath}" is not valid JSON: ${messageOf(error)}`, EXIT.input);
-  }
+  return normalized(source, records, asJson);
+}
 
+function normalized(source: CardSource, raw: unknown, asJson: boolean): CliResult {
   const result = source.normalize(raw);
   if (result.problems.length > 0 && result.cards.length === 0) {
     return fail(`Card data is not usable:\n  ${result.problems.join('\n  ')}`, EXIT.input);
@@ -180,9 +200,9 @@ export function run(argv: readonly string[], readFile: FileReader): CliResult {
     return usageError('No command given.');
   }
   if (command === 'ingest') {
-    const rawPath = positionals[1];
-    if (rawPath === undefined) {
-      return usageError('ingest needs a raw card data file.');
+    const rawPaths = positionals.slice(1);
+    if (rawPaths.length === 0) {
+      return usageError('ingest needs at least one raw card data file.');
     }
     const name = typeof values['source'] === 'string' ? values['source'] : 'apitcg';
     const source = SOURCES[name];
@@ -191,7 +211,7 @@ export function run(argv: readonly string[], readFile: FileReader): CliResult {
         `Unknown source "${name}". Use one of: ${Object.keys(SOURCES).join(', ')}.`,
       );
     }
-    return runIngest(rawPath, readFile, values['json'] === true, source);
+    return runIngest(rawPaths, readFile, values['json'] === true, source);
   }
   if (command !== 'analyze' && command !== 'validate' && command !== 'sim') {
     return usageError(`Unknown command "${command}".`);

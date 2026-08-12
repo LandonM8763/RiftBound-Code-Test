@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
+import { parseDeckList, toCardLists } from '@riftbound/deck';
 import { describe, expect, it } from 'vitest';
 
 import { CardDataError, parseCardsJson } from './cards-file.js';
@@ -478,5 +479,104 @@ describe('analyze --json', () => {
 
   it('round-trips through JSON.parse without loss', () => {
     expect(() => JSON.parse(analyze('--json').stdout)).not.toThrow();
+  });
+});
+
+describe('ingest from several set files', () => {
+  it('takes more than one raw file, because card data ships per set', () => {
+    const first = JSON.stringify([
+      {
+        id: 'set-a-001',
+        name: 'Alpha',
+        cardType: 'Unit',
+        domain: 'Fury',
+        energyCost: '2',
+        powerCost: '0',
+        might: '2',
+        description: '',
+      },
+    ]);
+    const second = JSON.stringify([
+      {
+        id: 'set-b-001',
+        name: 'Beta',
+        cardType: 'Unit',
+        domain: 'Calm',
+        energyCost: '3',
+        powerCost: '0',
+        might: '3',
+        description: '',
+      },
+    ]);
+    const result = run(['ingest', 'a.json', 'b.json'], (path) =>
+      path === 'a.json' ? first : second,
+    );
+
+    expect(result.code).toBe(EXIT.ok);
+    const cards = JSON.parse(result.stdout) as { name: string }[];
+    expect(cards.map((card) => card.name).sort()).toEqual(['Alpha', 'Beta']);
+  });
+
+  it('collapses a card reprinted into a second set (103.2.b.2)', () => {
+    // Same name in two sets is the same card, so concatenating before
+    // normalizing is what lets the printing rule see both and keep one.
+    const set = (id: string) =>
+      JSON.stringify([
+        {
+          id,
+          name: 'Reprint',
+          cardType: 'Unit',
+          domain: 'Fury',
+          energyCost: '2',
+          powerCost: '0',
+          might: '2',
+          description: '',
+        },
+      ]);
+    const result = run(['ingest', 'a.json', 'b.json'], (path) =>
+      path === 'a.json' ? set('set-a-001') : set('set-b-001'),
+    );
+
+    expect(JSON.parse(result.stdout)).toHaveLength(1);
+  });
+
+  it('names the file it could not read', () => {
+    const result = run(['ingest', 'ok.json', 'missing.json'], (path) => {
+      if (path === 'missing.json') {
+        throw new Error('ENOENT');
+      }
+      return '[]';
+    });
+    expect(result.code).toBe(EXIT.input);
+    expect(result.stderr).toContain('missing.json');
+  });
+
+  it('still asks for at least one file', () => {
+    expect(run(['ingest'], () => '').code).toBe(EXIT.usage);
+  });
+});
+
+describe('the real-card example deck', () => {
+  // Only its shape can be checked here: it names real collector numbers, and
+  // this repository does not commit the real card data (see CLAUDE.md's open
+  // question on licensing). Parsing needs no card data, so a typo in the file
+  // still fails CI even though validation cannot run.
+  const REAL_DECK = examples('real-deck.txt');
+
+  it('parses into a legal-sized deck', () => {
+    const parsed = parseDeckList(REAL_DECK);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    const lists = toCardLists(parsed.deck);
+    expect(lists.main).toHaveLength(40);
+    expect(lists.runes).toHaveLength(12);
+    expect(lists.battlefields).toHaveLength(3);
+  });
+
+  it('tells the reader how to get the card data it needs', () => {
+    expect(REAL_DECK).toContain('riftbound-tcg-data');
+    expect(REAL_DECK).toContain('ingest');
   });
 });

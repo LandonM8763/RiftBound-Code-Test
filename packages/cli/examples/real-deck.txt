@@ -1,0 +1,44 @@
+// A legal deck of REAL Riftbound cards, by collector number.
+//
+// Unlike deck.txt next to it, this references the real card pool rather than
+// the invented sample cards, so it needs card data ingested first:
+//
+//   curl -sO https://raw.githubusercontent.com/apitcg/riftbound-tcg-data/main/cards/en/origins.json
+//   curl -sO https://raw.githubusercontent.com/apitcg/riftbound-tcg-data/main/cards/en/spiritforged.json
+//   curl -sO https://raw.githubusercontent.com/apitcg/riftbound-tcg-data/main/cards/en/origins-proving-grounds.json
+//   node packages/cli/dist/main.js ingest *.json > cards.json
+//   node packages/cli/dist/main.js analyze packages/cli/examples/real-deck.txt --cards cards.json
+//
+// Kai'Sa - Daughter of the Void (Fury/Mind). Only collector numbers are listed
+// here; no card text is reproduced.
+
+# Legend
+1 origins-247-298
+
+# Champion
+1 origins-039-298
+
+# Main
+3 origins-001-298
+3 origins-002-298
+3 origins-003-298
+3 origins-004-298
+3 origins-005-298
+3 origins-006-298
+3 origins-008-298
+3 origins-009-298
+3 origins-010-298
+3 origins-011-298
+3 origins-012-298
+3 origins-013-298
+3 origins-014-298
+1 origins-015-298
+
+# Runes
+6 origins-007-298
+6 origins-089-298
+
+# Battlefields
+1 origins-275-298
+1 origins-276-298
+1 origins-277-298

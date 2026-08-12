@@ -84,7 +84,8 @@ What is built:
   above yields data while the shortfall stays visible. This is where
   presentation lives; nothing below
   it formats anything. `packages/cli/examples/` holds invented sample cards and a
-  legal deck list so the tool runs today, and the suite reads them so a broken
+  legal deck list so the tool runs with no setup at all, plus `real-deck.txt`
+  for use against ingested real data; the suite reads all three, so a broken
   example fails CI.
 
 **The engine is now reconciled against the official Core Rules** (RUP4,
@@ -920,12 +921,20 @@ reachable on `raw.githubusercontent.com`. It carries **Might**, the **Champion
 and Signature supertypes**, and **printed Spell timing** — the three things the
 older community export lacked.
 
-Ingest it with the default source:
+Ingest it with the default source. `ingest` takes several files, because the
+data is published one file per set and a deck is not limited to one set:
 
 ```bash
-curl -sO https://raw.githubusercontent.com/apitcg/riftbound-tcg-data/main/cards/en/origins.json
-node packages/cli/dist/main.js ingest origins.json > cards.json
+base=https://raw.githubusercontent.com/apitcg/riftbound-tcg-data/main/cards/en
+curl -sO $base/origins.json
+curl -sO $base/spiritforged.json
+curl -sO $base/origins-proving-grounds.json
+node packages/cli/dist/main.js ingest *.json > cards.json
 ```
+
+`packages/cli/examples/real-deck.txt` is a legal deck of real collector numbers
+to point the tools at once that has run. It lists ids only — no card text — so
+it sidesteps the licensing half of open question 1.
 
 ### What it yields
 
