@@ -9,6 +9,7 @@ import type { CardType } from './card.js';
 import type { Cost } from './cost.js';
 import type { CostModifier } from './cost-modifier.js';
 import type { CardEffect } from './effect.js';
+import type { StaticAbility } from './static.js';
 
 /**
  * A gate on an otherwise ordinary ability — the rulebook's Dependent Keywords
@@ -191,6 +192,17 @@ export interface CardAbilities {
    * 363, 365.1). A standing statement, not something that fires.
    */
   readonly costModifiers?: readonly CostModifier[] | undefined;
+  /**
+   * Static abilities: Might modifiers and granted keywords (363-365).
+   *
+   * Separate from `costModifiers` because rule 356 gives cost modification a
+   * layered ordering that Might and keywords do not have.
+   */
+  readonly statics?: readonly StaticAbility[] | undefined;
+}
+
+export function staticAbilities(abilities: CardAbilities | undefined): readonly StaticAbility[] {
+  return abilities?.statics ?? [];
 }
 
 export function activatedAbilities(abilities: CardAbilities | undefined): readonly ActivatedAbility[] {

@@ -15,8 +15,7 @@
  *    Defender is still present (466.1.a.2).
  * 5. The result is decided by who has Units remaining, not by Might (466.3).
  */
-import { hasKeyword, keywordValue } from '@riftbound/cards';
-
+import { staticMight, unitHasKeyword, unitKeywordValue } from './statics.js';
 import type { EntityId, GameState, PlayerId } from './state.js';
 import { entityCard, getEntity } from './state.js';
 
@@ -46,16 +45,22 @@ export function mightOf(state: GameState, unit: EntityId, role?: CombatRole): nu
   }
   const entity = getEntity(state, unit);
   // 807.1.c: "While I am an attacker, I have +X Might." 814.1.c is the mirror
-  // for a defender. 807.2/814.2: multiple instances sum, which keywordValue does.
+  // for a defender. 807.2/814.2: multiple instances sum, and the value is read
+  // over granted keywords as well as printed ones — a granted Assault is an
+  // Assault (801.3.a).
   const designation =
     role === 'attacker'
-      ? keywordValue(card.keywords, 'assault')
+      ? unitKeywordValue(state, unit, 'assault')
       : role === 'defender'
-        ? keywordValue(card.keywords, 'shield')
+        ? unitKeywordValue(state, unit, 'shield')
         : 0;
   // Rule 703: each Buff contributes +1 Might. 143.2.b: a Might below 0 counts
-  // as 0 when summing for damage.
-  return Math.max(0, card.might + entity.mightBonus + entity.buffs + designation);
+  // as 0 when summing for damage. Static Might (363) is not on the Unit at all,
+  // which is why it is asked for rather than stored.
+  return Math.max(
+    0,
+    card.might + entity.mightBonus + entity.buffs + designation + staticMight(state, unit),
+  );
 }
 
 export function sumMight(state: GameState, units: readonly EntityId[], role?: CombatRole): number {
@@ -86,11 +91,10 @@ export function hasLethalDamage(state: GameState, unit: EntityId, role?: CombatR
  * Tank" literally, and is noted rather than hidden.
  */
 function assignmentRank(state: GameState, unit: EntityId): number {
-  const keywords = entityCard(state, unit).keywords;
-  if (hasKeyword(keywords, 'tank')) {
+  if (unitHasKeyword(state, unit, 'tank')) {
     return 0;
   }
-  return hasKeyword(keywords, 'backline') ? 2 : 1;
+  return unitHasKeyword(state, unit, 'backline') ? 2 : 1;
 }
 
 /**

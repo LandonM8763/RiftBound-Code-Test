@@ -28,6 +28,7 @@ import {
 import { executeEffect, isValidTarget, type EffectContext } from './effects.js';
 import { totalCost } from './costs.js';
 import { canPay, payFrom, timingAllows, validUnitLocations } from './play.js';
+import { entersReady } from './statics.js';
 import { Rng } from './rng.js';
 import type {
   BattlefieldState,
@@ -256,13 +257,22 @@ function playCard(
     return { state: next, events };
   }
 
+  // 359.2.c: a Unit enters exhausted; 359.2.d: Gear enters ready at the Base.
+  // A static saying "I enter ready" replaces 359.2.c (363).
+  //
+  // Asked *before* the move, which is load-bearing: "Other friendly units enter
+  // ready" must not reach the card carrying it, and once that card is on the
+  // Board the sweep can no longer tell it apart from the units it is talking
+  // about. 359.2.c is about how the card enters, so this is also when the rules
+  // ask the question.
+  const ready = entersReady(next, player, definition);
+
   // 359.2: a Permanent leaves the Chain and becomes a Game Object at once.
   const entersAt = resolvePermanentLocation(next, player, definition, location);
   next = moveEntity(next, card, entersAt);
-  // 359.2.c: a Unit enters exhausted; 359.2.d: Gear enters ready at the Base.
   next = withEntity(next, card, (current) => ({
     ...current,
-    exhausted: definition.type === 'unit',
+    exhausted: definition.type === 'unit' && !ready,
   }));
 
   events.push({ type: 'cardPlayed', player, entity: card, onChain: false });

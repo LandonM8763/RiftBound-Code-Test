@@ -311,11 +311,12 @@ describe('keywords (rules 800-828)', () => {
     expect(parsed.keywords).toEqual([{ kind: 'shield', value: 1 }, { kind: 'tank' }]);
   });
 
-  it('refuses a keyword granted by an effect, which is a static ability', () => {
-    // "Give a unit ASSAULT 3 this turn" is not the card having Assault. Reading
-    // it as though it were would give the wrong Unit the keyword, permanently.
+  it('refuses a keyword granted by an effect for a duration', () => {
+    // "Give a unit ASSAULT 3 this turn" is a chosen Unit, for one turn. The
+    // static model grants for as long as its source is on the Board and to a
+    // scope rather than a choice, so reading it as one would give the wrong
+    // Unit the keyword and never take it away.
     expect(parseCardText('Give a unit ASSAULT 3 this turn.').unparsed).toHaveLength(1);
-    expect(parseCardText('Other friendly units here have SHIELD.').unparsed).toHaveLength(1);
   });
 
   it('desugars Deathknell into the "when I die" trigger it is short for (808.1.c)', () => {
@@ -538,6 +539,93 @@ describe('cost modifiers (rules 356, 363)', () => {
       'If an enemy unit has died this turn, this costs 2 less.',
       'I cost 2 less for each of your MIGHTY units.',
       'While you control this battlefield, friendly gear costs 1 less.',
+    ];
+    for (const text of beyond) {
+      expect(parseCardText(text).unparsed).toHaveLength(1);
+    }
+  });
+});
+
+describe('static abilities (rules 363-365)', () => {
+  const staticsOf = (text: string) => parseCardText(text).abilities?.statics;
+
+  it('reads a Might modifier over a scope', () => {
+    expect(staticsOf('Other friendly units here have +1 Might.')).toEqual([
+      {
+        affects: { who: 'friendly', here: true, excludeSelf: true },
+        grant: { might: 1 },
+      },
+    ]);
+  });
+
+  it('reads a negative modifier, which 143.2.b floors at the total', () => {
+    expect(staticsOf('Enemy units here have -2 Might.')?.[0]?.grant).toEqual({ might: -2 });
+  });
+
+  it('separates "other" from the plain scope', () => {
+    expect(staticsOf('Friendly units have +1 Might.')?.[0]?.affects).toEqual({ who: 'friendly' });
+    expect(staticsOf('Other friendly units have +1 Might.')?.[0]?.affects).toEqual({
+      who: 'friendly',
+      excludeSelf: true,
+    });
+  });
+
+  it('reads a granted keyword (801.3.a)', () => {
+    expect(staticsOf('Other friendly units here have ASSAULT.')).toEqual([
+      {
+        affects: { who: 'friendly', here: true, excludeSelf: true },
+        grant: { keywords: [{ kind: 'assault', value: 1 }] },
+      },
+    ]);
+  });
+
+  it('reads several granted keywords at once', () => {
+    expect(staticsOf('I have ASSAULT and GANKING.')?.[0]?.grant).toEqual({
+      keywords: [{ kind: 'assault', value: 1 }, { kind: 'ganking' }],
+    });
+  });
+
+  it('reads a "while" clause as a condition on the source', () => {
+    expect(staticsOf("While I'm buffed, I have GANKING.")).toEqual([
+      {
+        affects: { who: 'self' },
+        grant: { keywords: [{ kind: 'ganking' }] },
+        condition: { kind: 'buffed' },
+      },
+    ]);
+  });
+
+  it('treats "an additional +N Might" as the same statement', () => {
+    expect(staticsOf("While I'm buffed, I have an additional +1 Might.")?.[0]?.grant).toEqual({
+      might: 1,
+    });
+  });
+
+  it('reads "enters ready", the most repeated static clause in the corpus', () => {
+    expect(staticsOf('I enter ready.')).toEqual([
+      { affects: { who: 'self' }, grant: { entersReady: true } },
+    ]);
+    expect(staticsOf('Other friendly units enter ready.')?.[0]?.affects).toEqual({
+      who: 'friendly',
+      excludeSelf: true,
+    });
+  });
+
+  it('refuses a keyword it does not model, even in a scope it understands', () => {
+    expect(parseCardText('Other friendly units have VISION.').unparsed).toHaveLength(1);
+  });
+
+  it('refuses the static clauses that want a mechanic instead', () => {
+    // Each is a real card. A dynamic Might, a duration, a scope the model
+    // cannot name, or a rule change — none is a scope-plus-grant, so each is
+    // refused rather than bent into one.
+    const beyond = [
+      'My Might is increased by your points.',
+      'My Might is increased by the number of cards on your trash.',
+      'Units you play this turn enter ready.',
+      'I can have any number of buffs.',
+      "While I'm at a battlefield, opponents can only play units to their base.",
+      'Stunned enemy units here have -8 Might, to a minimum of 1 Might.',
     ];
     for (const text of beyond) {
       expect(parseCardText(text).unparsed).toHaveLength(1);

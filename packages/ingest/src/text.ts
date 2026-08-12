@@ -22,6 +22,9 @@ import {
   type CostModifier,
   type Effect,
   type Keyword,
+  type StaticAbility,
+  type StaticCondition,
+  type StaticScope,
   type TargetSpec,
   type TriggerCondition,
   type TriggeredAbility,
@@ -493,6 +496,97 @@ const COST_MODIFIERS: readonly {
   },
 ];
 
+/**
+ * Static and Passive abilities (rules 363-365).
+ *
+ * Written as a scope plus a grant rather than one pattern per sentence, the
+ * same shape the trigger grammar took and for the same measured reason: the
+ * literal wordings are flat (108 distinct clauses over 113 occurrences) while
+ * the *categories* are few. Modifying Might and granting keywords are two
+ * categories that between them account for most of the recognizably-static
+ * text; "enters ready" is the third and is the single most repeated clause.
+ *
+ * A leading "While I'm buffed," / "While I'm at a battlefield," is stripped
+ * into `condition` first, because it is orthogonal to what follows.
+ */
+const STATIC_SCOPES: readonly { readonly pattern: RegExp; readonly scope: StaticScope }[] = [
+  { pattern: /^i$/i, scope: { who: 'self' } },
+  { pattern: /^other friendly units here$/i, scope: { who: 'friendly', here: true, excludeSelf: true } },
+  { pattern: /^other friendly units$/i, scope: { who: 'friendly', excludeSelf: true } },
+  { pattern: /^friendly units here$/i, scope: { who: 'friendly', here: true } },
+  { pattern: /^friendly units$/i, scope: { who: 'friendly' } },
+  { pattern: /^enemy units here$/i, scope: { who: 'enemy', here: true } },
+  { pattern: /^enemy units$/i, scope: { who: 'enemy' } },
+  { pattern: /^units here$/i, scope: { who: 'any', here: true } },
+];
+
+/** The keyword list a static may grant, e.g. "ASSAULT and GANKING". */
+function grantedKeywords(text: string): readonly Keyword[] | undefined {
+  const granted: Keyword[] = [];
+  for (const part of text.split(/\s+and\s+|,\s*/i)) {
+    const token = part.trim();
+    if (token === '') {
+      continue;
+    }
+    const rule = MODELLED_KEYWORDS.map((entry) => ({ entry, match: token.match(entry.pattern) })).find(
+      (entry) => entry.match !== null,
+    );
+    if (rule?.match == null) {
+      return undefined;
+    }
+    granted.push(rule.entry.build(rule.match));
+  }
+  return granted.length === 0 ? undefined : granted;
+}
+
+/** Read one static clause, or `undefined` if it is outside the grammar. */
+export function parseStatic(line: string): StaticAbility | undefined {
+  let text = line.replace(/[.]+$/, '').trim();
+  let condition: StaticCondition | undefined;
+
+  const whileClause = text.match(/^while i'?m (buffed|at a battlefield),\s*(.+)$/i);
+  if (whileClause !== null) {
+    condition = /buffed/i.test(whileClause[1] ?? '')
+      ? { kind: 'buffed' }
+      : { kind: 'atBattlefield' };
+    text = whileClause[2] ?? '';
+  }
+
+  // "<scope> enter(s) ready" (359.2.c is what this replaces).
+  const ready = text.match(/^(.+?) enters? ready$/i);
+  if (ready !== null) {
+    const scope = STATIC_SCOPES.find((entry) => entry.pattern.test((ready[1] ?? '').trim()))?.scope;
+    return scope === undefined
+      ? undefined
+      : { affects: scope, grant: { entersReady: true }, ...(condition ? { condition } : {}) };
+  }
+
+  // "<scope> have/has <+N Might | KEYWORD…>". "an additional +1 Might" is the
+  // same statement with a word of emphasis in it.
+  const have = text.match(/^(.+?) (?:have|has) (?:an additional )?(.+)$/i);
+  if (have === null) {
+    return undefined;
+  }
+  const scope = STATIC_SCOPES.find((entry) => entry.pattern.test((have[1] ?? '').trim()))?.scope;
+  if (scope === undefined) {
+    return undefined;
+  }
+
+  const body = (have[2] ?? '').trim();
+  const might = body.match(/^([+-]\d+) might$/i);
+  if (might !== null) {
+    const amount = Number.parseInt(might[1] ?? '', 10);
+    return Number.isNaN(amount)
+      ? undefined
+      : { affects: scope, grant: { might: amount }, ...(condition ? { condition } : {}) };
+  }
+
+  const keywords = grantedKeywords(body);
+  return keywords === undefined
+    ? undefined
+    : { affects: scope, grant: { keywords }, ...(condition ? { condition } : {}) };
+}
+
 /** A trigger condition together with any per-turn limit its wording implies. */
 interface ParsedCondition {
   readonly condition: TriggerCondition;
@@ -602,6 +696,7 @@ function parseLine(line: string): {
   triggered?: TriggeredAbility;
   activated?: NonNullable<CardAbilities['activated']>[number];
   costModifier?: CostModifier;
+  static?: StaticAbility;
 } | undefined {
   // A timing marker is not an effect; it became `SpellCard.timing` at ingest.
   if (/^(action|reaction)$/i.test(line)) {
@@ -620,6 +715,14 @@ function parseLine(line: string): {
     }
     const costModifier = rule.build(match);
     return costModifier === undefined ? undefined : { costModifier };
+  }
+
+  // A Passive that modifies Might or grants a keyword (363-365). Tried before
+  // the trigger split below, because "Other friendly units here have ASSAULT"
+  // has no comma and would otherwise fall through to the effect grammar.
+  const passive = parseStatic(line);
+  if (passive !== undefined) {
+    return { static: passive };
   }
 
   // An Activated Ability is recognised by the colon (377.1). Its cost may be
@@ -727,6 +830,7 @@ export function parseCardText(text: string): ParsedText {
   const triggered: TriggeredAbility[] = [];
   const activated: NonNullable<CardAbilities['activated']>[number][] = [];
   const costModifiers: CostModifier[] = [];
+  const statics: StaticAbility[] = [];
   const keywords: Keyword[] = [];
 
   for (const rawLine of text.split('\n')) {
@@ -778,7 +882,8 @@ export function parseCardText(text: string): ParsedText {
       if (
         parsed.triggered === undefined &&
         parsed.activated === undefined &&
-        parsed.costModifier === undefined
+        parsed.costModifier === undefined &&
+        parsed.static === undefined
       ) {
         unparsed.push(line);
         continue;
@@ -791,6 +896,9 @@ export function parseCardText(text: string): ParsedText {
       }
       if (parsed.costModifier !== undefined) {
         costModifiers.push({ ...parsed.costModifier, dependsOn: { kind: 'legion' } });
+      }
+      if (parsed.static !== undefined) {
+        statics.push({ ...parsed.static, dependsOn: { kind: 'legion' } });
       }
       continue;
     }
@@ -813,12 +921,16 @@ export function parseCardText(text: string): ParsedText {
     if (parsed.costModifier !== undefined) {
       costModifiers.push(parsed.costModifier);
     }
+    if (parsed.static !== undefined) {
+      statics.push(parsed.static);
+    }
   }
 
   const abilities: CardAbilities = {
     ...(triggered.length > 0 ? { triggered } : {}),
     ...(activated.length > 0 ? { activated } : {}),
     ...(costModifiers.length > 0 ? { costModifiers } : {}),
+    ...(statics.length > 0 ? { statics } : {}),
   };
 
   return {

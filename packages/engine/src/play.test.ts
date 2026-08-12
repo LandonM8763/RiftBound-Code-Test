@@ -18,6 +18,7 @@ import { IllegalActionError } from './actions.js';
 import { checkInvariants } from './invariants.js';
 import { currentLegalActions, legalActions } from './legal.js';
 import { reduce } from './reduce.js';
+import { entersReady } from './statics.js';
 import { moveEntity } from './mutate.js';
 import { createGame, type DeckList } from './setup.js';
 import {
@@ -376,5 +377,118 @@ describe('Priority (rules 312-313)', () => {
       state = reduce(state, next).state;
       checkInvariants(state);
     }
+  });
+});
+
+describe('"I enter ready" (rule 363 replacing 359.2.c)', () => {
+  /** The most repeated static clause in the card corpus. */
+  const EAGER = makeUnit(2, ['fury'], {
+    id: cardId('P-090'),
+    name: 'Eager',
+    cost: cost(1),
+    abilities: { statics: [{ affects: { who: 'self' }, grant: { entersReady: true } }] },
+  });
+
+  /** "Other friendly units enter ready" — the same grant from the Board. */
+  const MARSHAL = makeUnit(2, ['fury'], {
+    id: cardId('P-091'),
+    name: 'Marshal',
+    cost: cost(1),
+    abilities: {
+      statics: [
+        { affects: { who: 'friendly', excludeSelf: true }, grant: { entersReady: true } },
+      ],
+    },
+  });
+
+  function withDefinition(state: GameState, card: CardDefinition): GameState {
+    return { ...state, definitions: { ...state.definitions, [card.id]: card } };
+  }
+
+  /** `inMainPhase` with Energy in the Turn Player's pool. */
+  function ready(seed: string, energy = 5): GameState {
+    const state = inMainPhase(seed);
+    return {
+      ...state,
+      players: state.players.map((seat) =>
+        seat.id === state.activePlayer
+          ? { ...seat, pool: { energy, power: seat.pool.power } }
+          : seat,
+      ),
+    };
+  }
+
+  /** Mint a card of `card` into the Turn Player's hand. */
+  function inHand(state: GameState, card: CardDefinition): [GameState, EntityId] {
+    const player = state.activePlayer;
+    const entity = state.nextEntityId as EntityId;
+    const next: GameState = {
+      ...withDefinition(state, card),
+      nextEntityId: state.nextEntityId + 1,
+      entities: {
+        ...state.entities,
+        [entity]: {
+          id: entity,
+          card: card.id,
+          owner: player,
+          controller: player,
+          location: playerLocation(player, 'hand'),
+          exhausted: false,
+          damage: 0,
+          mightBonus: 0,
+          buffs: 0,
+        },
+      },
+      players: state.players.map((seat) =>
+        seat.id === player
+          ? { ...seat, zones: { ...seat.zones, hand: [...seat.zones.hand, entity] } }
+          : seat,
+      ),
+    };
+    return [next, entity];
+  }
+
+  it('enters a Unit exhausted by default (359.2.c)', () => {
+    const [state, card] = inHand(ready('plain-enter'), CHEAP_UNIT);
+    const played = reduce(state, { type: 'playCard', card }).state;
+    expect(played.entities[card]!.exhausted).toBe(true);
+  });
+
+  it('enters ready when the card says so, read from hand', () => {
+    // The static is on the card being played, so a sweep of the Board would
+    // never find it — the card is still in hand when the question is asked.
+    const [state, card] = inHand(ready('eager'), EAGER);
+    const played = reduce(state, { type: 'playCard', card }).state;
+    expect(played.entities[card]!.exhausted).toBe(false);
+  });
+
+  it('lets a Unit already on the Board grant it to others', () => {
+    let state = ready('marshal');
+    const [withMarshal, marshal] = inHand(state, MARSHAL);
+    state = reduce(withMarshal, { type: 'playCard', card: marshal }).state;
+    // The Marshal itself entered exhausted: its own scope excludes it.
+    expect(state.entities[marshal]!.exhausted).toBe(true);
+
+    const [withOther, other] = inHand(state, CHEAP_UNIT);
+    const played = reduce(withOther, { type: 'playCard', card: other }).state;
+    expect(played.entities[other]!.exhausted).toBe(false);
+  });
+
+  it('does not grant it across the table', () => {
+    let state = ready('marshal-enemy');
+    const [withMarshal, marshal] = inHand(state, MARSHAL);
+    state = reduce(withMarshal, { type: 'playCard', card: marshal }).state;
+
+    // Same Board, but the opponent's own play is unaffected: the grant is
+    // friendly-scoped, judged from the Marshal's controller.
+    const opponent = playerId((state.activePlayer + 1) % state.players.length);
+    expect(entersReady(state, opponent, CHEAP_UNIT)).toBe(false);
+    expect(entersReady(state, state.activePlayer, CHEAP_UNIT)).toBe(true);
+  });
+
+  it('says nothing about a card with no such static', () => {
+    const state = ready('gear-enter');
+    expect(entersReady(state, state.activePlayer, CHEAP_UNIT)).toBe(false);
+    expect(entersReady(state, state.activePlayer, GEAR)).toBe(false);
   });
 });

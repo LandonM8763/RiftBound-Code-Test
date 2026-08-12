@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 58 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 68 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -49,10 +49,11 @@ What is built:
   heal, Might, resources, kill, recall, move, ready/exhaust, Buffs, discard,
   XP, Channel), **the Mulligan**,
   **Activated and Triggered abilities** on an **interruptible phase machine**,
-  **event-driven trigger conditions**, **rule 356 cost modification**, the
-  **keywords** Assault, Shield, Tank, Backline and Ganking, the **Dependent
-  Keywords** Legion and Level, first-class legal action generation, per-player
-  observable views, and a structural invariant checker.
+  **event-driven trigger conditions**, **rule 356 cost modification**,
+  **static and passive abilities**, the **keywords** Assault, Shield, Tank,
+  Backline and Ganking, the **Dependent Keywords** Legion and Level,
+  first-class legal action generation, per-player observable views, and a
+  structural invariant checker.
 
   With Combat in, the engine can play a complete game of Riftbound: contest a
   Battlefield, fight over it, take Control, and score to 8.
@@ -115,10 +116,15 @@ What is **not** built yet, in rough dependency order:
    cannot express, Hidden wants facedown cards, Equip and Weaponmaster want
    Attach, Vision wants Predict (436) — a choice made during resolution, so
    item 2's protocol.
-4. **Static and passive abilities** — "Units here have +1 Might", "I enter
-   ready", "My Might is increased by your points". `CostModifier` is the only
-   passive the model has, and 137 cards in the corpus want more.
-5. **Conditional and modal effects** — "if this kills it", "unless its
+4. **Statics that are not a scope plus a grant.** Might modifiers, granted
+   keywords and "enters ready" are built; a *dynamic* Might ("increased by your
+   points"), a duration ("units you play this turn enter ready") and a rule
+   change ("opponents can only play units to their base") are not.
+5. **Abilities on Battlefields.** A Battlefield is not a Game Object here —
+   `BattlefieldState` holds a card id, not an entity — so nothing sweeps one for
+   abilities. Ingest drops them and records a gap rather than shipping a card
+   that looks modelled and silently never runs. 5 cards in the corpus.
+6. **Conditional and modal effects** — "if this kills it", "unless its
    controller…", "choose one •…", "for each…". The effect model has no
    conditions, no counting and no modes.
 
@@ -532,6 +538,52 @@ Four things about it are load-bearing:
 `filter.ordinal` and `limitPerTurn` are different things and both exist: the
 ordinal picks *which* occurrence fires ("your second card in a turn"), the limit
 caps *how often* the ability may ("the first time … each turn").
+
+### Static and passive abilities
+
+Rules 363-365, data in `cards/static.ts`, engine in `engine/statics.ts`.
+
+**A static is never executed. It is *consulted*.** That one sentence is the
+design. Rule 365.1 makes a Permanent's Passive Abilities active while it is on
+the Board, and 365 stops them the instant it leaves — so `mightOf` asks "what do
+the statics say" every time it is called, and nothing is ever written onto the
+Unit being modified. Model "other units here have +1 Might" as an effect instead
+and the +1 stays behind when the granter dies.
+
+A static is a **scope plus a grant**, the same shape the trigger grammar
+settled on and for the same measured reason: the literal wordings are flat (108
+distinct clauses over 113 occurrences) while the categories are few.
+
+| Field | What it says |
+|---|---|
+| `affects` | `self` / `friendly` / `enemy` / `any`, plus `here` (355.9) and `excludeSelf` for "other" |
+| `grant` | `might`, `keywords` (801.3.a), `entersReady` (replacing 359.2.c) |
+| `condition` | "While I'm buffed", "While I'm at a battlefield" — about the **source**, not its objects |
+
+Four things are load-bearing:
+
+- **The engine must never read `card.keywords` directly.** A granted Tank is as
+  much a Tank as a printed one, so `combat.ts` and `move.ts` go through
+  `unitHasKeyword` / `unitKeywordValue`, which consult `keywordsOf` — printed
+  plus granted. There are exactly three such read sites and they are the reason
+  this was cheap to add.
+- **A static condition may not look at Might.** `mightOf` consults statics, so a
+  condition that read Might back would recurse. `StaticCondition` is deliberately
+  narrow for that reason, not for lack of ambition.
+- **`entersReady` is asked *before* the card moves to the Board.** "Other
+  friendly units enter ready" must not reach the card carrying it, and once that
+  card is on the Board the sweep cannot tell it apart from the units it is
+  talking about. 359.2.c is about how a card enters, so before the move is also
+  when the rules ask.
+- **A `self` static is read off the card in hand**, exactly like a `self` cost
+  modifier, because that is where the card still is when the question matters.
+
+**Battlefields cannot carry any of this.** `BattlefieldState` holds a card id
+rather than an entity, so there is no Game Object for `activeStatics` or
+`triggersFor` to find. Ingest therefore *drops* a Battlefield's abilities and
+records a gap: shipping them would leave a card that looks modelled while the
+engine silently never ran it, which is precisely the plausible-and-wrong outcome
+the gap model exists to prevent.
 
 ### Keywords
 
@@ -999,14 +1051,14 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 58 of the 468 cards that have text**, and the shape of what is
+**Coverage is 68 of the 468 cards that have text**, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 58 |
-| Blocked | 410 |
+| Fully parsed | 68 |
+| Blocked | 400 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 3 or 4 times, everything else once or
@@ -1036,6 +1088,10 @@ three are about the card's own cost in a way the state can answer. The rest want
 a duration, a condition, a Battlefield static, or a count of something invisible
 — so they are refused. See [Cost modification](#cost-modification).
 
+**Static abilities then took it 58 → 68**, the largest single step since the
+keyword and trigger work, and the one whose category was measured furthest in
+advance. See [Static and passive abilities](#static-and-passive-abilities).
+
 **The trigger tail is now genuinely spent.** The 8 cards a wider condition would
 still buy want 8 *distinct* wordings, and most need a mechanic that does not
 exist — Stun, Hidden, and an event for choosing a target. There is no third
@@ -1043,11 +1099,11 @@ round of this to do.
 
 What the corpus is blocked on now, in the order measurement puts them:
 
-1. **Static and passive abilities** — "Units here have +1 Might", "I enter
-   ready", "My Might is increased by your points". 137 cards. `CostModifier` is
-   still the only passive the model has, and it is also what the remaining
-   keywords mostly reduce to. Its `self` scope and counted amounts are the shape
-   the rest will want; what they need beyond it is a *condition*.
+1. **Statics beyond a scope plus a grant** — "My Might is increased by your
+   points" (dynamic), "Units you play this turn enter ready" (a duration),
+   "opponents can only play units to their base" (a rule change). The
+   scope-plus-grant form is built and took the corpus from 58 to 68; what is
+   left in this category each wants a different mechanic.
 2. **The eight refused keywords**, each blocked on a mechanic: Optional
    Additional Costs (Accelerate, Repeat, and Deflect, which also wants Power of
    any Domain), facedown cards (Hidden), Attach (Equip, Weaponmaster,

@@ -269,3 +269,32 @@ describe('output shape', () => {
     expect(summarizeGaps(gaps).byField).toContainEqual({ field: 'timing', count: 2 });
   });
 });
+
+describe('Battlefield abilities', () => {
+  it('drops them, because a Battlefield is not a Game Object here', () => {
+    // BattlefieldState holds a card id rather than an entity, so nothing
+    // sweeps a Battlefield for abilities. Keeping the ability would make the
+    // card look modelled while the engine silently never ran it.
+    const { cards, gaps } = run([
+      raw({
+        cardType: 'Battlefield',
+        name: 'Trifarian War Camp',
+        domain: 'None',
+        might: null,
+        description: 'Units here have +1 Might.',
+      }),
+    ]);
+
+    expect(cards).toHaveLength(1);
+    expect(cards[0]?.abilities).toBeUndefined();
+    expect(gaps.find((gap) => gap.field === 'abilities')).toMatchObject({ severity: 'degraded' });
+  });
+
+  it('says nothing about a Battlefield with no rules text', () => {
+    const { cards, gaps } = run([
+      raw({ cardType: 'Battlefield', name: 'Plain Field', domain: 'None', might: null, description: '' }),
+    ]);
+    expect(cards).toHaveLength(1);
+    expect(gaps.find((gap) => gap.field === 'abilities')).toBeUndefined();
+  });
+});

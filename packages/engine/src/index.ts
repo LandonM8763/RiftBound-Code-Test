@@ -72,6 +72,16 @@ export type { PendingTrigger, TriggerEventInstance } from './abilities.js';
 
 export { dependencyMet } from './dependency.js';
 
+export {
+  activeStatics,
+  entersReady,
+  keywordsOf,
+  staticMight,
+  unitHasKeyword,
+  unitKeywordValue,
+} from './statics.js';
+export type { ActiveStatic } from './statics.js';
+
 export { executeEffect, isValidTarget, legalTargets } from './effects.js';
 export type { EffectContext } from './effects.js';
 

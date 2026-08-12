@@ -12,8 +12,9 @@ import { makeBattlefield, makeLegend, makeRune, makeUnit } from '@riftbound/card
 import { describe, expect, it } from 'vitest';
 
 import { assignDamage, combatResult, mightOf, sumMight } from './combat.js';
+import { keywordsOf } from './statics.js';
 import { checkInvariants } from './invariants.js';
-import { moveEntity } from './mutate.js';
+import { moveEntity, withEntity } from './mutate.js';
 import { reduce } from './reduce.js';
 import { createGame, type DeckList } from './setup.js';
 import {
@@ -509,5 +510,230 @@ describe('Tank and Backline (rules 815, 826)', () => {
     expect(assignment.get(tank)).toBe(2);
     expect(assignment.get(plain)).toBe(2);
     expect(assignment.get(back)).toBeUndefined();
+  });
+});
+
+describe('static abilities (rules 363-365)', () => {
+  /** "Other friendly units here have +2 Might." */
+  const BANNER = makeUnit(1, ['fury'], {
+    id: cardId('C-020'),
+    name: 'Banner',
+    cost: cost(1),
+    abilities: {
+      statics: [
+        {
+          affects: { who: 'friendly', here: true, excludeSelf: true },
+          grant: { might: 2 },
+        },
+      ],
+    },
+  });
+
+  /** "Other friendly units here have TANK." — a granted keyword (801.3.a). */
+  const WARDEN = makeUnit(1, ['fury'], {
+    id: cardId('C-021'),
+    name: 'Warden',
+    cost: cost(1),
+    abilities: {
+      statics: [
+        {
+          affects: { who: 'friendly', here: true, excludeSelf: true },
+          grant: { keywords: [{ kind: 'tank' }] },
+        },
+      ],
+    },
+  });
+
+  /** "While I'm buffed, I have an additional +3 Might." */
+  const BERSERKER = makeUnit(2, ['fury'], {
+    id: cardId('C-022'),
+    name: 'Berserker',
+    cost: cost(1),
+    abilities: {
+      statics: [{ affects: { who: 'self' }, grant: { might: 3 }, condition: { kind: 'buffed' } }],
+    },
+  });
+
+  const STATIC_REGISTRY = CardRegistry.from([
+    LEGEND,
+    CHAMPION,
+    BIG,
+    SMALL,
+    ASSAULT,
+    SHIELDED,
+    TANK,
+    BACKLINE,
+    BANNER,
+    WARDEN,
+    BERSERKER,
+    FURY_RUNE,
+    ...BATTLEFIELDS,
+  ] as CardDefinition[]);
+
+  function staticGame(seed: string): GameState {
+    const list: DeckList = {
+      legend: LEGEND.id,
+      champion: CHAMPION.id,
+      main: [
+        ...Array.from({ length: 6 }, () => SMALL.id),
+        ...Array.from({ length: 3 }, () => BIG.id),
+        ...Array.from({ length: 3 }, () => BANNER.id),
+        ...Array.from({ length: 3 }, () => WARDEN.id),
+        ...Array.from({ length: 3 }, () => BERSERKER.id),
+      ],
+      runes: Array.from({ length: 8 }, () => FURY_RUNE.id),
+      battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
+    };
+    let state = pastMulligan(
+      createGame({ decks: [list, list], registry: STATIC_REGISTRY, seed }).state,
+    );
+    while (state.phase !== 'main' && !isOver(state)) {
+      state = reduce(state, { type: 'resolvePhase' }).state;
+    }
+    return state;
+  }
+
+  it('adds Might to the Units in its scope, and not to itself', () => {
+    let state = staticGame('banner');
+    const [a, banner] = place(state, 0, BANNER, 0);
+    state = a;
+    const [b, ally] = place(state, 0, SMALL, 0);
+    state = b;
+
+    expect(mightOf(state, ally)).toBe(4); // 2 printed + 2 from the Banner
+    expect(mightOf(state, banner)).toBe(1); // "Other": never itself
+  });
+
+  it('stops the moment the source leaves the Board (365)', () => {
+    // Nothing is written onto the Unit, so nothing has to be cleaned up: the
+    // answer simply changes. That is the point of consulting rather than
+    // executing a static.
+    let state = staticGame('leaves');
+    const [a, banner] = place(state, 0, BANNER, 0);
+    state = a;
+    const [b, ally] = place(state, 0, SMALL, 0);
+    state = b;
+    expect(mightOf(state, ally)).toBe(4);
+
+    const gone = moveEntity(state, banner, playerLocation(playerId(0), 'trash'));
+    expect(mightOf(gone, ally)).toBe(2);
+  });
+
+  it('honours "here" — a Unit elsewhere is out of scope (355.9)', () => {
+    let state = staticGame('here');
+    const [a] = place(state, 0, BANNER, 0);
+    state = a;
+    const [b, elsewhere] = place(state, 0, SMALL, 1);
+    state = b;
+
+    expect(mightOf(state, elsewhere)).toBe(2);
+  });
+
+  it('does not reach an opponent`s Units', () => {
+    let state = staticGame('friendly');
+    const [a] = place(state, 0, BANNER, 0);
+    state = a;
+    const [b, theirs] = place(state, 1, SMALL, 0);
+    state = b;
+
+    expect(mightOf(state, theirs)).toBe(2);
+  });
+
+  it('grants a keyword, which the engine must read as though printed (801.3.a)', () => {
+    let state = staticGame('grant');
+    const [a, warden] = place(state, 0, WARDEN, 0);
+    state = a;
+    const [b, plain] = place(state, 0, SMALL, 0);
+    state = b;
+
+    // The Warden's own scope excludes itself, so exactly one of these two has
+    // Tank — which is what makes the assignment order say something.
+    expect(keywordsOf(state, plain)).toEqual([{ kind: 'tank' }]);
+    expect(keywordsOf(state, warden)).toEqual([]);
+
+    // The granted Tank must sort ahead in damage assignment exactly as a
+    // printed one does (815.1.b), even though the Warden is listed first.
+    const assignment = assignDamage(state, 2, [warden, plain]);
+    expect(assignment.get(plain)).toBe(2);
+    expect(assignment.get(warden)).toBeUndefined();
+  });
+
+  it('grants to everything in scope, not just the first', () => {
+    let state = staticGame('grant-all');
+    const [a] = place(state, 0, WARDEN, 0);
+    state = a;
+    const [b, first] = place(state, 0, SMALL, 0);
+    state = b;
+    const [c, second] = place(state, 0, BIG, 0);
+    state = c;
+
+    for (const unit of [first, second]) {
+      expect(keywordsOf(state, unit)).toContainEqual({ kind: 'tank' });
+    }
+  });
+
+  it('applies its condition to the source, not to what it affects', () => {
+    let state = staticGame('while');
+    const [placed, berserker] = place(state, 0, BERSERKER, 0);
+    state = placed;
+    expect(mightOf(state, berserker)).toBe(2);
+
+    const buffed = withEntity(state, berserker, (current) => ({ ...current, buffs: 1 }));
+    // 2 printed + 1 for the Buff (703) + 3 from the now-active static.
+    expect(mightOf(buffed, berserker)).toBe(6);
+  });
+
+  it('counts toward the Might a side deals in Combat (465.2.a)', () => {
+    let state = staticGame('sum');
+    const [a, banner] = place(state, 0, BANNER, 0);
+    state = a;
+    const [b, ally] = place(state, 0, SMALL, 0);
+    state = b;
+
+    // 1 for the Banner, 2 printed + 2 granted for the ally.
+    expect(sumMight(state, [banner, ally])).toBe(5);
+  });
+
+  it('floors the total at 0 for a negative static (143.2.b)', () => {
+    const WEAKEN = makeUnit(1, ['fury'], {
+      id: cardId('C-023'),
+      name: 'Weaken',
+      cost: cost(1),
+      abilities: {
+        statics: [{ affects: { who: 'enemy', here: true }, grant: { might: -9 } }],
+      },
+    });
+    let state = staticGame('floor');
+    state = {
+      ...state,
+      definitions: { ...state.definitions, [WEAKEN.id]: WEAKEN },
+    };
+    const [a, theirs] = place(state, 1, SMALL, 0);
+    state = a;
+
+    const entity = state.nextEntityId as EntityId;
+    state = {
+      ...state,
+      nextEntityId: entity + 1,
+      entities: {
+        ...state.entities,
+        [entity]: {
+          id: entity,
+          card: WEAKEN.id,
+          owner: playerId(0),
+          controller: playerId(0),
+          location: battlefieldLocation(0),
+          exhausted: false,
+          damage: 0,
+          mightBonus: 0,
+          buffs: 0,
+        },
+      },
+      battlefields: state.battlefields.map((battlefield, index) =>
+        index === 0 ? { ...battlefield, units: [...battlefield.units, entity] } : battlefield,
+      ),
+    };
+
+    expect(mightOf(state, theirs)).toBe(0);
   });
 });

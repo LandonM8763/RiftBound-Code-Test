@@ -6,8 +6,7 @@
  * (446.3). What it *does* do is apply Contested status, which is the trigger
  * for Showdowns and Combat (190.3.c).
  */
-import { hasKeyword } from '@riftbound/cards';
-
+import { unitHasKeyword } from './statics.js';
 import type { BattlefieldState, EntityId, GameState, Location, PlayerId } from './state.js';
 import {
   battlefieldLocation,
@@ -44,7 +43,7 @@ export function standardMoveDestinations(state: GameState, unit: EntityId): Loca
     // legal Standard Move. 810.1.c.1-3: it only *adds* this destination — it is
     // not an extra Move and has no cost of its own, so the exhaust in
     // `canStandardMove` is still the whole price.
-    if (!hasKeyword(entityCard(state, unit).keywords, 'ganking')) {
+    if (!unitHasKeyword(state, unit, 'ganking')) {
       return [home];
     }
     return [home, ...toBattlefields()];
