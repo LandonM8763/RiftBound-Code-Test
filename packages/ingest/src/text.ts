@@ -19,6 +19,7 @@ import {
   tokenByName,
   tokenMight,
   type CardAbilities,
+  type CardType,
   type Domain,
   type CardEffect,
   type AdditionalCost,
@@ -259,6 +260,51 @@ const CLAUSES: readonly ClauseRule[] = [
         target: NO_TARGET,
       };
     },
+  },
+  {
+    /**
+     * "Return a unit at a battlefield to its owner's hand" — a bounce.
+     *
+     * Anchored to the whole clause so the qualified printings fall through and
+     * are recorded: "another unit at a battlefield" wants an `excludeSelf` that
+     * `TargetSpec` has no field for, and "a unit … with 3 might or less" wants
+     * a Might filter. Reading either as the unqualified form would let the card
+     * hit something the printed text forbids.
+     */
+    pattern: /^return an? (friendly |enemy )?(unit|gear)( at a battlefield)? to (?:its|their) owner'?s? hand$/i,
+    build: (m) => {
+      // 355.9.a.1 makes a Unit target a Game Object on the Board. Gear is a
+      // Permanent too, but `TargetSpec` only enumerates Units, so a Gear bounce
+      // has nothing to choose from and is refused rather than silently missing.
+      if ((m[2] ?? '').toLowerCase() !== 'unit') {
+        return undefined;
+      }
+      const scope = (m[1] ?? '').trim().toLowerCase();
+      const base: TargetSpec =
+        scope === 'friendly' ? UNIT_FRIENDLY : scope === 'enemy' ? UNIT_ENEMY : UNIT_ANY;
+      return {
+        effects: [{ kind: 'toHand' }],
+        target: m[3] === undefined ? base : { ...base, atBattlefield: true },
+      };
+    },
+  },
+  {
+    /** "Return me to my owner's hand" — the same effect, already-determined target. */
+    pattern: /^return me to my owner'?s? hand$/i,
+    build: () => ({ effects: [{ kind: 'toHand' }], target: SELF }),
+  },
+  {
+    /**
+     * "Return a unit from your trash to your hand" — a retrieval.
+     *
+     * The same `toHand` effect as the bounce above; only the target differs,
+     * which is the whole reason both are one primitive.
+     */
+    pattern: /^return an? (unit|spell|gear|rune) from your trash to your hand$/i,
+    build: (m) => ({
+      effects: [{ kind: 'toHand' }],
+      target: { kind: 'trashCard', cardType: (m[1] ?? 'unit').toLowerCase() as CardType },
+    }),
   },
   {
     pattern: /^kill an? (friendly |enemy )?unit(?: at a battlefield)?$/i,

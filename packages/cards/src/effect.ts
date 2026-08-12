@@ -1,3 +1,4 @@
+import type { CardType } from './card.js';
 import type { Condition } from './condition.js';
 import type { Domain } from './domain.js';
 
@@ -42,7 +43,22 @@ export type TargetSpec =
       readonly kind: 'unit';
       readonly scope: 'any' | 'friendly' | 'enemy';
       readonly atBattlefield?: boolean | undefined;
-    };
+    }
+  /**
+   * A card in the controller's own trash — "return a unit from your trash to
+   * your hand".
+   *
+   * A separate variant rather than a `zone` field on `unit`, because the two
+   * differ in what they may be: a Unit target is a Game Object on the Board
+   * (355.9.a.1) and can be damaged, killed or moved, while this is a *card* in
+   * a Non-Board Zone and the only thing that can be done with it is to move it
+   * somewhere else. Keeping them apart is what stops "deal 3 to a unit" being
+   * pointed at the trash.
+   *
+   * `cardType` narrows to "a **unit** from your trash", which is how the corpus
+   * prints it; omitted, any card qualifies.
+   */
+  | { readonly kind: 'trashCard'; readonly cardType?: CardType | undefined };
 
 /**
  * Where a `move` effect sends its target (rule 449.1).
@@ -149,7 +165,37 @@ export type Effect =
       readonly count: number;
       readonly where: 'here' | 'base';
       readonly ready?: boolean | undefined;
-    };
+    }
+  /**
+   * Put the target into its owner's hand.
+   *
+   * One primitive for two printings, because they differ only in what is
+   * targeted: "return a unit at a battlefield to its owner's hand" bounces a
+   * Permanent off the Board, and "return a unit from your trash to your hand"
+   * retrieves a card. Both end in the same zone, and the destination is fixed
+   * by the wording rather than chosen, so it is not a `DestinationSpec`.
+   *
+   * Rule 412 lists no "Return" action, so this is an ordinary zone move rather
+   * than a named Game Action — which is exactly why it is *not* a Recall (456):
+   * a Recall relocates a Permanent to its owner's **Base**, keeping it on the
+   * Board with its damage and statuses intact (458.1). This takes it off the
+   * Board entirely, so 705 strips its Buffs like any other departure.
+   */
+  | { readonly kind: 'toHand' };
+
+/**
+ * Recycle (rule 416) is deliberately **not** an effect primitive.
+ *
+ * It is a real Game Action and the engine already performs it in the two places
+ * the rules demand — a Basic Rune's `Recycle this: Add [C]` (164.2.b) and the
+ * Burn Out of 431.2.b — but as a *card effect* it measured +0. The targeted
+ * form the grammar could read ("recycle me") appears once, on a card blocked by
+ * the rest of its own sentence; 416.6's "Recycle X from [Zone]" appears on
+ * cards blocked by their ability *cost* rather than their effect.
+ *
+ * It was built, measured at +0, and removed — the same evidence that keeps
+ * Repeat (820) out. Add it when a counterfactual re-parse moves the number.
+ */
 
 /** The rules text of a card: what it targets, and what it then does. */
 export interface CardEffect {
@@ -185,7 +231,7 @@ export function needsTarget(effect: CardEffect | undefined): boolean {
  * affects nobody in particular, the other is already determined.
  */
 export function needsTargetChoice(spec: TargetSpec | undefined): boolean {
-  return spec !== undefined && spec.kind === 'unit';
+  return spec !== undefined && (spec.kind === 'unit' || spec.kind === 'trashCard');
 }
 
 /** True when playing this card requires the player to choose a Destination. */

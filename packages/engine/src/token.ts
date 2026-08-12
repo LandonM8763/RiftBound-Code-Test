@@ -14,7 +14,7 @@
 import { TOKEN_DEFINITIONS, isTokenCard, tokenCardId } from '@riftbound/cards';
 
 import type { GameEvent } from './events.js';
-import { moveEntity } from './mutate.js';
+import { moveEntity, type DeckEnd } from './mutate.js';
 import {
   entityCard,
   entityId,
@@ -43,9 +43,14 @@ export function isToken(state: GameState, id: EntityId): boolean {
  * token leaving the Chain must all stop existing, and those are three unrelated
  * pieces of code that would otherwise each need to remember.
  */
-export function sendToNonBoardZone(state: GameState, id: EntityId, to: Location): GameState {
+export function sendToNonBoardZone(
+  state: GameState,
+  id: EntityId,
+  to: Location,
+  end: DeckEnd = 'bottom',
+): GameState {
   if (!isToken(state, id)) {
-    return moveEntity(state, id, to);
+    return moveEntity(state, id, to, end);
   }
   return moveEntity(state, id, playerLocation(getEntity(state, id).owner, 'banishment'));
 }

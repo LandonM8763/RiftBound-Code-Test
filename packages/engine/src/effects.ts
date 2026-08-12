@@ -112,6 +112,14 @@ export function legalTargets(
   controller: PlayerId,
   spec: TargetSpec,
 ): EntityId[] {
+  // "A unit from your trash" — a card in a Non-Board Zone, not a Game Object on
+  // the Board, so this walks the trash rather than the Battlefields and Bases.
+  if (spec.kind === 'trashCard') {
+    return getPlayer(state, controller).zones.trash.filter(
+      (card) => spec.cardType === undefined || entityCard(state, card).type === spec.cardType,
+    );
+  }
+
   // Neither makes the player choose: `none` affects nobody in particular and
   // `self` is already determined by which card the text is printed on.
   if (spec.kind !== 'unit') {
@@ -159,7 +167,7 @@ export function isValidTarget(
 ): boolean {
   // A self-targeting card takes no chosen target; supplying one is an error,
   // not a different reading.
-  if (spec.kind !== 'unit') {
+  if (spec.kind !== 'unit' && spec.kind !== 'trashCard') {
     return target === undefined;
   }
   return target !== undefined && legalTargets(state, controller, spec).includes(target);
@@ -443,6 +451,30 @@ function applyEffect(
       return context.afterMove(moved, controller, destination, [target], events);
     }
 
+    // "Return it to its owner's hand." Rule 412 lists no Return action, so this
+    // is a plain zone move — and deliberately not a Recall (455), which keeps
+    // the Permanent on the Board at its owner's Base with damage and statuses
+    // intact (458.1).
+    case 'toHand': {
+      if (target === undefined) {
+        return state;
+      }
+      const entity = getEntity(state, target);
+      // Already in a hand, or on the Chain partway through being played: there
+      // is nothing to return, and moving it would corrupt the Process of Play.
+      if (entity.location.kind === 'player' && ['hand', 'chain'].includes(entity.location.zone)) {
+        return state;
+      }
+      const owner = entity.owner;
+      events.push({ type: 'returnedToHand', player: owner, cards: [target] });
+      // 186.1: a Token reaching a Non-Board Zone stops existing instead — it
+      // never becomes a card in a hand, because it is not a card (185).
+      return clearCounters(
+        sendToNonBoardZone(state, target, playerLocation(owner, 'hand')),
+        target,
+      );
+    }
+
     // 180-184: Create Tokens. Not a Move and not a play from hand — a Token is
     // Created directly on the Board (186), so nothing is Contested and no
     // Showdown opens. A card that wants the token to arrive fighting says
@@ -516,5 +548,10 @@ function clearCounters(state: GameState, entity: EntityId): GameState {
     buffs: 0,
     damage: 0,
     mightBonus: 0,
+    // Exhaustion is a state of a Game Object on the Board (414-415) and means
+    // nothing in a hand, deck or trash. The Combat and Kill sites in `reduce`
+    // already cleared it by hand; clearing it here too is what makes every
+    // departure from the Board look the same however it happened.
+    exhausted: false,
   }));
 }

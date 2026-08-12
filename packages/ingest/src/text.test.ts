@@ -482,6 +482,73 @@ describe('tokens (rules 179-187)', () => {
   });
 });
 
+describe('zone movement', () => {
+  it('reads a bounce off the Board', () => {
+    expect(parseCardText("Return a unit at a battlefield to its owner's hand.").effect).toEqual({
+      target: { kind: 'unit', scope: 'any', atBattlefield: true },
+      effects: [{ kind: 'toHand' }],
+    });
+  });
+
+  it('reads the friendly and enemy scopes', () => {
+    expect(parseCardText("Return a friendly unit to its owner's hand.").effect?.target).toEqual({
+      kind: 'unit',
+      scope: 'friendly',
+    });
+    expect(parseCardText("Return an enemy unit to its owner's hand.").effect?.target).toEqual({
+      kind: 'unit',
+      scope: 'enemy',
+    });
+  });
+
+  it('reads the self form', () => {
+    expect(parseCardText("Return me to my owner's hand.").effect).toEqual({
+      target: { kind: 'self' },
+      effects: [{ kind: 'toHand' }],
+    });
+  });
+
+  it('reads a retrieval as the same effect with a different target', () => {
+    // Bounce and retrieve are one primitive: only the target differs.
+    expect(parseCardText('Return a unit from your trash to your hand.').effect).toEqual({
+      target: { kind: 'trashCard', cardType: 'unit' },
+      effects: [{ kind: 'toHand' }],
+    });
+    expect(parseCardText('Return a spell from your trash to your hand.').effect?.target).toEqual({
+      kind: 'trashCard',
+      cardType: 'spell',
+    });
+  });
+
+  it('refuses "another", which needs an excludeSelf the target model lacks', () => {
+    // Reading it as the plain form would let the card bounce itself, which the
+    // printed text forbids.
+    expect(
+      parseCardText("When you play me, return another unit at a battlefield to its owner's hand.")
+        .unparsed,
+    ).toHaveLength(1);
+  });
+
+  it('refuses a Might filter on the target', () => {
+    expect(
+      parseCardText("Return a unit at a battlefield with 3 Might or less to its owner's hand.")
+        .unparsed,
+    ).toHaveLength(1);
+  });
+
+  it('refuses a Gear bounce, which has no target to choose from', () => {
+    expect(parseCardText("Return a gear to its owner's hand.").unparsed).toHaveLength(1);
+  });
+
+  it('416: refuses Recycle as an effect, which measured +0 cards', () => {
+    // Recycle is a real Game Action and the engine performs it for Runes
+    // (164.2.b) and Burn Out (431.2.b). As a *card effect* it unlocks nothing,
+    // so it is deliberately absent — see the note in `cards/effect.ts`.
+    expect(parseCardText('Recycle me.').unparsed).toHaveLength(1);
+    expect(parseCardText('Recycle 3 from your trash.').unparsed).toHaveLength(1);
+  });
+});
+
 describe('Accelerate (rule 805)', () => {
   it('805.1.a: desugars to an optional cost plus "if you do, I enter ready"', () => {
     const parsed = parseCardText('ACCELERATE', { domains: ['fury'] });

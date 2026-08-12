@@ -139,6 +139,12 @@ export type GameEvent =
   | { readonly type: 'xpChanged'; readonly player: PlayerId; readonly amount: number }
   /** Rule 428: Units died. */
   | { readonly type: 'unitsKilled'; readonly units: readonly EntityId[] }
+  /** Cards were put into their owner's hand — a bounce or a retrieval. */
+  | {
+      readonly type: 'returnedToHand';
+      readonly player: PlayerId;
+      readonly cards: readonly EntityId[];
+    }
   /** Rules 180-184: Tokens were Created on the Board. `token` keys rule 187. */
   | {
       readonly type: 'tokensCreated';
