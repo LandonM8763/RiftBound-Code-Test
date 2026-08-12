@@ -3,6 +3,7 @@ import type { CardId, CardRegistry } from '@riftbound/cards';
 import type { Deck, Format, ValidationResult } from '@riftbound/deck';
 import { summarizeGaps, type CardSource, type IngestResult } from '@riftbound/ingest';
 import { marginOf, type SimulationResult } from '@riftbound/sim';
+import { describeEdit, type SuggestionReport } from '@riftbound/suggest';
 
 /**
  * Presentation lives here and nowhere else.
@@ -377,4 +378,50 @@ export function analysisToJson(
       atLeastOneByType: mapToObject(analysis.openingHand.atLeastOneByType),
     },
   };
+}
+
+/**
+ * A suggestion report.
+ *
+ * Every line carries the measurement that produced it, because a deck edit
+ * proposed without a reason the reader can check is an opinion rather than a
+ * suggestion.
+ */
+export function formatSuggestions(
+  report: SuggestionReport,
+  nameOf: (card: CardId) => string,
+): string {
+  const lines: string[] = [
+    'Suggestions',
+    '===========',
+    `  Objective: ${report.objective}`,
+    `  Current:   ${report.baseline.total.toFixed(3)}` +
+      `  (${componentLine(report.baseline.components)})`,
+    `  Evaluated: ${report.considered} candidate edit${report.considered === 1 ? '' : 's'}`,
+    '',
+  ];
+
+  if (report.suggestions.length === 0) {
+    lines.push(
+      report.considered === 0
+        ? '  Nothing to suggest: no candidate edit was worth evaluating.'
+        : '  Nothing to suggest: no candidate edit improved the objective.',
+    );
+    return `${lines.join('\n')}\n`;
+  }
+
+  for (const suggestion of report.suggestions) {
+    lines.push(
+      `  ${describeEdit(suggestion.edit, nameOf)}  (+${suggestion.delta.toFixed(3)})`,
+      `    ${suggestion.reason}.`,
+      '',
+    );
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+function componentLine(components: Readonly<Record<string, number>>): string {
+  return Object.entries(components)
+    .map(([key, value]) => `${key} ${value.toFixed(2)}`)
+    .join(', ');
 }

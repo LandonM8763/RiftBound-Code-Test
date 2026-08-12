@@ -580,3 +580,75 @@ describe('the real-card example deck', () => {
     expect(REAL_DECK).toContain('ingest');
   });
 });
+
+describe('the suggest command', () => {
+  it('reports the objective, the baseline and the edits that improve it', () => {
+    const result = run(['suggest', 'deck.txt', '--cards', 'cards.json'], (path) =>
+      path === 'deck.txt' ? DECK : CARDS,
+    );
+
+    expect(result.code).toBe(EXIT.ok);
+    expect(result.stdout).toContain('Objective: consistency');
+    expect(result.stdout).toMatch(/Evaluated: \d+ candidate edit/);
+  });
+
+  it('emits the whole report as JSON', () => {
+    const result = run(['suggest', 'deck.txt', '--cards', 'cards.json', '--json'], (path) =>
+      path === 'deck.txt' ? DECK : CARDS,
+    );
+    const report = JSON.parse(result.stdout) as {
+      objective: string;
+      baseline: { total: number };
+      suggestions: unknown[];
+    };
+
+    expect(report.objective).toBe('consistency');
+    expect(report.baseline.total).toBeGreaterThanOrEqual(0);
+    expect(Array.isArray(report.suggestions)).toBe(true);
+  });
+
+  it('rejects an objective it does not have', () => {
+    const result = run(
+      ['suggest', 'deck.txt', '--cards', 'cards.json', '--objective', 'winrate'],
+      (path) => (path === 'deck.txt' ? DECK : CARDS),
+    );
+    expect(result.code).toBe(EXIT.usage);
+    expect(result.stderr).toContain('Unknown objective');
+  });
+
+  it('rejects a limit that is not a positive integer', () => {
+    const result = run(['suggest', 'deck.txt', '--cards', 'cards.json', '--limit', '0'], (path) =>
+      path === 'deck.txt' ? DECK : CARDS,
+    );
+    expect(result.code).toBe(EXIT.usage);
+  });
+
+  it('proposes no additions under --pool none', () => {
+    // Suggesting a card the owner does not have is shopping, not a deck edit,
+    // so `--pool none` is the setting for "tune what I already own".
+    const result = run(
+      ['suggest', 'deck.txt', '--cards', 'cards.json', '--pool', 'none', '--json'],
+      (path) => (path === 'deck.txt' ? DECK : CARDS),
+    );
+    const report = JSON.parse(result.stdout) as {
+      suggestions: { edit: { kind: string } }[];
+    };
+
+    expect(report.suggestions.length).toBeGreaterThan(0);
+    expect(report.suggestions.every((s) => s.edit.kind !== 'add')).toBe(true);
+  });
+
+  it('says so plainly when nothing improves the objective', () => {
+    // A deck whose Runes already match its demand has nothing to re-ratio.
+    const tuned = DECK.replace(/^\d+ SAMPLE-10[01]$/gm, '').replace(
+      /# Runes/,
+      '# Runes\n12 SAMPLE-100',
+    );
+    const result = run(['suggest', 'deck.txt', '--cards', 'cards.json', '--pool', 'none'], (path) =>
+      path === 'deck.txt' ? tuned : CARDS,
+    );
+
+    expect(result.code).toBe(EXIT.ok);
+    expect(result.stdout).toContain('Nothing to suggest');
+  });
+});

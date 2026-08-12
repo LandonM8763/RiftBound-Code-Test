@@ -13,6 +13,7 @@ import {
 import { HeuristicAgent, RandomAgent } from '@riftbound/ai';
 import { APITCG_SOURCE, COMMUNITY_SOURCE, type CardSource } from '@riftbound/ingest';
 import { simulate } from '@riftbound/sim';
+import { OBJECTIVES, suggestEdits } from '@riftbound/suggest';
 
 import { CardDataError, loadCardRegistry } from './cards-file.js';
 import {
@@ -20,6 +21,7 @@ import {
   formatIngest,
   formatReport,
   formatSimulation,
+  formatSuggestions,
   formatValidation,
 } from './report.js';
 
@@ -44,6 +46,7 @@ Usage:
   riftbound validate <deck-file> --cards <cards.json> [options]
   riftbound ingest   <raw-file>... [--source <name>] [--json]
   riftbound sim      <deck-file> --cards <cards.json> [options]
+  riftbound suggest  <deck-file> --cards <cards.json> [options]
   riftbound help
 
 Options:
@@ -53,6 +56,9 @@ Options:
   --games <n>      Games to simulate. Default 200.
   --seed <text>    Simulation seed. Default "riftbound".
   --source <name>  Card data source for ingest: apitcg (default) or community.
+  --objective <n>  What suggest optimizes for. Default consistency.
+  --limit <n>      Suggestions to return. Default 5.
+  --pool none      Suggest only cuts and ratio changes, never additions.
   --json           Emit machine-readable JSON instead of a text report.
   -h, --help       Show this help.
 
@@ -79,6 +85,10 @@ analyze reports analytic statistics: exact, closed-form, and computed without
 playing a game. sim reports simulated ones, which need the engine and an agent
 and therefore carry a sample size and an interval. The two answer different
 questions; neither replaces the other.
+
+suggest proposes deck edits and reports, for each, how far it moved the chosen
+objective and the measurement that motivated it. It never proposes an edit that
+would make the deck illegal for the format.
 `;
 
 function fail(message: string, code: number): CliResult {
@@ -181,6 +191,9 @@ export function run(argv: readonly string[], readFile: FileReader): CliResult {
         games: { type: 'string' },
         seed: { type: 'string' },
         source: { type: 'string' },
+        objective: { type: 'string' },
+        limit: { type: 'string' },
+        pool: { type: 'string' },
         json: { type: 'boolean' },
         help: { type: 'boolean', short: 'h' },
       },
@@ -213,7 +226,12 @@ export function run(argv: readonly string[], readFile: FileReader): CliResult {
     }
     return runIngest(rawPaths, readFile, values['json'] === true, source);
   }
-  if (command !== 'analyze' && command !== 'validate' && command !== 'sim') {
+  if (
+    command !== 'analyze' &&
+    command !== 'validate' &&
+    command !== 'sim' &&
+    command !== 'suggest'
+  ) {
     return usageError(`Unknown command "${command}".`);
   }
 
@@ -242,6 +260,20 @@ export function run(argv: readonly string[], readFile: FileReader): CliResult {
   const games = Number.parseInt(gamesText, 10);
   if (!Number.isInteger(games) || games < 1) {
     return usageError(`--games must be a positive integer, got "${gamesText}".`);
+  }
+
+  const limitText = typeof values['limit'] === 'string' ? values['limit'] : '5';
+  const limit = Number.parseInt(limitText, 10);
+  if (!Number.isInteger(limit) || limit < 1) {
+    return usageError(`--limit must be a positive integer, got "${limitText}".`);
+  }
+
+  const objectiveName = typeof values['objective'] === 'string' ? values['objective'] : undefined;
+  const objective = objectiveName === undefined ? undefined : OBJECTIVES[objectiveName];
+  if (objectiveName !== undefined && objective === undefined) {
+    return usageError(
+      `Unknown objective "${objectiveName}". Use one of: ${Object.keys(OBJECTIVES).join(', ')}.`,
+    );
   }
 
   const asJson = values['json'] === true;
@@ -285,6 +317,23 @@ export function run(argv: readonly string[], readFile: FileReader): CliResult {
       ? `${JSON.stringify({ legal: validation.legal, format: format.name, issues: validation.issues }, null, 2)}\n`
       : formatValidation(validation, format);
     return { stdout, stderr: '', code: validation.legal ? EXIT.ok : EXIT.illegal };
+  }
+
+  if (command === 'suggest') {
+    // The whole card pool is offerable by default. `candidateEdits` filters it
+    // down to what this deck could legally take (103.1.b.4, 103.2.b), so the
+    // shortlist is still small.
+    const pool = values['pool'] === 'none' ? [] : [...registry.all()].map((card) => card.id);
+    const report = suggestEdits(deck, registry, {
+      format,
+      pool,
+      limit,
+      ...(objective === undefined ? {} : { objective }),
+    });
+    const stdout = asJson
+      ? `${JSON.stringify(report, null, 2)}\n`
+      : formatSuggestions(report, (card) => registry.get(card)?.name ?? String(card));
+    return { stdout, stderr: '', code: EXIT.ok };
   }
 
   // Statistics read card definitions, so an unknown card would mean reporting

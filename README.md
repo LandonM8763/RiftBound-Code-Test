@@ -28,10 +28,10 @@ Requires Node 22 or newer.
 | `@riftbound/analysis` | Cost curve, draw probabilities, Domain/Power consistency, castability |
 | `@riftbound/sim` | Batch simulation: win rates with Wilson intervals, game length, points |
 | `@riftbound/ingest` | Card data source adapters: normalize a raw export, report what it is missing |
-| `@riftbound/cli` | `riftbound analyze` / `validate` / `sim` / `ingest` |
+| `@riftbound/suggest` | Deck edit recommendations, each with the measurement behind it |
+| `@riftbound/cli` | `riftbound analyze` / `validate` / `sim` / `suggest` / `ingest` |
 
-A suggestions package is still planned; see `CLAUDE.md` for the architecture and
-phasing.
+See `CLAUDE.md` for the architecture and phasing.
 
 ## Try it
 

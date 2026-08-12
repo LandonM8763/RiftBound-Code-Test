@@ -21,7 +21,7 @@ card game). The application has four capabilities:
 
 ## Current status
 
-**Phase 1, in progress.** Eight packages exist and are covered by tests; the rest
+**Phase 1, in progress.** Nine packages exist and are covered by tests; the rest
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
@@ -79,7 +79,11 @@ What is built:
   score intervals**, plus game-length and points summaries. Reproducible: each
   game's seed derives from the batch seed, so any single game replays on its
   own with `playGame`.
-- **`@riftbound/cli`** — `riftbound analyze|validate|sim <deck> --cards <cards.json>`
+- **`@riftbound/suggest`** — deck edit recommendations: cuts, additions, swaps
+  and Rune ratio changes, each carrying the measurement that motivated it and
+  how far it moved a stated objective. **What it optimizes for is pluggable and
+  deliberately undecided** — see [Suggestions](#suggestions).
+- **`@riftbound/cli`** — `riftbound analyze|validate|sim|suggest <deck> --cards <cards.json>`
   and `riftbound ingest <raw> > cards.json`, with text or `--json` output.
   Ingest writes cards to stdout and its gap report to stderr, so the redirect
   above yields data while the shortfall stays visible. This is where
@@ -435,7 +439,7 @@ packages/
   ai/         EXISTS  Agents (random → heuristic → search-based)
   analysis/   EXISTS  Statistics: curve, consistency, draw probabilities
   ingest/     EXISTS  Card data source adapters: normalize and report gaps
-  suggest/    planned Deck edit recommendations
+  suggest/    EXISTS  Deck edit recommendations
   sim/        EXISTS  Batch simulation: win rates with intervals
   cli/        EXISTS  Developer-facing entry point until the UI exists
 ```
@@ -882,6 +886,57 @@ runs one game, and batch simulation belongs to the planned `sim` package. It
 alternates seats, because the player going second Channels an extra Rune (485.7)
 and a fixed seating would measure that alongside the agents.
 
+### Suggestions
+
+`packages/suggest`. Rules the recommendations obey are rule 103's; the design
+decisions are these.
+
+**The objective is pluggable, and that is the point.** Open question 4 — what
+"suggest edits" should optimize for — is not answered in the code. An
+`Objective` is a function from a deck to a score, `suggestEdits` ranks candidate
+edits by how far they move it, and swapping the objective swaps what the tool is
+for without touching the search.
+
+**The default is `CONSISTENCY`, and the reason is not taste.** A *simulated*
+objective is not trustworthy yet: 400 of the 468 cards with rules text still
+play as vanilla, so a simulator cannot see what most cards do. Optimizing
+against it would cut the card whose text the engine ignores and keep the vanilla
+body with better stats — confidently wrong advice. Consistency depends on cost
+and Domain, which are exact for all 479 cards. A simulated objective becomes
+viable as text coverage rises, and the seam needs no other change: `sim` already
+measures win rates, so such an objective is a function that calls it.
+
+Five things are load-bearing:
+
+- **A suggestion is measured, not reasoned.** Every candidate is applied, the
+  resulting deck is scored, and the delta is reported. Nothing is proposed
+  because it looks sensible.
+- **The reason states the measurement.** "50% of your Runes are mind but only 0%
+  of your Power demand is" — a reader can check it. A reason that only says a
+  number improved is not a reason.
+- **An illegal edit is never proposed.** The candidate deck is validated before
+  it is scored, so an edit that would break rule 103 is dropped rather than
+  ranked. This is also why a `swap` is one edit rather than a cut plus an add:
+  103.3 fixes the Rune deck at 12, so half a swap always scores an illegal deck.
+- **One suggestion per decision.** Twenty ways to replace the same card are not
+  twenty suggestions — the decision is "cut this card" and the replacement is
+  the answer to it. Without deduplication the ranked list fills with variations
+  of one move and crowds out the structurally different ones.
+- **The empty pool is the default.** Proposing a card the owner does not have is
+  shopping, not a deck edit, so additions require an explicit pool. The CLI
+  passes the whole card pool; `--pool none` restricts it to cuts and ratios.
+
+One property worth knowing rather than hiding: **the Domain component is
+symmetric.** A deck with 6 Mind Runes and no Mind cards can be fixed by cutting
+the Runes *or* by adding Mind cards, and both genuinely improve consistency, so
+both are proposed. Which one is right depends on what the deck is trying to be,
+which is a question the metric cannot answer and the reader can.
+
+Suggestions are single-step: each is measured against the current deck, not
+against a deck with the others already applied. Two that individually help may
+not compose, which is why they are a ranked list to choose from rather than a
+patch to apply wholesale.
+
 ### Statistics
 
 Two distinct kinds — do not conflate them:
@@ -1194,8 +1249,10 @@ The rulebook resolved the ones that were blocking. What remains:
    be the canonical format, and whether card *names* should be accepted, both
    wait on question 1.
 4. **What "suggest edits" should optimize for** — raw win rate against a fixed
-   AI, a specific matchup, or consistency metrics? This determines whether the
-   suggestion engine needs simulation in the loop.
+   AI, a specific matchup, or consistency metrics? Still open, but no longer
+   blocking: `Objective` is pluggable and `packages/suggest` ships with
+   `CONSISTENCY` as the default. See [Suggestions](#suggestions) for why a
+   simulated objective is not trustworthy until card-text coverage rises.
 5. **Rule 103.4.b** makes Battlefields "subject to Domain Identity if
    applicable". The qualifier is not defined anywhere in the Core Rules, so
    validation leaves Battlefields unchecked rather than guessing.

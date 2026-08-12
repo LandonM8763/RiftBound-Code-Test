@@ -12,6 +12,7 @@
     { "path": "../analysis" },
     { "path": "../ingest" },
     { "path": "../ai" },
-    { "path": "../sim" }
+    { "path": "../sim" },
+    { "path": "../suggest" }
   ]
 }

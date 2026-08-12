@@ -1,13 +1,10 @@
 {
-  "name": "@riftbound/cli",
+  "name": "@riftbound/suggest",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "bin": {
-    "riftbound": "./dist/main.js"
-  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -15,13 +12,9 @@
     }
   },
   "dependencies": {
-    "@riftbound/ai": "*",
     "@riftbound/analysis": "*",
     "@riftbound/cards": "*",
-    "@riftbound/deck": "*",
-    "@riftbound/ingest": "*",
-    "@riftbound/sim": "*",
-    "@riftbound/suggest": "*"
+    "@riftbound/deck": "*"
   },
   "scripts": {
     "build": "tsc --build"
