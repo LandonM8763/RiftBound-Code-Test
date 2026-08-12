@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 78 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 95 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -47,11 +47,11 @@ What is built:
   Showdowns with Focus, the full Steps of Combat, Scoring by Conquer including
   the Final Point restriction, **data-driven card effects** (draw, damage,
   heal, Might, resources, kill, recall, move, ready/exhaust, Buffs, discard,
-  XP, Channel), **the Mulligan**,
+  XP, Channel, Tokens), **the Mulligan**,
   **Activated and Triggered abilities** on an **interruptible phase machine**,
-  **event-driven trigger conditions**, **rule 356 cost modification**,
-  **static and passive abilities**, **state predicates**, the **keywords**
-  Assault, Shield, Tank,
+  **event-driven trigger conditions**, **rule 356 cost modification** including
+  **Additional Costs**, **static and passive abilities**, **state predicates**,
+  **Tokens** (179-187), the **keywords** Assault, Shield, Tank,
   Backline and Ganking, the **Dependent Keywords** Legion and Level,
   first-class legal action generation, per-player observable views, and a
   structural invariant checker.
@@ -107,13 +107,17 @@ What is **not** built yet, in rough dependency order:
    sub-action protocol. Activated abilities and played cards are unaffected:
    both choose at play time, as 355.8 requires.
 2. **The keywords that need mechanics the engine has no representation for.**
-   Assault, Shield, Tank, Backline and Ganking are built; the rest are refused
-   with a stated reason in `UNMODELLED_KEYWORDS`, and each reason is a mechanic
-   rather than a keyword: Accelerate and Repeat want Optional Additional Costs
-   (item 1), Deflect wants those *and* a Power cost of any Domain that `Cost`
-   cannot express, Hidden wants facedown cards, Equip and Weaponmaster want
-   Attach, Vision wants Predict (436) — a choice made during resolution, so
-   item 2's protocol.
+   Assault, Shield, Tank, Backline and Ganking are built as engine rules and
+   **Accelerate desugars** (805.1.a is an Optional Additional Cost plus "if you
+   do, I enter ready", and both halves now exist). The rest are refused with a
+   stated reason in `UNMODELLED_KEYWORDS`, and each reason is a mechanic rather
+   than a keyword: Deflect wants a Power cost of any Domain that `Cost` cannot
+   express, Hidden wants facedown cards, Equip and Weaponmaster want Attach,
+   Vision wants Predict (436) — a choice made during resolution, so item 1's
+   protocol. **Repeat is the exception: it is no longer blocked** — 820.1.d is
+   the same optional-cost shape — but it measured **+0 cards** and so is not
+   built. Its reason in `UNMODELLED_KEYWORDS` records that rather than a
+   blocker, which is the honest thing for it to say.
 3. **Statics that are not a scope plus a grant.** Might modifiers, granted
    keywords and "enters ready" are built; a *dynamic* Might ("increased by your
    points"), a duration ("units you play this turn enter ready") and a rule
@@ -121,7 +125,8 @@ What is **not** built yet, in rough dependency order:
 4. **Abilities on Battlefields.** A Battlefield is not a Game Object here —
    `BattlefieldState` holds a card id, not an entity — so nothing sweeps one for
    abilities. Ingest drops them and records a gap rather than shipping a card
-   that looks modelled and silently never runs. 5 cards in the corpus.
+   that looks modelled and silently never runs. 12 cards in the corpus. The same
+   gap is why `TokenSpec.type` excludes the Battlefield tokens of 187.8-187.9.
 5. **Conditional and modal effects** — "if this kills it", "unless its
    controller…", "choose one •…", "for each…". *State* predicates and "if you
    paid the additional cost" are built; what is left is a condition on an
@@ -469,6 +474,7 @@ builds the batch on top of it. Keep that split — a win rate computed inside
 | `costs.ts` | Rule 356's layers: what a card or ability actually costs to play |
 | `legal.ts` | `legalActions(state, player)` |
 | `view.ts` | Per-player observable view; redacts hidden zones |
+| `token.ts` | Tokens (179-187): Creating them, and 186.1's rule that one leaving the Board stops existing |
 | `invariants.ts` | `checkInvariants(state)`, run after every action when fuzzing |
 | `setup.ts` | `createGame` — entity creation, shuffles, opening hands, opens in the Mulligan |
 
@@ -682,6 +688,48 @@ So `PlayerState.playedThisTurn` holds entity ids; a count would satisfy every
 Legion trigger on the first card played. It clears in the Ending Phase, because
 812.1.c scopes it to "the same turn".
 
+### Tokens
+
+Rules 179-187, data in `cards/token.ts`, engine in `engine/token.ts`.
+
+**A Token is a Game Object but not a card (185), and every design decision here
+is about which of those two halves a given caller needs.** A token carries a
+synthesized `CardDefinition` registered in `state.definitions`, so `mightOf`,
+`keywordsOf`, combat, statics and the trigger sweep read it exactly like a Unit
+and need no second code path — that is what made this cheap. `isTokenCard` is
+how the places that must tell them apart still can, and there are only three.
+
+Four things are load-bearing:
+
+- **186.1: a Token that reaches any Non-Board Zone but the Chain stops
+  existing.** Modelled as permanent occupancy of `banishment` (438.5) rather
+  than by deleting the entity, so a reference held on the Chain, in
+  `playedThisTurn` or as a trigger source still resolves instead of throwing.
+  It is deliberately *not* the trash: a banished token must not be counted by
+  "for each card in your trash" or recycled by a Burn Out (431.2.b). Every site
+  that moves something off the Board goes through `sendToNonBoardZone` for this
+  — there are four, and a token has to stop existing at all four.
+- **Rule 187 defines the tokens that exist, so `STANDARD_TOKENS` is a closed
+  table and the parser *checks* the card against it rather than believing it.**
+  A printed "4 Might Recruit" does not describe the Recruit of 187.1, so it is
+  refused and recorded. Inventing one would put a Unit on the Board that no
+  rule describes — the plausible-and-wrong outcome the gap model exists for.
+- **A token enters exhausted unless 184.1 says otherwise.** 359.2.c is the
+  default for any Unit reaching the Board, so `ready` defaults to false.
+  Inverted, every token would arrive with a free Standard Move.
+- **185.3 leaves a token with no cost and no domain.** `FREE` and `[]` are the
+  closest this model can state and neither is ever read: a token is Created on
+  the Board (186), never played from a hand, so its cost is never paid and its
+  domains never checked against a Domain Identity.
+
+**Battlefield tokens (187.8, 187.9) are excluded**, for the same reason
+Battlefield abilities are: `BattlefieldState` holds a card id rather than an
+entity, so one could be created and then never consulted.
+
+Token definitions are seeded into every game by `createGame` rather than
+discovered from a deck list, because 181 supplies them with the game and they
+appear in no deck.
+
 ### Effect primitives
 
 `cards/effect.ts` holds the data, `engine/effects.ts` the interpreter. Adding a
@@ -710,6 +758,11 @@ Five of them encode a rule that is easy to get backwards:
 - **Channelling an empty Rune Deck is not a Burn Out.** Rule 430.3 channels as
   many as possible and stops; 431's Burn Out, and the point it hands an
   opponent, belongs to the *Main* Deck alone.
+- **A Token is Created, not played.** `createToken` puts it straight on the
+  Board (186), so nothing is Contested and no Showdown opens — unlike `move`.
+  Its `where` is rule 184.2's restriction and is fixed by the creating card, so
+  it is not a `DestinationSpec`: that is a choice, and this is not one. See
+  [Tokens](#tokens).
 
 `XP` (728-733) sits on `PlayerState` rather than being an entity, because 731
 says it is not a Game Object and cannot be targeted, readied or exhausted. It
@@ -969,7 +1022,7 @@ edits by how far they move it, and swapping the objective swaps what the tool is
 for without touching the search.
 
 **The default is `CONSISTENCY`, and the reason is not taste.** A *simulated*
-objective is not trustworthy yet: 400 of the 468 cards with rules text still
+objective is not trustworthy yet: 373 of the 468 cards with rules text still
 play as vanilla, so a simulator cannot see what most cards do. Optimizing
 against it would cut the card whose text the engine ignores and keep the vanilla
 body with better stats — confidently wrong advice. Consistency depends on cost
@@ -1119,11 +1172,12 @@ it sidesteps the licensing half of open question 1.
 541 card records in (699 minus sealed products and tokens), **479 cards out**,
 covering every card type including 322 Units and 157 Champion Units. A legal
 deck builds and validates from it with no issues, and the engine plays complete
-games with it — 300 games, all decided, heuristic 60.7% ± 5.5 against random.
+games with it — 300 games, all decided, heuristic 58.7% ± 5.5 against random.
 
-37 of those cards carry an ability and 11 a keyword. The keyword figure is low
-against the 55 that parse because keywords ride the same all-or-nothing rule:
-a card whose other clause is unreadable keeps neither.
+72 of those cards carry an ability and 14 a keyword. The keyword figure is low
+against the 95 that parse because keywords ride the same all-or-nothing rule:
+a card whose other clause is unreadable keeps neither. 11 create Tokens and 6
+carry Accelerate.
 
 What it still cannot supply:
 
@@ -1168,23 +1222,30 @@ It covers `Draw N`, `Deal N to a unit [at a battlefield]`, `Give a unit +N
 Might this turn`, `Kill`, `Ready`, `Buff`, `Heal`, `Discard N`, `Channel N
 rune(s) [exhausted]`, `ADD` resources and `Gain N XP`; the self-targeting forms
 (`Ready/Buff/Heal/Exhaust/Recall me`, `Give me +N Might this turn`); sequences
-joined by "then" or "and"; the trigger grammar below; the modelled keywords and
-the desugared ones (`DEATHKNELL - <effects>`, `TEMPORARY`, `LEGION - <ability>`);
-and Activated abilities written `[N,] Exhaust: <effects>`.
+joined by "then" or "and"; the trigger grammar below; `Play [N] [ready] <M>
+Might <Name> unit token [here|in your base]`; the modelled keywords and the
+desugared ones (`DEATHKNELL - <effects>`, `TEMPORARY`, `ACCELERATE`,
+`LEGION - <ability>`); and Activated abilities written `[N,] Exhaust: <effects>`.
+
+`parseCardText` takes a second argument, `CardFacts`, and it holds exactly one
+field. Almost every clause is readable from the words alone and the grammar is
+better for not having the whole card to reach into; the one exception is
+Accelerate, whose Power is the Unit's *own* Domain (805.1.a.1) and appears
+nowhere in the printed line.
 
 Trigger conditions are parsed as an event plus a subject plus a filter rather
 than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 78 of the 468 cards that have text**, and the shape of what is
+**Coverage is 95 of the 468 cards that have text**, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 78 |
-| Blocked | 390 |
+| Fully parsed | 95 |
+| Blocked | 373 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 3 or 4 times, everything else once or
@@ -1224,24 +1285,61 @@ See [State predicates](#state-predicates).
 **Additional Costs then took it 74 → 78**, the last of the two best-measured
 investments. See [Additional Costs](#additional-costs-rule-3562).
 
+**Tokens took it 78 → 89**, and **Accelerate 89 → 95.**
+
+#### How the ranking was measured wrong, and what fixed it
+
+Worth reading before trusting any number below it.
+
+The ranking that stood here until tokens were built **attributed a blocked
+clause by its opening word**. Anything starting "When…" was counted against
+trigger conditions — including cards whose trigger the grammar already parses
+perfectly and whose *effect* is the blocker. That put "trigger/static shape" at
+110 solely-blocked cards against the ≈8 a wider condition actually buys, and it
+hid tokens completely: every "When you play me, play a Recruit token" was
+filed as a missing trigger.
+
+The fix is to attribute by **asking the parser's own sub-parsers which stage
+refused the clause** — if some comma prefix parses as a condition, the blocker
+is downstream of it. Doing that surfaced tokens (+9 projected, **+11
+delivered**) as the largest single coherent mechanic left, from a standing
+start of not being on the list at all.
+
+So: **never rank by what a clause looks like. Rank by what the parser rejected,
+then confirm with a counterfactual re-parse.** The scratch harness for both is
+worth rebuilding if it is not to hand — it is about fifty lines.
+
 #### What is left, ranked by measurement
 
-Re-measured from the 68 baseline, one mechanic at a time and then cumulatively:
+Re-measured by counterfactual from the 89 baseline (tokens in, Accelerate not),
+one mechanic at a time and then in build order:
 
 | Mechanic | Alone |
 |---|---|
+| **Tokens (179-187)** — now built | **+9 projected, +11 delivered** |
 | The 8 refused keywords | +11 |
-| **Additional Costs (356.2)** — now built | **+8** |
-| **State predicates** — now built | **+6** |
-| Non-standard ability costs | +3 |
+| **Accelerate (805)** — now built | **+5 projected, +6 delivered** |
+| Zone movement (bounce to hand, recycle from trash) | +5 |
+| Statics beyond scope-plus-grant | +4 |
+| Keywords granted by an effect ("give a unit ASSAULT 3") | +4 |
+| Durations and delayed effects ("the next spell you play…") | +3 |
 | Counting / dynamic values | +2 |
+| Non-standard ability costs | +2 |
 | Effect-outcome predicates ("if this kills it") | +1 |
-| Attach (Equip, Weaponmaster, Quick-Draw) | +0 |
+| Modal effects ("choose one •…") | +0 |
 
-**The keyword figure is a trap.** Individually they are Accelerate +5, Hidden
-+3, Vision +2, Deflect +1 and the other four +0 — and each wants a *different*
-deep mechanic (Optional Additional Costs, facedown cards, Predict, Attach). The
-+11 only arrives after building four of them.
+**Projections run optimistic, except when they do not.** Additional Costs
+projected +8 and delivered +4; tokens projected +9 and delivered +11. A
+counterfactual rewrite proves a *clause* stops blocking, which is neither an
+upper nor a lower bound on what a real implementation reaches — treat these as
+a ranking, not a forecast.
+
+**The keyword figure is still a trap**, and now more so. Accelerate was +5 of
+the +11 and it is built. What remains is Hidden +3, Vision +2, Deflect +1 and
+four at +0, each wanting a *different* deep mechanic (facedown cards, Predict,
+Power of any Domain, Attach). Repeat is not blocked at all any more — 820.1.d is
+the optional-cost shape that now exists — but it measures **+0**, so it stays
+refused with that as its stated reason.
 
 Additional Costs and state predicates were the two best single investments and
 **do not overlap**: together they measured +14 and delivered +10. The shortfall
@@ -1256,21 +1354,28 @@ round of this to do.
 
 What the corpus is blocked on now, in the order measurement puts them:
 
-1. **Statics beyond a scope plus a grant** — "My Might is increased by your
+1. **Zone movement** — "Return me to my owner's hand", "recycle 3 from your
+   trash", "play it from your trash". +5, and the largest coherent one left.
+   The effect model can move a Permanent around the Board and to the trash; it
+   cannot move a card *back* out of a Non-Board Zone, and bounce-to-hand is a
+   distinct primitive from `recall` (which is Board-to-Base, 455).
+2. **Statics beyond a scope plus a grant** — "My Might is increased by your
    points" (dynamic), "Units you play this turn enter ready" (a duration),
-   "opponents can only play units to their base" (a rule change). The
+   "opponents can only play units to their base" (a rule change). +4. The
    scope-plus-grant form is built and took the corpus from 58 to 68; what is
    left in this category each wants a different mechanic.
-2. **The eight refused keywords**, each blocked on a mechanic: Optional
-   Additional Costs (Accelerate, Repeat, and Deflect, which also wants Power of
-   any Domain), facedown cards (Hidden), Attach (Equip, Weaponmaster,
-   Quick-Draw), Predict (Vision).
-3. **Conditional and modal effects** — "if this kills it", "unless its
-   controller…", "choose one •…", "for each…". 42 cards. The effect model has no
-   conditions, no counting and no modes.
-4. **Non-standard ability costs** — "Spend my buff:", "Recycle 1 from your
+3. **Keywords granted by an effect** — "Give a unit ASSAULT 3 this turn". +4.
+   A static with a duration and a chosen subject, which is why it is refused
+   today rather than read as the card having the keyword itself.
+4. **The seven still-refused keywords**, each blocked on a mechanic: facedown
+   cards (Hidden), Attach (Equip, Weaponmaster, Quick-Draw), Predict (Vision),
+   Power of any Domain (Deflect). Repeat is blocked on nothing and worth +0.
+5. **Conditional and modal effects** — "if this kills it", "unless its
+   controller…", "choose one •…", "for each…". The effect model has no
+   outcome conditions, no counting and no modes.
+6. **Non-standard ability costs** — "Spend my buff:", "Recycle 1 from your
    trash:", "you may exhaust me to …". `ActivatedAbility.cost` is Energy, Power
-   and the exhaust; 22 cards want more.
+   and the exhaust; 16 cards want more.
 
 Self-targeting was on this list before keywords and triggers, and unlocked
 **nothing** — every self-targeting card was blocked on something else. That is

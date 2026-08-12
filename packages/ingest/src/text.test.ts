@@ -367,10 +367,17 @@ describe('keywords (rules 800-828)', () => {
   });
 
   it('refuses a keyword the engine does not model, with a stated reason', () => {
-    for (const keyword of ['ACCELERATE', 'HIDDEN', 'DEFLECT', 'EQUIP Calm', 'VISION', 'REPEAT 2']) {
+    for (const keyword of ['HIDDEN', 'DEFLECT', 'EQUIP Calm', 'VISION', 'REPEAT 2']) {
       expect(parseCardText(keyword).unparsed).toHaveLength(1);
     }
-    expect(Object.keys(UNMODELLED_KEYWORDS)).toContain('accelerate');
+    expect(Object.keys(UNMODELLED_KEYWORDS)).toContain('hidden');
+  });
+
+  it('805: Accelerate is no longer among them, because it now desugars', () => {
+    // It was refused for wanting rule 356.2, which now exists. The keyword is
+    // shorthand for an ability the model has, so it becomes that ability.
+    expect(Object.keys(UNMODELLED_KEYWORDS)).not.toContain('accelerate');
+    expect(parseCardText('ACCELERATE', { domains: ['fury'] }).unparsed).toEqual([]);
   });
 });
 
@@ -472,6 +479,51 @@ describe('tokens (rules 179-187)', () => {
       condition: { event: 'played', subject: 'self' },
       effect: { effects: [{ kind: 'createToken', token: 'recruit' }] },
     });
+  });
+});
+
+describe('Accelerate (rule 805)', () => {
+  it('805.1.a: desugars to an optional cost plus "if you do, I enter ready"', () => {
+    const parsed = parseCardText('ACCELERATE', { domains: ['fury'] });
+
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.additionalCosts).toEqual([
+      { optional: true, pay: { kind: 'resources', cost: { energy: 1, power: ['fury'] } } },
+    ]);
+    expect(parsed.abilities?.statics).toEqual([
+      {
+        affects: { who: 'self' },
+        grant: { entersReady: true },
+        condition: { kind: 'paidAdditionalCost' },
+      },
+    ]);
+  });
+
+  it('805.1.a.1: takes the Power from the Unit\'s own Domain', () => {
+    const parsed = parseCardText('ACCELERATE', { domains: ['order'] });
+    expect(parsed.abilities?.additionalCosts?.[0]?.pay).toMatchObject({
+      cost: { energy: 1, power: ['order'] },
+    });
+  });
+
+  it('refuses a multi-Domain Unit, where 805.1.a.1 is a choice', () => {
+    // "a Power that matches one of the domains" — picking one would be a guess,
+    // and `Cost` has no way to say "either".
+    expect(parseCardText('ACCELERATE', { domains: ['fury', 'calm'] }).unparsed).toEqual([
+      'ACCELERATE',
+    ]);
+  });
+
+  it('refuses a domainless Unit, where 805.1.a.2 means any Domain', () => {
+    expect(parseCardText('ACCELERATE', { domains: [] }).unparsed).toEqual(['ACCELERATE']);
+  });
+
+  it('refuses it when the caller supplies no Domains at all', () => {
+    expect(parseCardText('ACCELERATE').unparsed).toEqual(['ACCELERATE']);
+  });
+
+  it('820: Repeat is still refused, and the reason is now its measured worth', () => {
+    expect(parseCardText('REPEAT 2', { domains: ['fury'] }).unparsed).toHaveLength(1);
   });
 });
 

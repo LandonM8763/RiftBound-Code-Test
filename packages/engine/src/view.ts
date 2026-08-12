@@ -47,6 +47,9 @@ export interface PlayerView {
   readonly trash: readonly EntityView[];
   readonly legend: EntityView | null;
   readonly champion: EntityView | null;
+  // Banishment is deliberately absent. Rule 186.1 has a Token there stop
+  // existing, and the zone holds nothing else, so exposing it would show an
+  // agent objects that are not in the game.
   /**
    * Decks are exposed as counts only — never as entity lists. Handing out ids
    * in deck order would let an agent track a card's identity across a shuffle,

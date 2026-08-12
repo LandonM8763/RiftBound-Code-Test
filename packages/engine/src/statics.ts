@@ -24,7 +24,7 @@ import {
   type ValuedKeywordKind,
 } from '@riftbound/cards';
 
-import { conditionMet } from './condition.js';
+import { conditionMet, type ConditionContext } from './condition.js';
 import { dependencyMet } from './dependency.js';
 import { entityCard, getEntity, type EntityId, type GameState, type PlayerId } from './state.js';
 
@@ -192,6 +192,7 @@ export function entersReady(
   state: GameState,
   player: PlayerId,
   card: CardDefinition,
+  context: ConditionContext = {},
 ): boolean {
   for (const ability of staticAbilities(card.abilities)) {
     if (ability.grant.entersReady !== true || ability.affects.who !== 'self') {
@@ -204,8 +205,11 @@ export function entersReady(
     if (ability.condition !== undefined && isSourceCondition(ability.condition)) {
       continue;
     }
+    // 805.1.a: Accelerate desugars to exactly this — an Optional Additional
+    // Cost plus "if you do, I enter ready". The declaration was made at step 2
+    // and cannot be read off the board, so it rides in on the context.
     if (
-      conditionMet(state, player, undefined, ability.condition) &&
+      conditionMet(state, player, undefined, ability.condition, context) &&
       dependencyMet(state, undefined, player, ability.dependsOn)
     ) {
       return true;

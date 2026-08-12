@@ -213,7 +213,9 @@ function normalizeCard(
   // All-or-nothing per card: a partially understood card would play, look
   // right and be wrong, so anything left over leaves the card vanilla and is
   // recorded instead. See `text.ts`.
-  const parsed = parseCardText(description);
+  // 805.1.a.1 pays Accelerate's Power with the Unit's own Domain, which is not
+  // in the printed line — the one fact the grammar cannot read off the text.
+  const parsed = parseCardText(description, { domains });
   const understood = parsed.unparsed.length === 0;
 
   const base = {

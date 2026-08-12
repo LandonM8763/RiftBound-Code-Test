@@ -51,6 +51,29 @@ const SACRIFICE = makeUnit(2, ['fury'], {
   abilities: { additionalCosts: [{ pay: { kind: 'kill', what: 'unit' } }] },
 });
 
+/**
+ * Accelerate (805.1.a), exactly as ingest desugars it: an Optional Additional
+ * Cost of 1 Energy and 1 Power of the Unit's own Domain, plus "if you do, I
+ * enter ready".
+ */
+const ACCELERATED = makeUnit(2, ['fury'], {
+  id: cardId('D-014'),
+  name: 'Accelerated',
+  cost: cost(1),
+  abilities: {
+    additionalCosts: [
+      { optional: true, pay: { kind: 'resources', cost: { energy: 1, power: ['fury'] } } },
+    ],
+    statics: [
+      {
+        affects: { who: 'self' },
+        grant: { entersReady: true },
+        condition: { kind: 'paidAdditionalCost' },
+      },
+    ],
+  },
+});
+
 /** An optional cost whose payoff is an effect rather than a discount. */
 const BONUS = makeUnit(2, ['fury'], {
   id: cardId('D-013'),
@@ -76,6 +99,7 @@ const REGISTRY = CardRegistry.from([
   BARGAIN,
   SACRIFICE,
   BONUS,
+  ACCELERATED,
   RUNE,
   ...BATTLEFIELDS,
 ] as CardDefinition[]);
@@ -85,10 +109,11 @@ function deck(): DeckList {
     legend: LEGEND.id,
     champion: CHAMPION.id,
     main: [
-      ...Array.from({ length: 6 }, () => PLAIN.id),
+      ...Array.from({ length: 2 }, () => PLAIN.id),
       ...Array.from({ length: 4 }, () => BARGAIN.id),
       ...Array.from({ length: 4 }, () => SACRIFICE.id),
       ...Array.from({ length: 4 }, () => BONUS.id),
+      ...Array.from({ length: 4 }, () => ACCELERATED.id),
     ],
     runes: Array.from({ length: 8 }, () => RUNE.id),
     battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
@@ -289,5 +314,59 @@ describe('payability', () => {
     };
 
     expect(canPayAdditional(exhausted, player, { kind: 'exhaustLegend' })).toBe(false);
+  });
+});
+
+describe('Accelerate (rule 805)', () => {
+  it('805.1.a: entering ready is what paying buys', () => {
+    // The keyword is *functionally short for* an optional cost plus "if you do,
+    // I enter ready", so the two plays must differ in exactly that.
+    const [base, card] = inHand(inMainPhase('accel', 6), ACCELERATED.id);
+    const player = base.activePlayer;
+    const state = withPlayer(base, player, (seat) => ({
+      ...seat,
+      pool: { energy: 6, power: { ...seat.pool.power, fury: 1 } },
+    }));
+
+    const paid = reduce(state, { type: 'playCard', card, payAdditional: true }).state;
+    const declined = reduce(state, { type: 'playCard', card }).state;
+
+    expect(paid.entities[card]!.exhausted).toBe(false);
+    // 359.2.c: without the payment it enters exhausted like any other Unit.
+    expect(declined.entities[card]!.exhausted).toBe(true);
+    checkInvariants(paid);
+  });
+
+  it('357.1: the Power comes out of the same pool as the Total Cost', () => {
+    const [base, card] = inHand(inMainPhase('accel-pool', 2), ACCELERATED.id);
+    const player = base.activePlayer;
+    const state = withPlayer(base, player, (seat) => ({
+      ...seat,
+      pool: { energy: 2, power: { ...seat.pool.power, fury: 1 } },
+    }));
+
+    const paid = reduce(state, { type: 'playCard', card, payAdditional: true }).state;
+
+    // 1 Energy for the card, 1 Energy and 1 Fury for Accelerate.
+    expect(paid.players[player]!.pool.energy).toBe(0);
+    expect(paid.players[player]!.pool.power.fury).toBe(0);
+  });
+
+  it('is not offered when the Power cannot be paid', () => {
+    // No Fury in the pool, so 805.1.a's cost is unpayable and only the plain
+    // play survives — the accelerated one would strand the game at 357.2.
+    const [base, card] = inHand(inMainPhase('accel-broke', 2), ACCELERATED.id);
+    const player = base.activePlayer;
+    const state = withPlayer(base, player, (seat) => ({
+      ...seat,
+      pool: { energy: 2, power: { ...seat.pool.power, fury: 0 } },
+    }));
+
+    const plays = legalActions(state, player).filter(
+      (action) => action.type === 'playCard' && action.card === card,
+    );
+
+    expect(plays).toHaveLength(1);
+    expect(plays[0]).not.toHaveProperty('payAdditional');
   });
 });

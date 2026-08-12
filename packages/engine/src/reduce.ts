@@ -307,7 +307,7 @@ function playCard(
   // Board the sweep can no longer tell it apart from the units it is talking
   // about. 359.2.c is about how the card enters, so this is also when the rules
   // ask the question.
-  const ready = entersReady(next, player, definition);
+  const ready = entersReady(next, player, definition, { paidAdditionalCost: payAdditional });
 
   // 359.2: a Permanent leaves the Chain and becomes a Game Object at once.
   const entersAt = resolvePermanentLocation(next, player, definition, location);

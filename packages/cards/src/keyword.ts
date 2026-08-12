@@ -101,11 +101,18 @@ export function keywordValue(
  * rules, so a card whose keyword is ignored is being played wrong.
  */
 export const UNMODELLED_KEYWORDS: Readonly<Record<string, string>> = Object.freeze({
-  // 805.2: an Optional Additional Cost, which is rule 356.2 — the one layer of
-  // cost modification not built. The payment protocol is what is missing, not
-  // the effect.
-  accelerate: 'Accelerate (805) is an Optional Additional Cost; rule 356.2 is not modelled',
-  repeat: 'Repeat (820) is an Optional Additional Cost; rule 356.2 is not modelled',
+  // Accelerate (805) is *not* here: 805.1.a makes it an Optional Additional
+  // Cost plus "if you do, I enter ready", and both halves now exist, so it
+  // desugars at ingest like Deathknell and Temporary do.
+  //
+  // 820.1.d makes Repeat the same shape — an Optional Additional Cost whose
+  // payoff is executing the Chain item's instructions a second time — so it is
+  // no longer *blocked*. It stays refused because it is not worth building:
+  // pretending it exists and re-parsing the corpus unlocks **zero** cards, both
+  // alone and alongside every other keyword. Its 10 printings are each blocked
+  // on something else as well. Build it when that number moves.
+  repeat:
+    'Repeat (820) needs the effect executed twice on resolution; measured at 0 cards unlocked, so it is not built',
   // 809.1.d: a *Mandatory* Additional Cost, and 809.1.c.1 makes it Power "of
   // any Domain", which `Cost` cannot express — its power is a Domain list.
   deflect: 'Deflect (809) is a Mandatory Additional Cost in Power of any Domain; Cost cannot express either',

@@ -44,6 +44,18 @@ export interface ParsedText {
   readonly unparsed: readonly string[];
 }
 
+/**
+ * What the parser needs to know about the card beyond its text.
+ *
+ * Deliberately tiny. Almost every clause is readable from the words alone, and
+ * the grammar is better for not having the whole card to reach into. The one
+ * exception is Accelerate: rule 805.1.a.1 fixes its Power to the Unit's *own*
+ * Domain, which is nowhere in the printed line.
+ */
+export interface CardFacts {
+  readonly domains?: readonly Domain[] | undefined;
+}
+
 /** Words the text uses for small numbers. */
 const NUMBER_WORDS: Readonly<Record<string, number>> = {
   one: 1,
@@ -1199,12 +1211,33 @@ function parseKeywordAbility(line: string): TriggeredAbility | undefined {
 }
 
 /**
+ * Accelerate's Additional Cost (805.1.a), or `undefined` when it cannot be
+ * stated.
+ *
+ * 1 Energy plus 1 Power, and 805.1.a.1 fixes that Power to one of the Unit's
+ * own Domains — so a single-Domain Unit has exactly one reading and anything
+ * else does not. Every Accelerate in the corpus today is single-Domain, which
+ * is why this covers all of them; the refusal is here so that a future
+ * multi-Domain printing is recorded as a gap rather than given an arbitrary
+ * Domain.
+ */
+function accelerateCost(domains: readonly Domain[] | undefined): AdditionalCost | undefined {
+  if (domains === undefined || domains.length !== 1) {
+    return undefined;
+  }
+  return {
+    optional: true,
+    pay: { kind: 'resources', cost: { energy: 1, power: [domains[0]!] } },
+  };
+}
+
+/**
  * Parse a card's printed text.
  *
  * The card is understood only when `unparsed` comes back empty; anything in it
  * means the caller should leave the card vanilla and record the gap.
  */
-export function parseCardText(text: string): ParsedText {
+export function parseCardText(text: string, card: CardFacts = {}): ParsedText {
   const unparsed: string[] = [];
   const effects: Effect[] = [];
   let target: TargetSpec = NO_TARGET;
@@ -1235,6 +1268,29 @@ export function parseCardText(text: string): ParsedText {
     const desugared = parseKeywordAbility(line);
     if (desugared !== undefined) {
       triggered.push(desugared);
+      continue;
+    }
+
+    // 805.1.a: Accelerate is "As you play me, you may pay [1][C] as an
+    // additional cost. If you do, I enter ready." Both halves exist — 356.2's
+    // optional payment and an `entersReady` static gated on having made it — so
+    // the keyword desugars rather than becoming a rule of its own.
+    if (/^accelerate$/i.test(line)) {
+      const accelerate = accelerateCost(card.domains);
+      if (accelerate === undefined) {
+        // 805.1.a.1 pays the Power with "a Power that matches one of the
+        // domains of the unit", which is a *choice* on a multi-Domain card, and
+        // 805.1.a.2 makes a domainless unit's Power any Domain at all. `Cost`
+        // is a fixed Domain list and can state neither, so those are refused.
+        unparsed.push(line);
+        continue;
+      }
+      additionalCosts.push(accelerate);
+      statics.push({
+        affects: { who: 'self' },
+        grant: { entersReady: true },
+        condition: { kind: 'paidAdditionalCost' },
+      });
       continue;
     }
 
