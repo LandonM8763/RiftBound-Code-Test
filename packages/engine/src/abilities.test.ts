@@ -313,6 +313,7 @@ function withBoardCard(
         exhausted: false,
         damage: 0,
         mightBonus: 0,
+        grantedKeywords: [],
         buffs: 0,
       },
     },

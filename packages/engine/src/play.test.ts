@@ -436,6 +436,7 @@ describe('"I enter ready" (rule 363 replacing 359.2.c)', () => {
           exhausted: false,
           damage: 0,
           mightBonus: 0,
+          grantedKeywords: [],
           buffs: 0,
         },
       },

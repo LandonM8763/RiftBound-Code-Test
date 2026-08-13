@@ -4,6 +4,7 @@ import {
   type CardDefinition,
   type CardId,
   type Domain,
+  type Keyword,
   type TriggerEvent,
 } from '@riftbound/cards';
 
@@ -110,6 +111,19 @@ export interface Entity {
    * where this is cleared. Not a Buff — see the note on `giveMight`.
    */
   readonly mightBonus: number;
+  /**
+   * Keywords granted to this object until the end of the turn (801.3.a).
+   *
+   * "Give a unit ASSAULT 3 this turn" — the exact counterpart of `mightBonus`,
+   * and cleared beside it by 317.2.c. Deliberately *not* a static: a static is
+   * consulted from its source and stops the moment that source leaves the Board
+   * (365), whereas this grant outlives the Spell that made it, which has gone
+   * to the trash by the time the keyword matters.
+   *
+   * Read through `keywordsOf`, never directly — 801.3.a makes a granted keyword
+   * exactly as real as a printed one.
+   */
+  readonly grantedKeywords: readonly Keyword[];
   /**
    * Buff counters on a Unit (rules 701-705).
    *

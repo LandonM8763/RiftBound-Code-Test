@@ -127,6 +127,7 @@ export function createGame(options: CreateGameOptions): ReduceResult {
       exhausted: false,
       damage: 0,
       mightBonus: 0,
+      grantedKeywords: [],
       buffs: 0,
     };
     return id;

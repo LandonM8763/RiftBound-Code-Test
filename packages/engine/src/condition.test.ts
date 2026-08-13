@@ -312,3 +312,79 @@ describe('an absent condition', () => {
     expect(conditionMet(state, state.activePlayer, undefined, undefined)).toBe(true);
   });
 });
+
+describe('Runes count as Board presence (161.1.a)', () => {
+  it('counts Channelled Runes, which is what "while you have 8+ runes" asks', () => {
+    // 161.1.a: a Rune stays on the Board until it is Recycled or otherwise
+    // removed, so it is part of what a player "has" the same way a Unit is.
+    const state = inMainPhase('runes');
+    const player = state.activePlayer;
+    const channelled = state.players[player]!.zones.runes.length;
+    expect(channelled).toBeGreaterThan(0);
+
+    const predicate = { kind: 'controls', who: 'you', what: 'rune' } as const;
+    expect(conditionMet(state, player, undefined, { ...predicate, min: channelled })).toBe(true);
+    expect(conditionMet(state, player, undefined, { ...predicate, min: channelled + 1 })).toBe(
+      false,
+    );
+  });
+
+  it('does not count Runes still in the Rune Deck', () => {
+    const state = inMainPhase('rune-deck');
+    const player = state.activePlayer;
+    const total =
+      state.players[player]!.zones.runes.length + state.players[player]!.zones.runeDeck.length;
+
+    expect(
+      conditionMet(state, player, undefined, {
+        kind: 'controls',
+        who: 'you',
+        what: 'rune',
+        min: total,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe('"here" on a controls predicate (355.9)', () => {
+  const HERE = {
+    kind: 'controls',
+    who: 'you',
+    what: 'unit',
+    min: 1,
+    here: true,
+    excludeSelf: true,
+  } as const;
+
+  it('counts only Units at the source`s own Battlefield', () => {
+    let state = inMainPhase('here');
+    const player = state.activePlayer;
+    const [a, source] = onBoard(state, PLAIN.id);
+    state = moveEntity(a, source, battlefieldLocation(0));
+
+    // Alone at Battlefield 0: "another unit here" is false.
+    expect(conditionMet(state, player, source, HERE)).toBe(false);
+
+    // A friend at a *different* Battlefield still does not count.
+    const [b, elsewhere] = onBoard(state, PLAIN.id);
+    state = moveEntity(b, elsewhere, battlefieldLocation(1));
+    expect(conditionMet(state, player, source, HERE)).toBe(false);
+
+    // A friend at the same one does.
+    const [c, together] = onBoard(state, PLAIN.id);
+    state = moveEntity(c, together, battlefieldLocation(0));
+    expect(conditionMet(state, player, source, HERE)).toBe(true);
+  });
+
+  it('is false for a source that names no Battlefield', () => {
+    // A source in a Base, or a card still in hand, has no "here" at all.
+    let state = inMainPhase('here-base');
+    const player = state.activePlayer;
+    const [a, source] = onBoard(state, PLAIN.id);
+    const [b] = onBoard(a, PLAIN.id);
+    state = b;
+
+    expect(conditionMet(state, player, source, HERE)).toBe(false);
+    expect(conditionMet(state, player, undefined, HERE)).toBe(false);
+  });
+});

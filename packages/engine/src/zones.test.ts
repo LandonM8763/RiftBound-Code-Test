@@ -172,13 +172,14 @@ describe('returning a Permanent to hand', () => {
     expect(settled.entities[victim]!.location).toEqual(playerLocation(owner, 'hand'));
   });
 
-  it('705: leaving the Board strips Buffs, damage and the turn\'s Might', () => {
+  it('705: leaving the Board strips Buffs, damage and everything granted this turn', () => {
     let [state, victim] = atBattlefield(inMainPhase('counters'), 0);
     state = withEntity(state, victim, (e) => ({
       ...e,
       buffs: 1,
       damage: 1,
       mightBonus: 2,
+      grantedKeywords: [{ kind: 'tank' }],
       exhausted: true,
     }));
     const [withSpell, spell] = inHand(state, REBUKE.id);
@@ -193,6 +194,7 @@ describe('returning a Permanent to hand', () => {
       buffs: 0,
       damage: 0,
       mightBonus: 0,
+      grantedKeywords: [],
       exhausted: false,
     });
   });

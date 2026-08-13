@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 100 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 105 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -47,7 +47,8 @@ What is built:
   Showdowns with Focus, the full Steps of Combat, Scoring by Conquer including
   the Final Point restriction, **data-driven card effects** (draw, damage,
   heal, Might, resources, kill, recall, move, ready/exhaust, Buffs, discard,
-  XP, Channel, Tokens, returning cards to hand), **the Mulligan**,
+  XP, Channel, Tokens, returning cards to hand, granting keywords), **the
+  Mulligan**,
   **Activated and Triggered abilities** on an **interruptible phase machine**,
   **event-driven trigger conditions**, **rule 356 cost modification** including
   **Additional Costs**, **static and passive abilities**, **state predicates**,
@@ -626,6 +627,19 @@ Three things are load-bearing:
   condition that quietly never holds — that would make the card permanently
   weaker than printed. "If you control a facedown card", "if I have moved twice
   this turn" and "if you've spent at least 2 Runes this turn" are all refused.
+- **`controls` counts the whole Board, Runes included.** 161.1.a keeps a
+  Channelled Rune on the Board until it is Recycled, so "while you have 8+
+  runes" is an ordinary `controls` count rather than a predicate of its own —
+  the Rune zone was simply missing from the sweep, which made that question
+  quietly answer 0.
+- **`controls` takes `here` (355.9)**, so "another unit here" is one predicate
+  that is both. Source-relative like `StaticScope.here`: a source in a Base
+  names no Battlefield, so the count is 0 rather than the whole Board.
+- **A "While …" the grammar cannot read fails the card.** `parseStatic` routes
+  every "While <predicate>," through the shared state-predicate grammar, naming
+  only `buffed` and `atBattlefield` specially because those are about the source
+  rather than the state. Dropping an unreadable one would make the static
+  unconditional, which is strictly stronger than printed.
 
 ### Keywords
 
@@ -669,13 +683,20 @@ Tank is a wrong card, not a simpler one.
 
 Two consequences worth knowing:
 
-- **A keyword granted by an effect is refused, not read as the card having it.**
-  "Give a unit ASSAULT 3 this turn" is a static ability the effect model cannot
-  express, and mistaking it would give the wrong Unit the keyword, permanently.
-  The keyword patterns are anchored to a whole line for exactly this reason.
+- **A keyword granted by an effect is never read as the card having it.** "Give
+  a unit ASSAULT 3 this turn" is a `grantKeyword` effect on a chosen Unit, not
+  a keyword on the card that says it — mistaking the two would give the wrong
+  Unit the keyword, permanently. The keyword patterns stay anchored to a whole
+  line for exactly that reason, and the grant is a separate clause rule. See
+  [Effect primitives](#effect-primitives).
+- **Only keywords the engine models can be granted.** `keywordNamed` reads the
+  same `MODELLED_KEYWORDS` table the printed form does, so "give a unit DEFLECT
+  this turn" is refused: 801.3.a makes a granted keyword do exactly what a
+  printed one does, and granting one the engine ignores is the same wrong card
+  as printing it.
 - **Keywords ride the same all-or-nothing rule as everything else.** A card
-  whose other clause is unreadable keeps neither. That is why only 11 ingested
-  cards carry a keyword while 55 parse fully.
+  whose other clause is unreadable keeps neither. That is why only 14 ingested
+  cards carry a keyword while 105 parse fully.
 
 `Keyword` stacking follows the rules rather than the callers: valued keywords
 sum (807.2, 814.2) and unvalued ones are redundant (810.2, 815.2, 826.5), which
@@ -758,6 +779,16 @@ Five of them encode a rule that is easy to get backwards:
 - **Channelling an empty Rune Deck is not a Burn Out.** Rule 430.3 channels as
   many as possible and stops; 431's Burn Out, and the point it hands an
   opponent, belongs to the *Main* Deck alone.
+- **A granted keyword lives on the recipient, not on the granter.** "Give a
+  unit ASSAULT 3 this turn" is `grantKeyword`, stored in
+  `Entity.grantedKeywords` and expired by 317.2.c exactly like `mightBonus`.
+  Modelling it as a static instead would be wrong twice over: a static grants
+  to a *scope* rather than to a chosen Unit, and 365 stops it the moment its
+  source leaves the Board — which for a Spell is immediately. Rule 801.3.a
+  makes it indistinguishable from a printed keyword once granted, so
+  `keywordsOf` returns printed, static-granted and this, and no caller can tell
+  which is which. Only the "this turn" wording is read: a grant with no printed
+  duration would have to persist, which is different storage.
 - **A bounce is not a Recall, and both differ from a Kill.** Rule 412 lists no
   "Return" Game Action, so `toHand` is an ordinary zone move — which is exactly
   what separates it from a Recall (455), where the Permanent stays on the Board
@@ -1037,7 +1068,7 @@ edits by how far they move it, and swapping the objective swaps what the tool is
 for without touching the search.
 
 **The default is `CONSISTENCY`, and the reason is not taste.** A *simulated*
-objective is not trustworthy yet: 368 of the 468 cards with rules text still
+objective is not trustworthy yet: 363 of the 468 cards with rules text still
 play as vanilla, so a simulator cannot see what most cards do. Optimizing
 against it would cut the card whose text the engine ignores and keep the vanilla
 body with better stats — confidently wrong advice. Consistency depends on cost
@@ -1189,10 +1220,10 @@ covering every card type including 322 Units and 157 Champion Units. A legal
 deck builds and validates from it with no issues, and the engine plays complete
 games with it — 300 games, all decided, heuristic 58.7% ± 5.5 against random.
 
-72 of those cards carry an ability and 14 a keyword. The keyword figure is low
-against the 100 that parse because keywords ride the same all-or-nothing rule:
-a card whose other clause is unreadable keeps neither. 11 create Tokens and 6
-carry Accelerate.
+79 of those cards carry an ability and 14 a keyword. The keyword figure is low
+against the 105 that parse because keywords ride the same all-or-nothing rule:
+a card whose other clause is unreadable keeps neither. 11 create Tokens, 6
+carry Accelerate, 5 return a card to hand and 3 grant a keyword.
 
 What it still cannot supply:
 
@@ -1234,7 +1265,7 @@ would be worse than none — "Deal 6 to it unless its controller has you draw 2"
 reduced to "deal 6" is a card that plays, looks right, and is wrong.
 
 It covers `Draw N`, `Deal N to a unit [at a battlefield]`, `Give a unit +N
-Might this turn`, `Kill`, `Ready`, `Buff`, `Heal`, `Discard N`, `Channel N
+Might this turn`, `Give a unit <KEYWORD> [N] this turn`, `Kill`, `Ready`, `Buff`, `Heal`, `Discard N`, `Channel N
 rune(s) [exhausted]`, `ADD` resources, `Gain N XP` and
 `Return <a unit|me|a <type> from your trash> to <its|my|your> owner's hand`; the self-targeting forms
 (`Ready/Buff/Heal/Exhaust/Recall me`, `Give me +N Might this turn`); sequences
@@ -1254,14 +1285,14 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 100 of the 468 cards that have text**, and the shape of what is
+**Coverage is 105 of the 468 cards that have text**, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 100 |
-| Blocked | 368 |
+| Fully parsed | 105 |
+| Blocked | 363 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 3 or 4 times, everything else once or
@@ -1301,7 +1332,8 @@ See [State predicates](#state-predicates).
 **Additional Costs then took it 74 → 78**, the last of the two best-measured
 investments. See [Additional Costs](#additional-costs-rule-3562).
 
-**Tokens took it 78 → 89**, **Accelerate 89 → 95**, and **zone movement 95 → 100.**
+**Tokens took it 78 → 89**, **Accelerate 89 → 95**, **zone movement 95 → 100**, and
+**effect-granted keywords plus two wider conditions 100 → 105.**
 
 #### How the ranking was measured wrong, and what fixed it
 
@@ -1336,8 +1368,9 @@ one mechanic at a time and then in build order:
 | The 8 refused keywords | +11 |
 | **Zone movement** — now built | **+8 projected, +5 delivered** |
 | **Accelerate (805)** — now built | **+5 projected, +6 delivered** |
-| Statics beyond scope-plus-grant | +4 |
-| Keywords granted by an effect ("give a unit ASSAULT 3") | +4 |
+| **Keywords granted by an effect** — now built | **+2 projected, +3 delivered** |
+| **Wider `controls` predicates** — now built | **+2 delivered** |
+| Statics beyond scope-plus-grant, minus the two now readable | +2 |
 | Durations and delayed effects ("the next spell you play…") | +3 |
 | Counting / dynamic values | +2 |
 | Non-standard ability costs | +2 |
@@ -1370,23 +1403,36 @@ round of this to do.
 
 What the corpus is blocked on now, in the order measurement puts them:
 
-1. **Statics beyond a scope plus a grant** — "My Might is increased by your
-   points" (dynamic), "Units you play this turn enter ready" (a duration),
-   "opponents can only play units to their base" (a rule change). +4. The
-   scope-plus-grant form is built and took the corpus from 58 to 68; what is
-   left in this category each wants a different mechanic.
-2. **Keywords granted by an effect** — "Give a unit ASSAULT 3 this turn". +4.
-   A static with a duration and a chosen subject, which is why it is refused
-   today rather than read as the card having the keyword itself.
-3. **The seven still-refused keywords**, each blocked on a mechanic: facedown
-   cards (Hidden), Attach (Equip, Weaponmaster, Quick-Draw), Predict (Vision),
-   Power of any Domain (Deflect). Repeat is blocked on nothing and worth +0.
-4. **Conditional and modal effects** — "if this kills it", "unless its
-   controller…", "choose one •…", "for each…". The effect model has no
-   outcome conditions, no counting and no modes.
-5. **Non-standard ability costs** — "Spend my buff:", "Recycle 1 from your
-   trash:", "you may exhaust me to …". `ActivatedAbility.cost` is Energy, Power
-   and the exhaust; 16 cards want more.
+1. **Hidden (811) and the Hide action (421)** — +4, and the largest single
+   mechanic left. It is also the most expensive: facedown cards are a
+   hidden-information mechanic the state model has no representation for, and
+   it reaches `view.ts`. Four cards print a bare `HIDDEN`.
+2. **Counting and dynamic values** — "draw 1 for each of your MIGHTY units",
+   "I have ASSAULT equal to the number of enemy units here". +3. `CostCount`
+   already does this shape for discounts; effects and statics would want the
+   same idea.
+3. **Durations and delayed effects** — "the next spell you play this turn costs
+   5 less", "opponents can't play cards this turn". +3, but three cards wanting
+   three different mechanics.
+4. **The rest of statics beyond a scope plus a grant** — +2 now that the two
+   readable predicates are in. "My Might is increased by your points" is
+   dynamic (see 2), and "While I'm attacking or defending alone" needs a
+   combat-role predicate that `Condition` deliberately cannot express, because
+   a condition that reads Might back would recurse through `mightOf`.
+5. **The six other refused keywords**, each blocked on a mechanic: Attach
+   (Equip, Weaponmaster, Quick-Draw), Predict (Vision), Power of any Domain
+   (Deflect). Repeat is blocked on nothing and worth +0.
+6. **Conditional and modal effects** — "if this kills it", "unless its
+   controller…", "choose one •…". +1 and +0. The effect model has no outcome
+   conditions and no modes.
+7. **Non-standard ability costs** — "Spend my buff:", "Recycle 1 from your
+   trash:", "you may exhaust me to …". +2. `ActivatedAbility.cost` is Energy,
+   Power and the exhaust; 16 cards want more.
+
+**This is where the curve flattens.** The four rounds after Additional Costs
+delivered +11, +6, +5 and +5; everything above is +4 or less, and the two
+largest each need a subsystem rather than an extension. Coverage past ~120
+means paying subsystem prices for three or four cards at a time.
 
 Self-targeting was on this list before keywords and triggers, and unlocked
 **nothing** — every self-targeting card was blocked on something else. That is

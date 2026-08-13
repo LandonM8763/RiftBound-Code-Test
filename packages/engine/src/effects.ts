@@ -451,6 +451,22 @@ function applyEffect(
       return context.afterMove(moved, controller, destination, [target], events);
     }
 
+    // 801.3.a: a granted keyword is as real as a printed one. Stored on the
+    // recipient because 317.2.c expires it there, alongside `mightBonus`.
+    case 'grantKeyword': {
+      if (target === undefined || !onBoard(state, target)) {
+        return state;
+      }
+      events.push({ type: 'keywordGranted', unit: target, keyword: effect.keyword });
+      return withEntity(state, target, (current) => ({
+        ...current,
+        // 807.2/814.2 sum valued keywords and 810.2/815.2 make unvalued ones
+        // redundant. Both are `keywordValue`/`hasKeyword`'s job, so this
+        // appends rather than deduplicating.
+        grantedKeywords: [...current.grantedKeywords, effect.keyword],
+      }));
+    }
+
     // "Return it to its owner's hand." Rule 412 lists no Return action, so this
     // is a plain zone move — and deliberately not a Recall (455), which keeps
     // the Permanent on the Board at its owner's Base with damage and statuses
@@ -548,6 +564,10 @@ function clearCounters(state: GameState, entity: EntityId): GameState {
     buffs: 0,
     damage: 0,
     mightBonus: 0,
+    // A keyword granted "this turn" is as much a thing the Board was doing to
+    // this object as its Buffs are, so 705's reasoning covers it: leaving play
+    // ends it, rather than it waiting in the trash for 317.2.c.
+    grantedKeywords: [],
     // Exhaustion is a state of a Game Object on the Board (414-415) and means
     // nothing in a hand, deck or trash. The Combat and Kill sites in `reduce`
     // already cleared it by hand; clearing it here too is what makes every

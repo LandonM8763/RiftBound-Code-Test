@@ -1,6 +1,7 @@
 import type { CardType } from './card.js';
 import type { Condition } from './condition.js';
 import type { Domain } from './domain.js';
+import type { Keyword } from './keyword.js';
 
 /**
  * Card effects as data, not code.
@@ -181,7 +182,22 @@ export type Effect =
    * Board with its damage and statuses intact (458.1). This takes it off the
    * Board entirely, so 705 strips its Buffs like any other departure.
    */
-  | { readonly kind: 'toHand' };
+  | { readonly kind: 'toHand' }
+  /**
+   * "Give a unit ASSAULT 3 this turn" — grant a keyword until end of turn.
+   *
+   * Rule 801.3.a makes a granted keyword do exactly what a printed one does, so
+   * the engine reads both through `keywordsOf` and nothing downstream can tell
+   * them apart. 317.2.c expires it, which is why it is stored on the receiving
+   * Unit beside `mightBonus` rather than as a static on the granting card: the
+   * Spell that said it is in the trash by the time the keyword matters, and a
+   * static stops the moment its source leaves the Board (365).
+   *
+   * Only the "this turn" wording is read. A grant with no stated duration would
+   * have to persist, which is a different mechanic with different storage, so
+   * the parser refuses it rather than guessing at an expiry.
+   */
+  | { readonly kind: 'grantKeyword'; readonly keyword: Keyword };
 
 /**
  * Recycle (rule 416) is deliberately **not** an effect primitive.

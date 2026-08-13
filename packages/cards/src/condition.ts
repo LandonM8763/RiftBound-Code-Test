@@ -52,6 +52,15 @@ export type Condition =
       readonly tag?: string | undefined;
       /** "another Dragon" — the source does not count toward the total. */
       readonly excludeSelf?: boolean | undefined;
+      /**
+       * "another unit **here**" (355.9) — counted only at the source's own
+       * Battlefield.
+       *
+       * Source-relative, so it needs a source to mean anything; a source in a
+       * Base names no Battlefield and the count is 0. The same restriction
+       * `StaticScope.here` applies, spelled the same way.
+       */
+      readonly here?: boolean | undefined;
     }
   /**
    * "If an opponent's score is within 3 points of the Victory Score" (194.3).

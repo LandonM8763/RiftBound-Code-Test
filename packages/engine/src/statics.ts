@@ -159,6 +159,14 @@ export function keywordsOf(state: GameState, unit: EntityId): readonly Keyword[]
     }
   }
 
+  // "Give a unit ASSAULT 3 this turn" (801.3.a). Unlike a static this is *on*
+  // the Unit, because the card that granted it is in the trash by now; 317.2.c
+  // is what takes it away again.
+  const untilEndOfTurn = getEntity(state, unit).grantedKeywords;
+  if (untilEndOfTurn.length > 0) {
+    (granted ??= []).push(...untilEndOfTurn);
+  }
+
   return granted === undefined ? printed : [...printed, ...granted];
 }
 

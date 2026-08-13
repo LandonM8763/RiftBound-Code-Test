@@ -692,6 +692,7 @@ function payAdditionalCost(
         damage: 0,
         exhausted: false,
         mightBonus: 0,
+        grantedKeywords: [],
         buffs: 0,
       }));
     },
@@ -1251,6 +1252,7 @@ function resolveCombat(
       damage: 0,
       exhausted: false,
       mightBonus: 0,
+      grantedKeywords: [],
       buffs: 0,
     }));
   }
@@ -1633,9 +1635,14 @@ function ending(state: GameState): ReduceResult {
       healed.push(entity.id);
       next = withEntity(next, entity.id, (current) => ({ ...current, damage: 0 }));
     }
-    // 317.2.c: all "this turn" effects expire simultaneously.
-    if (entity.mightBonus !== 0) {
-      next = withEntity(next, entity.id, (current) => ({ ...current, mightBonus: 0 }));
+    // 317.2.c: all "this turn" effects expire simultaneously — the Might a
+    // card granted and the keywords it granted go together.
+    if (entity.mightBonus !== 0 || entity.grantedKeywords.length > 0) {
+      next = withEntity(next, entity.id, (current) => ({
+        ...current,
+        mightBonus: 0,
+        grantedKeywords: [],
+      }));
     }
   }
 

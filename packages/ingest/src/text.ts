@@ -137,6 +137,25 @@ const MODELLED_KEYWORDS: readonly {
   { pattern: /^ganking$/i, build: () => ({ kind: 'ganking' }) },
 ];
 
+/**
+ * A modelled keyword by name, for the "give a unit X this turn" grant.
+ *
+ * Reuses `MODELLED_KEYWORDS` rather than a second table, so a keyword the
+ * engine does not implement cannot be granted by an effect either — 801.3.a
+ * makes a granted keyword do exactly what a printed one does, and granting one
+ * the engine ignores would be the same wrong card as printing it.
+ */
+function keywordNamed(name: string, value: string | undefined): Keyword | undefined {
+  const line = value === undefined ? name : `${name} ${value}`;
+  for (const rule of MODELLED_KEYWORDS) {
+    const match = line.match(rule.pattern);
+    if (match !== null) {
+      return rule.build(match);
+    }
+  }
+  return undefined;
+}
+
 /** A clause that consumes the whole line, mapping to zero or more effects. */
 interface ClauseRule {
   readonly pattern: RegExp;
@@ -258,6 +277,39 @@ const CLAUSES: readonly ClauseRule[] = [
           },
         ],
         target: NO_TARGET,
+      };
+    },
+  },
+  {
+    /**
+     * "Give a unit ASSAULT 3 this turn" (801.3.a).
+     *
+     * The `this turn` is required, not optional. A grant with no stated
+     * duration would have to persist past the Ending Phase, which is different
+     * storage and a different mechanic — so "Give a unit ASSAULT 2" is refused
+     * rather than quietly given an expiry the card never printed.
+     *
+     * Only one keyword per clause. "Give a unit SHIELD 3 and TANK this turn"
+     * is split on "and" before it reaches here and fails, which is the correct
+     * outcome: half a grant is the wrong card.
+     */
+    pattern: /^give (?:an? (friendly |enemy )?unit|(me)) ([a-z]+)(?:\s+(\d+))? this turn$/i,
+    build: (m) => {
+      const keyword = keywordNamed(m[3] ?? '', m[4]);
+      if (keyword === undefined) {
+        return undefined;
+      }
+      const scope = (m[1] ?? '').trim().toLowerCase();
+      return {
+        effects: [{ kind: 'grantKeyword', keyword }],
+        target:
+          m[2] !== undefined
+            ? SELF
+            : scope === 'friendly'
+              ? UNIT_FRIENDLY
+              : scope === 'enemy'
+                ? UNIT_ENEMY
+                : UNIT_ANY,
       };
     },
   },
@@ -757,6 +809,48 @@ const STATE_PREDICATES: readonly {
     },
   },
   {
+    // "While you have 8+ runes" — Channelled Runes are on the Board (161.1.a),
+    // so this is an ordinary `controls` count rather than a new predicate.
+    pattern: /^you have (\d+)\+? or more ([A-Za-z'-]+?)s?$|^you have (\d+)\+ ([A-Za-z'-]+?)s?$/i,
+    build: (m) => {
+      const min = count(m[1] ?? m[3] ?? '');
+      const noun = (m[2] ?? m[4] ?? '').toLowerCase();
+      if (min === undefined) {
+        return undefined;
+      }
+      const what = CARD_TYPES.find((type) => type === noun);
+      return {
+        kind: 'controls',
+        who: 'you',
+        what: what ?? 'unit',
+        min,
+        ...(what === undefined ? { tag: noun } : {}),
+      };
+    },
+  },
+  {
+    // "While you have another unit here" (355.9).
+    pattern: /^you have (a|an|another|one|two|three|\d+)(?: or more)? ([A-Za-z'-]+?)s? here$/i,
+    build: (m) => {
+      const word = (m[1] ?? '').toLowerCase();
+      const min = word === 'a' || word === 'an' || word === 'another' ? 1 : count(word);
+      if (min === undefined) {
+        return undefined;
+      }
+      const noun = (m[2] ?? '').toLowerCase();
+      const what = CARD_TYPES.find((type) => type === noun);
+      return {
+        kind: 'controls',
+        who: 'you',
+        what: what ?? 'unit',
+        min,
+        here: true,
+        ...(what === undefined ? { tag: noun } : {}),
+        ...(word === 'another' ? { excludeSelf: true } : {}),
+      };
+    },
+  },
+  {
     pattern: /^an opponent controls a battlefield$/i,
     build: () => ({ kind: 'controls', who: 'opponent', what: 'battlefield', min: 1 }),
   },
@@ -890,11 +984,26 @@ export function parseStatic(line: string): StaticAbility | undefined {
   let text = line.replace(/[.]+$/, '').trim();
   let condition: Condition | undefined;
 
-  const whileClause = text.match(/^while i'?m (buffed|at a battlefield),\s*(.+)$/i);
+  // "While <predicate>, <static>". The two source-relative predicates are named
+  // here because they are about the source rather than the state, and
+  // `parseStatePredicate` deliberately does not answer those; anything else is
+  // an ordinary state predicate and goes through the shared grammar, so
+  // "While you have 8+ runes" needs no rule of its own.
+  const whileClause = text.match(/^while (.+?),\s*(.+)$/i);
   if (whileClause !== null) {
-    condition = /buffed/i.test(whileClause[1] ?? '')
-      ? { kind: 'buffed' }
-      : { kind: 'atBattlefield' };
+    const predicate = (whileClause[1] ?? '').trim();
+    const source = predicate.match(/^i'?m (buffed|at a battlefield)$/i);
+    condition =
+      source !== null
+        ? /buffed/i.test(source[1] ?? '')
+          ? { kind: 'buffed' }
+          : { kind: 'atBattlefield' }
+        : parseStatePredicate(predicate);
+    // A "while" the grammar cannot read must fail the card: dropping it would
+    // make the static unconditional, which is strictly stronger than printed.
+    if (condition === undefined) {
+      return undefined;
+    }
     text = whileClause[2] ?? '';
   } else {
     // "If you control another Dragon, I enter ready" and "I enter ready if you

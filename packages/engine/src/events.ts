@@ -1,4 +1,4 @@
-import type { Domain } from '@riftbound/cards';
+import type { Domain, Keyword } from '@riftbound/cards';
 
 import type { EntityId, Outcome, Phase, PlayerId } from './state.js';
 
@@ -139,6 +139,8 @@ export type GameEvent =
   | { readonly type: 'xpChanged'; readonly player: PlayerId; readonly amount: number }
   /** Rule 428: Units died. */
   | { readonly type: 'unitsKilled'; readonly units: readonly EntityId[] }
+  /** Rule 801.3.a: a keyword was granted to a Unit until end of turn. */
+  | { readonly type: 'keywordGranted'; readonly unit: EntityId; readonly keyword: Keyword }
   /** Cards were put into their owner's hand — a bounce or a retrieval. */
   | {
       readonly type: 'returnedToHand';

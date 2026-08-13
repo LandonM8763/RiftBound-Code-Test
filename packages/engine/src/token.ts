@@ -103,6 +103,7 @@ export function createTokens(
           exhausted: !ready,
           damage: 0,
           mightBonus: 0,
+          grantedKeywords: [],
           buffs: 0,
         },
       },

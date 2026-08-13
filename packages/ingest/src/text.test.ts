@@ -311,12 +311,21 @@ describe('keywords (rules 800-828)', () => {
     expect(parsed.keywords).toEqual([{ kind: 'shield', value: 1 }, { kind: 'tank' }]);
   });
 
-  it('refuses a keyword granted by an effect for a duration', () => {
-    // "Give a unit ASSAULT 3 this turn" is a chosen Unit, for one turn. The
-    // static model grants for as long as its source is on the Board and to a
-    // scope rather than a choice, so reading it as one would give the wrong
-    // Unit the keyword and never take it away.
-    expect(parseCardText('Give a unit ASSAULT 3 this turn.').unparsed).toHaveLength(1);
+  it('801.3.a: grants a keyword by effect, to a chosen Unit for one turn', () => {
+    // This was refused while the only way to say it was a static, which grants
+    // to a *scope* for as long as its source is on the Board — the wrong Unit,
+    // and never taken away. `grantKeyword` puts it on the recipient instead,
+    // where 317.2.c expires it.
+    expect(parseCardText('Give a unit ASSAULT 3 this turn.').effect).toEqual({
+      target: { kind: 'unit', scope: 'any' },
+      effects: [{ kind: 'grantKeyword', keyword: { kind: 'assault', value: 3 } }],
+    });
+  });
+
+  it('refuses a grant with no stated duration', () => {
+    // A permanent grant is different storage and a different mechanic; giving
+    // it an expiry the card never printed would be a guess.
+    expect(parseCardText('Give a unit ASSAULT 2.').unparsed).toHaveLength(1);
   });
 
   it('desugars Deathknell into the "when I die" trigger it is short for (808.1.c)', () => {
@@ -479,6 +488,69 @@ describe('tokens (rules 179-187)', () => {
       condition: { event: 'played', subject: 'self' },
       effect: { effects: [{ kind: 'createToken', token: 'recruit' }] },
     });
+  });
+});
+
+describe('granted keywords and wider conditions', () => {
+  it('grants to "me" as well as to a chosen Unit', () => {
+    expect(parseCardText('Give me GANKING this turn.').effect).toEqual({
+      target: { kind: 'self' },
+      effects: [{ kind: 'grantKeyword', keyword: { kind: 'ganking' } }],
+    });
+  });
+
+  it('narrows the recipient by scope', () => {
+    expect(parseCardText('Give a friendly unit TANK this turn.').effect?.target).toEqual({
+      kind: 'unit',
+      scope: 'friendly',
+    });
+  });
+
+  it('refuses a keyword the engine does not model', () => {
+    // 801.3.a makes a granted keyword do what a printed one does, so granting
+    // one the engine ignores is the same wrong card as printing it.
+    expect(parseCardText('Give a unit DEFLECT this turn.').unparsed).toHaveLength(1);
+  });
+
+  it('refuses two keywords in one clause', () => {
+    // Split on "and" before it reaches the clause grammar; half a grant is the
+    // wrong card, so the whole line fails.
+    expect(parseCardText('Give a unit SHIELD 3 and TANK this turn.').unparsed.length)
+      .toBeGreaterThan(0);
+  });
+
+  it('161.1.a: reads "while you have 8+ runes" as a count of the Board', () => {
+    expect(parseCardText('While you have 8+ runes, I have +4 Might.').abilities?.statics?.[0])
+      .toEqual({
+        affects: { who: 'self' },
+        grant: { might: 4 },
+        condition: { kind: 'controls', who: 'you', what: 'rune', min: 8 },
+      });
+  });
+
+  it('355.9: reads "another unit here" with both here and excludeSelf', () => {
+    expect(
+      parseCardText('While you have another unit here, I have +1 Might.').abilities?.statics?.[0],
+    ).toEqual({
+      affects: { who: 'self' },
+      grant: { might: 1 },
+      condition: {
+        kind: 'controls',
+        who: 'you',
+        what: 'unit',
+        min: 1,
+        here: true,
+        excludeSelf: true,
+      },
+    });
+  });
+
+  it('refuses a "while" whose predicate it cannot read', () => {
+    // Dropping the condition would make the static unconditional, which is
+    // strictly stronger than the printed card.
+    expect(
+      parseCardText("While I'm attacking or defending alone, I have +2 Might.").unparsed,
+    ).toHaveLength(1);
   });
 });
 

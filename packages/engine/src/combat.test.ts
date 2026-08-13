@@ -726,6 +726,7 @@ describe('static abilities (rules 363-365)', () => {
           exhausted: false,
           damage: 0,
           mightBonus: 0,
+          grantedKeywords: [],
           buffs: 0,
         },
       },
@@ -736,4 +737,113 @@ describe('static abilities (rules 363-365)', () => {
 
     expect(mightOf(state, theirs)).toBe(0);
   });
+});
+
+/**
+ * Keywords granted by an effect (801.3.a), which expire with 317.2.c.
+ *
+ * The distinction from a static is the whole point: a static grants to a
+ * *scope* and stops the instant its source leaves the Board (365), while the
+ * Spell that says "give a unit ASSAULT 3 this turn" is in the trash long before
+ * the keyword matters. So the grant lives on the recipient, beside `mightBonus`.
+ */
+describe('keywords granted by an effect (rule 801.3.a)', () => {
+  /** "Give a unit TANK this turn." */
+  const EMBOLDEN = makeUnit(1, ['fury'], {
+    id: cardId('G-010'),
+    name: 'Embolden',
+    cost: cost(1),
+    effect: {
+      target: { kind: 'unit', scope: 'friendly' },
+      effects: [{ kind: 'grantKeyword', keyword: { kind: 'tank' } }],
+    },
+  });
+
+  const REGISTRY = CardRegistry.from([
+    LEGEND,
+    CHAMPION,
+    SMALL,
+    BIG,
+    EMBOLDEN,
+    FURY_RUNE,
+    ...BATTLEFIELDS,
+  ] as CardDefinition[]);
+
+  function game(seed: string): GameState {
+    const list: DeckList = {
+      legend: LEGEND.id,
+      champion: CHAMPION.id,
+      main: [
+        ...Array.from({ length: 6 }, () => SMALL.id),
+        ...Array.from({ length: 3 }, () => BIG.id),
+        ...Array.from({ length: 6 }, () => EMBOLDEN.id),
+      ],
+      runes: Array.from({ length: 8 }, () => FURY_RUNE.id),
+      battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
+    };
+    let state = pastMulligan(
+      createGame({ decks: [list, list], registry: REGISTRY, seed }).state,
+    );
+    while (state.phase !== 'main' && !isOver(state)) {
+      state = reduce(state, { type: 'resolvePhase' }).state;
+    }
+    return state;
+  }
+
+  it('reads as though printed, and sorts damage assignment (815.1.b)', () => {
+    let state = game('grant-effect');
+    const player = state.activePlayer;
+    const [a, first] = place(state, player, SMALL, 0);
+    state = a;
+    const [b, second] = place(state, player, BIG, 0);
+    state = b;
+
+    state = withEntity(state, second, (e) => ({ ...e, grantedKeywords: [{ kind: 'tank' }] }));
+
+    expect(keywordsOf(state, second)).toEqual([{ kind: 'tank' }]);
+    expect(keywordsOf(state, first)).toEqual([]);
+    // 815.1.b: the Tank takes lethal damage before the Unit without it, even
+    // though `first` is listed ahead of it.
+    const assignment = assignDamage(state, 5, [first, second]);
+    expect(assignment.get(second)).toBeGreaterThan(0);
+  });
+
+  it('317.2.c: expires in the Ending Phase, beside the turn`s Might', () => {
+    let state = game('grant-expiry');
+    const player = state.activePlayer;
+    const [placed, unit] = place(state, player, SMALL, 0);
+    state = withEntity(placed, unit, (e) => ({
+      ...e,
+      grantedKeywords: [{ kind: 'tank' }],
+      mightBonus: 2,
+    }));
+
+    expect(keywordsOf(state, unit)).toEqual([{ kind: 'tank' }]);
+
+    state = reduce(state, { type: 'endTurn' }).state;
+    while (state.phase === 'ending' && !isOver(state)) {
+      state = reduce(state, { type: 'resolvePhase' }).state;
+    }
+
+    // Both "this turn" effects go together.
+    expect(state.entities[unit]!.grantedKeywords).toEqual([]);
+    expect(state.entities[unit]!.mightBonus).toBe(0);
+    expect(keywordsOf(state, unit)).toEqual([]);
+    checkInvariants(state);
+  });
+
+  it('807.2: a granted valued keyword sums with a printed one', () => {
+    let state = game('grant-sum');
+    const player = state.activePlayer;
+    const [placed, unit] = place(state, player, SMALL, 0);
+    state = withEntity(placed, unit, (e) => ({
+      ...e,
+      grantedKeywords: [{ kind: 'assault', value: 2 }, { kind: 'assault', value: 1 }],
+    }));
+
+    // Might 2, plus Assault 3 while attacking.
+    expect(mightOf(state, unit, 'attacker')).toBe(5);
+    expect(mightOf(state, unit)).toBe(2);
+  });
+
 });

@@ -122,10 +122,27 @@ function countControlled(
     return state.battlefields.filter((battlefield) => battlefield.controller === seat).length;
   }
 
+  // 355.9: "here" is the source's own Battlefield. A source that names none —
+  // one in a Base, or a card still in hand — counts nothing.
+  let here: number | undefined;
+  if (condition.here === true) {
+    const at = source === undefined ? undefined : state.entities[source]?.location;
+    if (at?.kind !== 'battlefield') {
+      return 0;
+    }
+    here = at.index;
+  }
+
   let total = 0;
   for (const entity of boardEntities(state, seat)) {
     if (condition.excludeSelf === true && entity === source) {
       continue;
+    }
+    if (here !== undefined) {
+      const at = state.entities[entity]?.location;
+      if (at?.kind !== 'battlefield' || at.index !== here) {
+        continue;
+      }
     }
     const card = entityCard(state, entity);
     if (card.type !== (condition.what as ControlledKind)) {
@@ -151,7 +168,10 @@ function boardEntities(state: GameState, player: PlayerId): EntityId[] {
   const found: EntityId[] = [];
   const seat = state.players[player];
   if (seat !== undefined) {
-    found.push(...seat.zones.base, ...seat.zones.legendZone);
+    // Channelled Runes are on the Board: 161.1.a has a Rune stay there until it
+    // is Recycled or otherwise removed, which is what makes "while you have 8+
+    // runes" a question this predicate can answer at all.
+    found.push(...seat.zones.base, ...seat.zones.legendZone, ...seat.zones.runes);
   }
   for (const battlefield of state.battlefields) {
     for (const unit of battlefield.units) {
