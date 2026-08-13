@@ -1,7 +1,7 @@
 import type { Action } from './actions.js';
 import { effectOf, needsTargetChoice, type CardEffect, type TargetSpec } from '@riftbound/cards';
 
-import { activatableAbilities } from './abilities.js';
+import { abilityFor, activatableAbilities } from './abilities.js';
 import { legalDestinations, legalTargets } from './effects.js';
 import { standardMoves } from './move.js';
 import { playableFromHand, validUnitLocations } from './play.js';
@@ -38,14 +38,37 @@ export function legalActions(state: GameState, player: PlayerId): readonly Actio
   const showdown = isShowdown(state);
   const actions: Action[] = [];
 
-  // 383.3.a: a pending "you may" trigger blocks everything else — its
-  // controller finalizes it, or it leaves the Chain (383.3.e.2.b).
+  // Rule 402, step 2: a pending Ability blocks everything else until its
+  // controller makes the choices it needs — the "you may" of 402.1 and the
+  // targets of 402.2. Both ride on one action, because the rulebook puts them
+  // in one step.
   const top = state.chain[state.chain.length - 1];
   if (top !== undefined && top.pending && top.controller === player) {
-    return [
-      { type: 'resolveTrigger', perform: true },
-      { type: 'resolveTrigger', perform: false },
-    ];
+    // Only an Ability is ever pending: 359 finalizes a card atomically, so a
+    // Chain item with no `ability` cannot be waiting at step 2.
+    const ability = top.ability === null ? undefined : abilityFor(state, top.entity, top.ability);
+    if (ability === undefined) {
+      return [];
+    }
+    const spec = ability.effect.target;
+    const targets = needsTargetChoice(spec) ? legalTargets(state, player, spec) : [undefined];
+    const pendingActions: Action[] = [];
+    for (const target of targets) {
+      for (const destination of choicesOfDestination(state, player, ability.effect)) {
+        pendingActions.push({
+          type: 'resolveTrigger',
+          perform: true,
+          ...(target === undefined ? {} : { target }),
+          ...(destination === undefined ? {} : { destination }),
+        });
+      }
+    }
+    // 402.4.b: declining is offered only for a genuine "you may". A mandatory
+    // ability pauses here to choose, and its controller may not refuse.
+    if ('optional' in ability && ability.optional === true) {
+      pendingActions.push({ type: 'resolveTrigger', perform: false });
+    }
+    return pendingActions;
   }
 
   // 377: Activated Abilities. One action per legal target, for the same reason

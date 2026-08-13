@@ -101,29 +101,24 @@ quantity in `GameConfig` cites its rule number.
 
 What is **not** built yet, in rough dependency order:
 
-1. **Choices for Triggered Abilities.** A Triggered Ability's target is not
-   chosen on the way onto the Chain — `queueTriggers` carries `null` — so a
-   trigger whose effect targets currently does nothing. Rule 402.2 makes those
-   choices at the Make Relevant Choices step of resolution, which needs the
-   sub-action protocol. Activated abilities and played cards are unaffected:
-   both choose at play time, as 355.8 requires.
-2. **The keywords that need mechanics the engine has no representation for.**
+1. **The keywords that need mechanics the engine has no representation for.**
    Assault, Shield, Tank, Backline and Ganking are built as engine rules and
    **Accelerate desugars** (805.1.a is an Optional Additional Cost plus "if you
    do, I enter ready", and both halves now exist). The rest are refused with a
    stated reason in `UNMODELLED_KEYWORDS`, and each reason is a mechanic rather
    than a keyword: Deflect wants a Power cost of any Domain that `Cost` cannot
    express, Hidden wants facedown cards, Equip and Weaponmaster want Attach,
-   Vision wants Predict (436) — a choice made during resolution, so item 1's
-   protocol. **Repeat is the exception: it is no longer blocked** — 820.1.d is
+   Vision wants Predict (436) — a look at the top card of a deck, which is a
+   mechanic rather than a choice-point problem now that 402.2 is built.
+   **Repeat is the exception: it is no longer blocked** — 820.1.d is
    the same optional-cost shape — but it measured **+0 cards** and so is not
    built. Its reason in `UNMODELLED_KEYWORDS` records that rather than a
    blocker, which is the honest thing for it to say.
-3. **Statics that are not a scope plus a grant.** Might modifiers, granted
+2. **Statics that are not a scope plus a grant.** Might modifiers, granted
    keywords and "enters ready" are built; a *dynamic* Might ("increased by your
    points"), a duration ("units you play this turn enter ready") and a rule
    change ("opponents can only play units to their base") are not.
-4. **Abilities on Battlefields.** A Battlefield is not a Game Object here —
+3. **Abilities on Battlefields.** A Battlefield is not a Game Object here —
    `BattlefieldState` holds a card id, not an entity — so nothing sweeps one for
    abilities. Ingest drops them and records a gap rather than shipping a card
    that looks modelled and silently never runs. 12 cards in the corpus. The same
@@ -155,7 +150,9 @@ would with the cards that exist today:
   has each player order their own triggers, starting with the Turn Player and
   proceeding in turn order. `triggersFor` honours the *between-player* order and
   decides the within-player tie-break for them, deterministically. Making it a
-  choice needs the same sub-action protocol as the next item.
+  choice needs a decision point *between* queueing and finalizing, which is a
+  different thing from rule 402's step 2 — that one belongs to a single ability
+  and is built.
 - **Discount order is chosen for the player, not by them.** Rule 356.4.c.1 lets
   a player order the discounts on a component, and 356.4.e makes that choice
   matter. `costs.ts` applies bounded discounts before unbounded ones, which is
@@ -500,10 +497,27 @@ effect is just an effect.
   controller's own turn, Open State only), 380 (source on the Board), 377
   (the cost is payable, exhausting the source included when printed — 414) and
   801.1 (a Dependent Keyword's condition holds).
-- **An optional trigger goes on the Chain *pending*.** Rule 383.3.a makes
-  performing a "you may" its controller's choice at finalization, and
-  383.3.e.2.b removes it from the Chain if they decline, so a pending item is
-  the only thing `legalActions` will offer its controller until they answer.
+- **A trigger with anything to decide goes on the Chain *pending*, and rule 402
+  is why.** Rule 400 keeps an Ability a Pending Item until it has completed the
+  steps of playing, and step 2 (402) holds *both* decisions: 402.1 is the "you
+  may" and 402.2 is "all choices required for this ability, such as targets,
+  modes, or other relevant decisions". So one `resolveTrigger` action carries
+  both, `legalActions` offers one per legal target, and a pending item is the
+  only thing its controller may do until they answer.
+
+  **This is the one decision point a Triggered Ability has, and it is not
+  mid-resolution.** An earlier version of this file claimed 402.2 needed the
+  sub-action protocol; it does not — the protocol is for choices *inside* a
+  resolving multi-step effect, and this one is a step of playing the ability.
+  Getting that wrong left `queueTriggers` carrying `null`, which made every
+  targeting trigger resolve into nothing: 8 of the 45 in the real corpus were
+  silently doing so, cards that ingested cleanly and looked modelled.
+
+  Two rules fall out of the same step. **402.4**: an ability with no legal
+  choice available is removed at step 2 and never becomes a Finalized Chain
+  Item — 402.4.a is explicit that this is *not* being countered, so nothing
+  observes it. **402.4.b**: its controller may not decline this stage, so
+  `perform: false` is offered only for a genuine "you may" (383.3.e.2.b).
 - **`triggersUsed` counts per-turn limits** (383.3.e), keyed by source and
   ability index and cleared in the Ending Phase.
 

@@ -1078,3 +1078,169 @@ describe('Dependent Keywords (rules 801.1, 812)', () => {
     }
   });
 });
+
+/**
+ * Choices for Triggered Abilities (rule 402, step 2).
+ *
+ * The rulebook puts both decisions in one step: 402.1 is the "you may" and
+ * 402.2 is "all choices required for this ability, such as targets". Rule 400
+ * keeps an Ability Pending until it has completed the steps of playing, so an
+ * ability with a choice to make waits at step 2 whether or not it is optional.
+ *
+ * Before this, `queueTriggers` carried `null` and a targeting trigger resolved
+ * into nothing at all — a card that ingested cleanly, looked modelled, and was
+ * silently wrong.
+ */
+describe('choices for Triggered Abilities (rule 402)', () => {
+  /** "When you play me, deal 2 to a unit." — mandatory, and it targets. */
+  const SNIPER = makeUnit(2, ['fury'], {
+    id: cardId('C-030'),
+    name: 'Sniper',
+    cost: cost(1),
+    abilities: {
+      triggered: [
+        {
+          condition: { event: 'played', subject: 'self' },
+          effect: {
+            target: { kind: 'unit', scope: 'enemy' },
+            effects: [{ kind: 'dealDamage', amount: 2 }],
+          },
+        },
+      ],
+    },
+  });
+
+  const REGISTRY = CardRegistry.from([
+    LEGEND,
+    CHAMPION,
+    PLAIN,
+    SNIPER,
+    RUNE,
+    ...BATTLEFIELDS,
+  ] as CardDefinition[]);
+
+  function game(seed: string): GameState {
+    const list: DeckList = {
+      legend: LEGEND.id,
+      champion: CHAMPION.id,
+      main: [
+        ...Array.from({ length: 8 }, () => PLAIN.id),
+        ...Array.from({ length: 6 }, () => SNIPER.id),
+      ],
+      runes: Array.from({ length: 8 }, () => RUNE.id),
+      battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
+    };
+    let state = createGame({ decks: [list, list], registry: REGISTRY, seed }).state;
+    while (state.phase === 'mulligan') {
+      state = reduce(state, { type: 'mulligan', cards: [] }).state;
+    }
+    while (state.phase !== 'main' && !isOver(state)) {
+      state = reduce(state, { type: 'resolvePhase' }).state;
+    }
+    return withPlayer(state, state.activePlayer, (seat) => ({
+      ...seat,
+      pool: { energy: 6, power: seat.pool.power },
+    }));
+  }
+
+  /** Put an enemy Unit on the Board for the trigger to shoot at. */
+  function withEnemy(state: GameState): [GameState, EntityId] {
+    const enemy = playerId((state.activePlayer + 1) % state.players.length);
+    const card = state.players[enemy]!.zones.mainDeck.find(
+      (candidate) => state.entities[candidate]!.card === PLAIN.id,
+    );
+    if (card === undefined) {
+      throw new Error('no enemy Plain left');
+    }
+    return [moveEntity(state, card, playerLocation(enemy, 'base')), card];
+  }
+
+  function inHand(state: GameState, id: CardDefinition['id']): [GameState, EntityId] {
+    const player = state.activePlayer;
+    const held = state.players[player]!.zones.hand.find(
+      (candidate) => state.entities[candidate]!.card === id,
+    );
+    if (held !== undefined) {
+      return [state, held];
+    }
+    const card = state.players[player]!.zones.mainDeck.find(
+      (candidate) => state.entities[candidate]!.card === id,
+    );
+    if (card === undefined) {
+      throw new Error(`No ${id} left`);
+    }
+    return [moveEntity(state, card, playerLocation(player, 'hand')), card];
+  }
+
+  it('400: a mandatory trigger with a target waits Pending at step 2', () => {
+    const [a, victim] = withEnemy(game('pending'));
+    const [state, card] = inHand(a, SNIPER.id);
+
+    const played = reduce(state, { type: 'playCard', card }).state;
+    const top = played.chain[played.chain.length - 1];
+
+    expect(top?.pending).toBe(true);
+    expect(top?.target).toBeNull();
+    expect(victim).toBeDefined();
+  });
+
+  it('402.2: offers one choice per legal target, and no decline', () => {
+    const [a] = withEnemy(game('offers'));
+    const [b] = withEnemy(a);
+    const [state, card] = inHand(b, SNIPER.id);
+
+    const played = reduce(state, { type: 'playCard', card }).state;
+    const actions = legalActions(played, played.priority!);
+
+    // Two enemy Units, so two ways to make the choice.
+    expect(actions).toHaveLength(2);
+    expect(actions.every((action) => action.type === 'resolveTrigger')).toBe(true);
+    // 402.4.b: a mandatory ability's controller may not decline this stage.
+    expect(actions.some((a2) => a2.type === 'resolveTrigger' && !a2.perform)).toBe(false);
+  });
+
+  it('carries the choice to resolution, so the effect actually happens', () => {
+    const [a, victim] = withEnemy(game('resolve'));
+    const [state, card] = inHand(a, SNIPER.id);
+
+    let next = reduce(state, { type: 'playCard', card }).state;
+    next = reduce(next, { type: 'resolveTrigger', perform: true, target: victim }).state;
+    // Drain the Chain so the ability resolves.
+    let guard = 0;
+    while (next.chain.length > 0 && guard < 12) {
+      next = reduce(next, { type: 'pass' }).state;
+      guard += 1;
+    }
+
+    // This is the whole point: before, the damage was never dealt.
+    expect(next.entities[victim]!.damage).toBe(2);
+    checkInvariants(next);
+  });
+
+  it('402.4: an ability with no legal target never reaches the Chain', () => {
+    // No enemy Units at all, so there is nothing to choose.
+    const [state, card] = inHand(game('no-target'), SNIPER.id);
+    const enemy = playerId((state.activePlayer + 1) % state.players.length);
+    expect(state.players[enemy]!.zones.base).toHaveLength(0);
+
+    const played = reduce(state, { type: 'playCard', card }).state;
+
+    // 402.4: removed at step 2, never a Finalized Chain Item — and 402.4.a says
+    // this is not the ability being countered, so nothing else observes it.
+    expect(played.chain).toHaveLength(0);
+    checkInvariants(played);
+  });
+
+  it('rejects a target the ability could not legally choose', () => {
+    const [a, victim] = withEnemy(game('illegal'));
+    const [state, card] = inHand(a, SNIPER.id);
+    const played = reduce(state, { type: 'playCard', card }).state;
+
+    // The Sniper targets an *enemy* unit; its own controller's Legend is not one.
+    const friendly = played.players[played.activePlayer]!.zones.legendZone[0]!;
+    expect(() =>
+      reduce(played, { type: 'resolveTrigger', perform: true, target: friendly }),
+    ).toThrow(IllegalActionError);
+    expect(victim).toBeDefined();
+  });
+});

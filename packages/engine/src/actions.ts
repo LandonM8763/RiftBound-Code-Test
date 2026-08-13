@@ -62,11 +62,24 @@ export type Action =
       readonly destination?: Location;
     }
   /**
-   * Rule 383.3.a: a "you may" Triggered Ability is performed or declined by its
-   * controller during finalization; declining removes it from the Chain
-   * (383.3.e.2.b).
+   * Rule 402, step 2 of playing an Ability: make the relevant choices.
+   *
+   * The rulebook puts two decisions in this one step, which is why one action
+   * carries both. 402.1 is the "you may" — its controller decides whether to
+   * perform it, and declining removes it from the Chain (383.3.e.2.b). 402.2 is
+   * every other choice the ability needs, "such as targets, modes, or other
+   * relevant decisions".
+   *
+   * A mandatory ability still passes through this step whenever it has
+   * something to choose: 402.4.b says its controller *must* choose, and may not
+   * decline this stage, so `perform` is false only for a genuine "you may".
    */
-  | { readonly type: 'resolveTrigger'; readonly perform: boolean }
+  | {
+      readonly type: 'resolveTrigger';
+      readonly perform: boolean;
+      readonly target?: EntityId;
+      readonly destination?: Location;
+    }
   /**
    * Take the Mulligan (rule 117): set aside these cards, draw that many, then
    * Recycle the set-aside ones. An empty list keeps the opening hand.

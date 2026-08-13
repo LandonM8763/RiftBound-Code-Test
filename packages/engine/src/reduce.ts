@@ -1,4 +1,11 @@
-import { effectOf, isMandatory, type AdditionalCost, type CardDefinition, type Cost } from '@riftbound/cards';
+import {
+  effectOf,
+  isMandatory,
+  needsTargetChoice,
+  type AdditionalCost,
+  type CardDefinition,
+  type Cost,
+} from '@riftbound/cards';
 
 import { IllegalActionError, type Action } from './actions.js';
 import type { GameEvent } from './events.js';
@@ -25,7 +32,12 @@ import {
   type PendingTrigger,
   type TriggerEventInstance,
 } from './abilities.js';
-import { executeEffect, isValidTarget, type EffectContext } from './effects.js';
+import {
+  executeEffect,
+  isValidTarget,
+  legalTargets,
+  type EffectContext,
+} from './effects.js';
 import { totalCost } from './costs.js';
 import { canPay, payFrom, timingAllows, validUnitLocations } from './play.js';
 import { canPayAdditional, payAdditional as performPayment } from './additional.js';
@@ -104,7 +116,7 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     case 'activateAbility':
       return activateAbility(state, action.source, action.index, action.target, action.destination);
     case 'resolveTrigger':
-      return resolveTrigger(state, action.perform);
+      return resolveTrigger(state, action.perform, action.target, action.destination);
     default: {
       const exhaustive: never = action;
       throw new IllegalActionError(`Unknown action: ${JSON.stringify(exhaustive)}`);
@@ -428,7 +440,12 @@ function activateAbility(
  * resolves it immediately: the choice happens at finalization, after which the
  * ability is an ordinary Chain item that has already been passed on.
  */
-function resolveTrigger(state: GameState, perform: boolean): ReduceResult {
+function resolveTrigger(
+  state: GameState,
+  perform: boolean,
+  target: EntityId | undefined,
+  destination: Location | undefined,
+): ReduceResult {
   const player = requirePriority(state);
   const top = state.chain[state.chain.length - 1];
 
@@ -439,10 +456,20 @@ function resolveTrigger(state: GameState, perform: boolean): ReduceResult {
     throw new IllegalActionError(`Player ${player} does not control the pending Triggered Ability`);
   }
 
+  const ability = top.ability === null ? undefined : abilityFor(state, top.entity, top.ability);
+  if (ability === undefined) {
+    throw new IllegalActionError('The pending ability no longer exists');
+  }
+
   const events: GameEvent[] = [];
   const chain = state.chain.slice(0, -1);
 
   if (!perform) {
+    // 402.4.b: only a genuine "you may" may be declined. A mandatory ability
+    // pauses here to make choices, not to be refused.
+    if (!('optional' in ability) || ability.optional !== true) {
+      throw new IllegalActionError('This Triggered Ability is not optional and cannot be declined');
+    }
     events.push({ type: 'triggerDeclined', player, source: top.entity });
     return {
       state: { ...state, chain, passes: 0, priority: chainPriority(state, chain) },
@@ -450,8 +477,20 @@ function resolveTrigger(state: GameState, perform: boolean): ReduceResult {
     };
   }
 
-  // Finalized: it stops being pending and waits on the Chain like any item.
-  const finalized: ChainItem = { ...top, pending: false };
+  // 402.2: the choices are made now, and 358.1's legality check applies to them
+  // exactly as it does to a played card's.
+  if (!isValidTarget(state, player, ability.effect.target, target)) {
+    throw new IllegalActionError('Invalid target for the Triggered Ability');
+  }
+
+  // Finalized: it stops being pending and waits on the Chain like any item,
+  // now carrying the choices its controller just made.
+  const finalized: ChainItem = {
+    ...top,
+    pending: false,
+    target: target ?? null,
+    destination: destination ?? null,
+  };
   return {
     state: {
       ...state,
@@ -528,6 +567,15 @@ function queueTriggers(
       continue;
     }
     const optional = 'optional' in ability && ability.optional === true;
+    const choosesTarget = needsTargetChoice(ability.effect.target);
+
+    // 402.4: an ability with no legal choice available never becomes a
+    // Finalized Chain Item — it is removed at step 2 instead. 402.4.a is
+    // explicit that this is not the ability being countered, so nothing else
+    // observes it; it simply does not go on.
+    if (choosesTarget && legalTargets(next, trigger.controller, ability.effect.target).length === 0) {
+      continue;
+    }
 
     next = {
       ...next,
@@ -536,9 +584,12 @@ function queueTriggers(
         {
           entity: trigger.source,
           controller: trigger.controller,
-          pending: optional,
-          // Triggered abilities choose their target on resolution rather than
-          // on the way onto the Chain, so nothing is carried here yet.
+          // 400: an Ability is a Pending Item until it completes the steps of
+          // playing. Step 2 (402) is where the "you may" is answered and where
+          // targets are chosen, so anything with either to settle waits here.
+          // One with neither has nothing to do at step 2 and goes straight on.
+          pending: optional || choosesTarget,
+          // 402.2 chooses these; until then there is nothing to carry.
           target: null,
           destination: null,
           ability: trigger.ability,
