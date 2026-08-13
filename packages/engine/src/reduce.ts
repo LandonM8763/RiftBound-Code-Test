@@ -918,15 +918,25 @@ function pass(state: GameState): ReduceResult {
   const chain = state.chain.slice(0, -1);
   const nextTop = chain[chain.length - 1];
 
-  if (nextTop === undefined && state.showdown !== null) {
+  // Read the Showdown back off `next`, not off `state`. The item that just
+  // resolved may have changed it — a Move can convert a Non-Combat Showdown
+  // into a Combat one (316.8.b.1.a) — and rebuilding from the pre-resolution
+  // copy silently threw that away.
+  const ongoing = next.showdown;
+  if (nextTop === undefined && state.showdown !== null && ongoing !== null) {
     // 346: when the last Chain item resolves during a Showdown, Focus passes
     // and the next player gains both Focus and Priority.
-    const nextFocus = nextPlayer(state, state.showdown.focus);
+    //
+    // Except when this resolution opened the Combat: 464.2.d has just given
+    // the Attacker Focus, and 464.2.e.1 has "the Attacking player, who has
+    // Focus" act first — so passing it on immediately would contradict both.
+    const becameCombat = !state.showdown.combat && ongoing.combat;
+    const nextFocus = becameCombat ? ongoing.focus : nextPlayer(state, ongoing.focus);
     next = {
       ...next,
       chain,
       passes: 0,
-      showdown: { ...state.showdown, focus: nextFocus, passes: 0 },
+      showdown: { ...ongoing, focus: nextFocus, passes: 0 },
       priority: nextFocus,
     };
   } else {
@@ -1067,7 +1077,12 @@ function afterMove(
  * the turn is Neutral Open. 345: the contesting player gains Focus.
  */
 function openShowdown(state: GameState, events: GameEvent[]): GameState {
-  if (state.showdown !== null || isClosed(state)) {
+  // 316.8.b.1.a: a Non-Combat Showdown that gains an opposing Unit becomes a
+  // Combat Showdown in the following Cleanup — this one.
+  if (state.showdown !== null) {
+    return becomeCombatShowdown(state, events);
+  }
+  if (isClosed(state)) {
     return state;
   }
 
@@ -1106,6 +1121,71 @@ function openShowdown(state: GameState, events: GameEvent[]): GameState {
     ...state,
     showdown: { battlefield: index, focus: contestedBy, passes: 0, combat, attacker, defender },
     priority: contestedBy,
+    passes: 0,
+  };
+}
+
+/**
+ * Turn an ongoing Non-Combat Showdown into a Combat Showdown (316.8.b.1.a).
+ *
+ * Rule 464.1 gives Combat two ways to open. One is a Showdown that opens as a
+ * Combat Showdown, which `openShowdown` already handles. The other is this: a
+ * Non-Combat Showdown is ongoing and a Unit controlled by a different player
+ * becomes present, which 316.8.b.1.a converts "in the following cleanup".
+ * Without this the Showdown stayed non-combat and closed by establishing
+ * Control, so the two sides never fought.
+ *
+ * **The Attacker is still whoever applied Contested (464.2.c.1)**, not whoever
+ * arrived second. `applyContested` leaves `contestedBy` with the first player
+ * to contest, which is what keeps that right.
+ */
+function becomeCombatShowdown(state: GameState, events: GameEvent[]): GameState {
+  const showdown = state.showdown;
+  if (showdown === null || showdown.combat) {
+    return state;
+  }
+
+  const battlefield = state.battlefields[showdown.battlefield];
+  if (battlefield === undefined) {
+    return state;
+  }
+  const controllers = new Set(
+    battlefield.units.map((unit) => getEntity(state, unit).controller),
+  );
+  // 461: Combat is Staged only once two opposing players have Units here.
+  if (controllers.size <= 1) {
+    return state;
+  }
+
+  const attacker = battlefield.contestedBy;
+  if (attacker === null) {
+    return state;
+  }
+  const defender = [...controllers].find((candidate) => candidate !== attacker);
+  if (defender === undefined) {
+    return state;
+  }
+
+  events.push({
+    type: 'combatOpened',
+    battlefield: showdown.battlefield,
+    attacker,
+    defender,
+  });
+
+  return {
+    ...state,
+    // 464.2.d, step 3 of the Combat Showdown Step: the Attacker gains Focus.
+    //
+    // 464.2.c.1.b reads the other way — "the player who has Focus maintains
+    // their Focus" when a Showdown was already ongoing — and the two cannot
+    // both be the final word. 464.2.d is a numbered Task performed *during* the
+    // step, where c.1.b describes the instant the Combat opens, and 464.2.e.1
+    // settles it by calling the Attacker "the Attacking player, who has Focus".
+    // So c.1.b holds for step 1's start-of-combat effects and step 3 then moves
+    // Focus. This engine runs the step atomically, so only the outcome shows.
+    showdown: { ...showdown, combat: true, attacker, defender, focus: attacker, passes: 0 },
+    priority: attacker,
     passes: 0,
   };
 }

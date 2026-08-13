@@ -37,6 +37,18 @@ const ACTION_SPELL = makeSpell(['fury'], {
   cost: cost(1),
   timing: 'action',
 });
+/** "Move a friendly unit." An Action, so it is playable during a Showdown. */
+const CHARGE = makeSpell(['fury'], {
+  id: cardId('S-012'),
+  name: 'Charge',
+  cost: cost(0),
+  timing: 'action',
+  effect: {
+    target: { kind: 'unit', scope: 'friendly' },
+    destination: { kind: 'battlefield' },
+    effects: [{ kind: 'move' }],
+  },
+});
 const FURY_RUNE = makeRune('fury', { id: cardId('S-100') });
 const BATTLEFIELDS = Array.from({ length: 3 }, (_, i) =>
   makeBattlefield({ id: cardId(`S-20${i}`) }),
@@ -47,6 +59,7 @@ const REGISTRY = CardRegistry.from([
   CHAMPION,
   UNIT,
   ACTION_SPELL,
+  CHARGE,
   FURY_RUNE,
   ...BATTLEFIELDS,
 ] as CardDefinition[]);
@@ -340,5 +353,174 @@ describe('the Final Point restriction (rule 471.1.b)', () => {
     const closed = passUntilClosed(early);
 
     expect(closed.players[mover]!.points).toBe(4);
+  });
+});
+
+/**
+ * A Non-Combat Showdown becoming a Combat Showdown (316.8.b.1.a).
+ *
+ * Rule 464.1 gives Combat two ways to open, and this is the second: a
+ * Non-Combat Showdown is ongoing when a Unit controlled by a different player
+ * becomes present, and "this will cause the Showdown to become a Combat
+ * Showdown in the following cleanup".
+ *
+ * Before this, the Showdown stayed non-combat and closed by establishing
+ * Control — the two sides never fought.
+ *
+ * This block builds its own deck: the arriving Unit has to come from a card
+ * effect, because 144 restricts the Standard Move to the Turn Player and
+ * `canStandardMove` refuses it while a Showdown is running.
+ */
+describe('a Non-Combat Showdown becoming a Combat Showdown (316.8.b.1.a)', () => {
+  const CONVERT_REGISTRY = CardRegistry.from([
+    LEGEND,
+    CHAMPION,
+    UNIT,
+    CHARGE,
+    FURY_RUNE,
+    ...BATTLEFIELDS,
+  ] as CardDefinition[]);
+
+  function convertDeck(): DeckList {
+    return {
+      legend: LEGEND.id,
+      champion: CHAMPION.id,
+      main: [
+        ...Array.from({ length: 10 }, () => UNIT.id),
+        ...Array.from({ length: 6 }, () => CHARGE.id),
+      ],
+      runes: Array.from({ length: 8 }, () => FURY_RUNE.id),
+      battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
+    };
+  }
+
+  /** A Non-Combat Showdown, opened by the Turn Player at Battlefield 0. */
+  function nonCombat(seed: string): { state: GameState; attacker: number } {
+    let state = pastMulligan(
+      createGame({ decks: [convertDeck(), convertDeck()], registry: CONVERT_REGISTRY, seed }).state,
+    );
+    while (state.phase !== 'main' && !isOver(state)) {
+      state = reduce(state, { type: 'resolvePhase' }).state;
+    }
+    const attacker = state.activePlayer;
+    const unit = state.players[attacker]!.zones.mainDeck.find(
+      (id) => state.entities[id]!.card === UNIT.id,
+    )!;
+    state = moveEntity(state, unit, playerLocation(attacker, 'base'));
+    state = reduce(state, { type: 'moveUnits', units: [unit], to: battlefieldLocation(0) }).state;
+    return { state, attacker };
+  }
+
+  /** Find a card of `id` for `seat`, wherever it currently is. */
+  function cardFor(state: GameState, seat: number, id: CardDefinition['id']): EntityId {
+    const zones = state.players[seat]!.zones;
+    const found = [...zones.mainDeck, ...zones.hand].find(
+      (candidate) => state.entities[candidate]!.card === id,
+    );
+    if (found === undefined) {
+      throw new Error(`no ${id} for player ${seat}`);
+    }
+    return found;
+  }
+
+  /**
+   * The opponent takes Focus and plays a Spell that Moves one of their Units
+   * into the contested Battlefield. The Move's Cleanup (453) is where
+   * 316.8.b.1.a converts the Showdown.
+   */
+  function opposed(seed: string): {
+    state: GameState;
+    events: readonly { readonly type: string }[];
+    attacker: number;
+    defender: number;
+  } {
+    const { state: opened, attacker } = nonCombat(seed);
+    const defender = playerId((attacker + 1) % opened.players.length);
+
+    const unit = cardFor(opened, defender, UNIT.id);
+    const spell = cardFor(opened, defender, CHARGE.id);
+    let armed = moveEntity(opened, unit, playerLocation(defender, 'base'));
+    armed = moveEntity(armed, spell, playerLocation(defender, 'hand'));
+
+    // 347.2.b: passing hands Focus, and with it Priority, to the opponent.
+    const theirTurn = reduce(armed, { type: 'pass' }).state;
+    if (theirTurn.priority !== defender) {
+      throw new Error(`expected Focus to pass to ${defender}, got ${String(theirTurn.priority)}`);
+    }
+
+    let next = reduce(theirTurn, {
+      type: 'playCard',
+      card: spell,
+      target: unit,
+      destination: battlefieldLocation(0),
+    }).state;
+
+    // Drain the Chain so the Spell resolves and its Move runs.
+    const events: { readonly type: string }[] = [];
+    let guard = 0;
+    while (next.chain.length > 0 && guard < 8) {
+      const result = reduce(next, { type: 'pass' });
+      events.push(...result.events);
+      next = result.state;
+      guard += 1;
+    }
+    return { state: next, events, attacker, defender };
+  }
+
+  it('is a Non-Combat Showdown until the opposing Unit arrives', () => {
+    const { state } = nonCombat('convert-before');
+    expect(state.showdown?.combat).toBe(false);
+    expect(state.showdown?.attacker).toBeNull();
+  });
+
+  it('464.2.c.1: the Attacker is whoever applied Contested, not who arrived second', () => {
+    const { state, attacker, defender } = opposed('convert-who');
+
+    expect(state.showdown?.combat ?? false).toBe(true);
+    expect(state.showdown?.attacker).toBe(attacker);
+    expect(state.showdown?.defender).toBe(defender);
+  });
+
+  it('464.2.d: the Attacker has Focus once the step completes', () => {
+    const { state, attacker } = opposed('convert-focus');
+
+    expect(state.showdown?.focus).toBe(attacker);
+    expect(state.priority).toBe(attacker);
+  });
+
+  it('reports the Combat opening as an event', () => {
+    const { events, attacker, defender } = opposed('convert-event');
+
+    expect(events).toContainEqual({
+      type: 'combatOpened',
+      battlefield: 0,
+      attacker,
+      defender,
+    });
+  });
+
+  it('then fights, rather than closing by establishing Control', () => {
+    const { state, attacker } = opposed('convert-fight');
+    let next = state;
+
+    let guard = 0;
+    while (isShowdown(next) && guard < 12) {
+      next = reduce(next, { type: 'pass' }).state;
+      guard += 1;
+    }
+
+    // Two 2-Might Units traded (465-466), so neither side is left standing and
+    // nobody simply took the Battlefield.
+    expect(next.battlefields[0]!.units).toHaveLength(0);
+    expect(next.battlefields[0]!.controller).not.toBe(attacker);
+    checkInvariants(next);
+  });
+
+  it('leaves a Showdown alone while only one player has Units there', () => {
+    const { state } = nonCombat('convert-none');
+    const next = reduce(state, { type: 'pass' }).state;
+
+    // Passing Focus does not invent a Combat out of a one-sided Battlefield.
+    expect(next.showdown?.combat ?? false).toBe(false);
   });
 });

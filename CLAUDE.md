@@ -128,10 +128,23 @@ What is **not** built yet, in rough dependency order:
    paid the additional cost" are built; what is left is a condition on an
    effect's own outcome, counting, and modes.
 
-Focus (rule 313) *is* implemented, as part of Non-Combat Showdowns: granted to
-the contesting player (345), passing on a pass (347.2.b) and when the last Chain
-item resolves (346). What is still missing there is the Combat Showdown's
-handling of it (464.2.c.1.a-b).
+Focus (rule 313) is implemented for both kinds of Showdown: granted to the
+contesting player (345), passing on a pass (347.2.b) and when the last Chain
+item resolves (346), and handed to the Attacker when a Combat opens (464.2.d).
+
+**A Non-Combat Showdown becomes a Combat Showdown when an opposing Unit
+arrives** (316.8.b.1.a), in the Cleanup that follows. That is rule 464.1's
+second way for Combat to open, and the Attacker stays whoever applied Contested
+(464.2.c.1) rather than whoever arrived second. It takes a card effect to reach:
+144 restricts the Standard Move to the Turn Player and `canStandardMove` refuses
+it while a Showdown is running.
+
+**464.2.c.1.b and 464.2.d appear to conflict** — the first says a Showdown that
+was already ongoing keeps its current Focus holder, the second is a numbered
+Task saying the Attacker gains Focus. 464.2.e.1 settles it by calling the
+Attacker "the Attacking player, who has Focus", so c.1.b is read as describing
+the instant Combat opens and d as the Task that then moves Focus. This engine
+performs the step atomically, so only the outcome is observable.
 
 ### Simplifications in the Process of Play
 
