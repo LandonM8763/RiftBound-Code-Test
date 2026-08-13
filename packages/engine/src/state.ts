@@ -273,6 +273,21 @@ export interface ShowdownState {
 
 export interface BattlefieldState {
   readonly card: CardId;
+  /**
+   * The Battlefield as a Game Object (rule 170).
+   *
+   * 170.8-170.10 give Battlefields Passive, Triggered and Activated abilities,
+   * and every one of those needs a Game Object to hang off — a source for
+   * `activeStatics` and `triggersFor` to find, and the "me" an effect resolves
+   * against. A bare `CardId` cannot be any of those.
+   *
+   * Its `location` is its own `battlefieldLocation`, because 170.5 makes a
+   * Battlefield *a Location*. It is deliberately **not** in `units`: that list
+   * is who is present *at* the Battlefield (170.6), and the Battlefield is not
+   * present at itself. Nothing moves it either — 170.4 says Battlefields cannot
+   * be Moved, and 170.3 that they cannot be Killed.
+   */
+  readonly entity: EntityId;
   /** `null` while Uncontrolled (rule 466.5.b). */
   readonly controller: PlayerId | null;
   readonly units: readonly EntityId[];

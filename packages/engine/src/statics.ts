@@ -68,6 +68,10 @@ export function activeStatics(state: GameState): readonly ActiveStatic[] {
     }
   }
   for (const battlefield of state.battlefields) {
+    // 170.8: a Battlefield can have Passive Abilities, and 170.5 puts its own
+    // Game Object at its Location — so `here` on one of its statics resolves to
+    // itself with no special case.
+    collect(battlefield.entity);
     for (const unit of battlefield.units) {
       collect(unit);
     }

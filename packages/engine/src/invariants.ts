@@ -45,6 +45,9 @@ export function checkInvariants(state: GameState): void {
   }
 
   state.battlefields.forEach((battlefield, index) => {
+    // 170.5: a Battlefield is a Location, and its own Game Object sits at it —
+    // separately from `units`, which is who is *present* there (170.6).
+    record(battlefield.entity, battlefieldLocation(index));
     for (const id of battlefield.units) {
       record(id, battlefieldLocation(index));
     }

@@ -23,6 +23,7 @@ import { describe, expect, it } from 'vitest';
 
 import { mightOf } from './combat.js';
 import { checkInvariants } from './invariants.js';
+import { legalActions } from './legal.js';
 import { moveEntity, withPlayer } from './mutate.js';
 import { reduce } from './reduce.js';
 import { createGame, type DeckList } from './setup.js';
@@ -310,3 +311,119 @@ function legalFor(state: GameState): { type: 'resolvePhase' | 'endTurn' | 'pass'
   }
   return actions;
 }
+
+/**
+ * Battlefields as Game Objects (rules 169-172).
+ *
+ * 170 makes a Battlefield a Game Object, 170.5 makes it a Location, and
+ * 170.8-170.10 give it Passive, Triggered and Activated abilities. Before this
+ * `BattlefieldState` held only a card id, so ingest dropped every one of them
+ * rather than ship a card the engine would silently never run.
+ */
+describe('Battlefields as Game Objects (rules 169-172)', () => {
+  /** "Units here have +1 Might." — 170.8, and a property of the Location. */
+  const WAR_CAMP = makeBattlefield({
+    id: cardId('T-210'),
+    name: 'War Camp',
+    abilities: {
+      statics: [{ affects: { who: 'any', here: true }, grant: { might: 1 } }],
+    },
+  });
+
+  const REGISTRY = CardRegistry.from([
+    LEGEND,
+    CHAMPION,
+    PLAIN,
+    RUNE,
+    WAR_CAMP,
+    ...BATTLEFIELDS,
+  ] as CardDefinition[]);
+
+  function game(seed: string): GameState {
+    const list: DeckList = {
+      legend: LEGEND.id,
+      champion: CHAMPION.id,
+      main: Array.from({ length: 12 }, () => PLAIN.id),
+      runes: Array.from({ length: 8 }, () => RUNE.id),
+      // Every choice is the War Camp, so 485.5's random pick lands on it.
+      battlefields: [WAR_CAMP.id, WAR_CAMP.id, WAR_CAMP.id],
+    };
+    let state = createGame({ decks: [list, list], registry: REGISTRY, seed }).state;
+    while (state.phase === 'mulligan') {
+      state = reduce(state, { type: 'mulligan', cards: [] }).state;
+    }
+    while (state.phase !== 'main' && !isOver(state)) {
+      state = reduce(state, { type: 'resolvePhase' }).state;
+    }
+    return state;
+  }
+
+  it('170: each Battlefield has its own Game Object', () => {
+    const state = game('bf-entity');
+    for (const battlefield of state.battlefields) {
+      expect(state.entities[battlefield.entity]).toBeDefined();
+    }
+    // 170.5: the Battlefield *is* a Location, so its object sits at its own
+    // index rather than in a player zone.
+    expect(state.entities[state.battlefields[0]!.entity]!.location).toEqual(
+      battlefieldLocation(0),
+    );
+    checkInvariants(state);
+  });
+
+  it('170.6: it is not among the Units present at itself', () => {
+    const state = game('bf-not-unit');
+    expect(state.battlefields[0]!.units).not.toContain(state.battlefields[0]!.entity);
+  });
+
+  it('170.8: its Passive reaches the Units at it', () => {
+    let state = game('bf-static');
+    const player = state.activePlayer;
+    const unit = state.players[player]!.zones.mainDeck.find(
+      (id) => state.entities[id]!.card === PLAIN.id,
+    )!;
+
+    // At a Base, out of the Battlefield's reach.
+    state = moveEntity(state, unit, playerLocation(player, 'base'));
+    expect(mightOf(state, unit)).toBe(2);
+
+    // 355.9's "here" resolves to the Battlefield's own Location, so the +1
+    // applies once the Unit is present.
+    state = moveEntity(state, unit, battlefieldLocation(0));
+    expect(mightOf(state, unit)).toBe(3);
+    checkInvariants(state);
+  });
+
+  it('its Passive applies regardless of who Controls it', () => {
+    // A Passive is a property of the Location (170.5), not of Control — unlike
+    // a Triggered ability, which speaks of holding or conquering.
+    let state = game('bf-uncontrolled');
+    const player = state.activePlayer;
+    const unit = state.players[player]!.zones.mainDeck.find(
+      (id) => state.entities[id]!.card === PLAIN.id,
+    )!;
+    state = moveEntity(state, unit, battlefieldLocation(0));
+
+    expect(state.battlefields[0]!.controller).toBeNull();
+    expect(mightOf(state, unit)).toBe(3);
+  });
+
+  it('170.4 / 170.3: it is never moved and never killed', () => {
+    // Nothing in the engine relocates a Battlefield's object, so it stays at
+    // its own index for the whole game.
+    let state = game('bf-fixed');
+    const entity = state.battlefields[0]!.entity;
+    let guard = 0;
+    while (!isOver(state) && guard < 200) {
+      const actions = legalActions(state, state.priority ?? state.activePlayer);
+      const action = actions[0];
+      if (action === undefined) {
+        break;
+      }
+      state = reduce(state, action).state;
+      guard += 1;
+    }
+    expect(state.entities[entity]!.location).toEqual(battlefieldLocation(0));
+    checkInvariants(state);
+  });
+});

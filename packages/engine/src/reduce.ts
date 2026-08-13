@@ -1302,8 +1302,25 @@ function withBattlefield(
   update: (battlefield: BattlefieldState) => BattlefieldState,
 ): GameState {
   const battlefields = state.battlefields.slice();
-  battlefields[index] = update(battlefields[index] as BattlefieldState);
-  return { ...state, battlefields };
+  const before = battlefields[index] as BattlefieldState;
+  const after = update(before);
+  battlefields[index] = after;
+  const next = { ...state, battlefields };
+
+  // A Battlefield's Game Object (170) has to follow the Battlefield's Control,
+  // or its abilities would keep answering to whoever brought it. This is the
+  // only place Control is written, so syncing here is what stops the two
+  // representations drifting — the same discipline `moveEntity` applies to a
+  // location and its zone list.
+  if (before.controller === after.controller) {
+    return next;
+  }
+  // 170.1 owns a Battlefield to a player even while it is Uncontrolled
+  // (170.11.b), and `Entity.controller` is not nullable, so an Uncontrolled
+  // Battlefield answers to its owner. Nothing reads it in that state: its
+  // abilities all speak of holding or conquering, which need a controller.
+  const controller = after.controller ?? getEntity(next, after.entity).owner;
+  return withEntity(next, after.entity, (current) => ({ ...current, controller }));
 }
 
 /**

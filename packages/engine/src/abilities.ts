@@ -380,6 +380,17 @@ function boardEntities(state: GameState, player: PlayerId): EntityId[] {
     found.push(...seat.zones.base, ...seat.zones.legendZone);
   }
   for (const battlefield of state.battlefields) {
+    // 170.9-170.10: Battlefields can carry Triggered and Activated abilities,
+    // and they belong to whoever Controls the Battlefield — every one the
+    // corpus prints speaks of holding or conquering it. An Uncontrolled
+    // Battlefield (170.11.b) therefore offers nobody its abilities.
+    //
+    // Its *Passive* abilities are a different matter and are swept by
+    // `activeStatics` regardless of Control: "Units here have +1 Might" is a
+    // property of the Location (170.5), not of who holds it.
+    if (battlefield.controller === player) {
+      found.push(battlefield.entity);
+    }
     for (const unit of battlefield.units) {
       if (getEntity(state, unit).controller === player) {
         found.push(unit);

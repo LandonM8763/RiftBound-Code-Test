@@ -19,6 +19,7 @@ import {
   DEFAULT_CONFIG,
   EMPTY_POOL,
   PLAYER_ZONES,
+  battlefieldLocation,
   entityId,
   playerId,
   playerLocation,
@@ -159,10 +160,31 @@ export function createGame(options: CreateGameOptions): ReduceResult {
     };
   }
 
-  const battlefields = placeBattlefields(options.decks, config.battlefieldCount, rng);
-  for (const battlefield of battlefields) {
-    define(battlefield.card);
-  }
+  // 170: a Battlefield is a Game Object, so each gets an entity — that is what
+  // its Passive, Triggered and Activated abilities (170.8-170.10) hang off.
+  // 170.5 makes a Battlefield a Location, so the entity sits at its own index
+  // rather than in any player zone, and 170.1 owns it to the player who
+  // brought it.
+  const battlefields = placeBattlefields(options.decks, config.battlefieldCount, rng).map(
+    (battlefield, index) => {
+      define(battlefield.card);
+      const id = entityId(nextEntityId);
+      nextEntityId += 1;
+      entities[id] = {
+        id,
+        card: battlefield.card,
+        owner: battlefield.owner,
+        controller: battlefield.owner,
+        location: battlefieldLocation(index),
+        exhausted: false,
+        damage: 0,
+        mightBonus: 0,
+        grantedKeywords: [],
+        buffs: 0,
+      };
+      return { ...battlefield, entity: id };
+    },
+  );
   // Rule 115: turn order is determined by any fair random method.
   const startingPlayer = playerId(rng.nextInt(playerCount));
 
@@ -222,11 +244,14 @@ export function createGame(options: CreateGameOptions): ReduceResult {
  * No sanctioned mode does, and the rules do not say who would be left out, so
  * rather than invent a rule this refuses the configuration.
  */
+/** 170.1: a Battlefield is Owned by the player who brought it. */
+type PlacedBattlefield = Omit<BattlefieldState, 'entity'> & { readonly owner: PlayerId };
+
 function placeBattlefields(
   decks: readonly DeckList[],
   battlefieldCount: number,
   rng: Rng,
-): BattlefieldState[] {
+): PlacedBattlefield[] {
   if (battlefieldCount !== decks.length) {
     throw new Error(
       `Battlefield placement is defined as one per player (rule 485.5), but the config asks ` +
@@ -240,6 +265,7 @@ function placeBattlefields(
     }
     return {
       card: rng.pick(deck.battlefields),
+      owner: playerId(seat),
       controller: null,
       units: [],
       contestedBy: null,

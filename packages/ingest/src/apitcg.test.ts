@@ -271,10 +271,10 @@ describe('output shape', () => {
 });
 
 describe('Battlefield abilities', () => {
-  it('drops them, because a Battlefield is not a Game Object here', () => {
-    // BattlefieldState holds a card id rather than an entity, so nothing
-    // sweeps a Battlefield for abilities. Keeping the ability would make the
-    // card look modelled while the engine silently never ran it.
+  it('170.8: keeps a Passive, now that a Battlefield is a Game Object', () => {
+    // These were dropped while `BattlefieldState` held only a card id and there
+    // was nothing for `activeStatics` to sweep. 170 gives each Battlefield an
+    // entity, so the ability has a source and actually runs.
     const { cards, gaps } = run([
       raw({
         cardType: 'Battlefield',
@@ -286,8 +286,26 @@ describe('Battlefield abilities', () => {
     ]);
 
     expect(cards).toHaveLength(1);
-    expect(cards[0]?.abilities).toBeUndefined();
-    expect(gaps.find((gap) => gap.field === 'abilities')).toMatchObject({ severity: 'degraded' });
+    expect(cards[0]?.abilities?.statics).toEqual([
+      { affects: { who: 'any', here: true }, grant: { might: 1 } },
+    ]);
+    expect(gaps.find((gap) => gap.field === 'abilities')).toBeUndefined();
+  });
+
+  it('170.9: keeps a Triggered ability too', () => {
+    const { cards } = run([
+      raw({
+        cardType: 'Battlefield',
+        name: 'Grove',
+        domain: 'None',
+        might: null,
+        description: 'When you hold here, draw 1.',
+      }),
+    ]);
+
+    expect(cards[0]?.abilities?.triggered?.[0]).toMatchObject({
+      condition: { event: 'hold', subject: 'you' },
+    });
   });
 
   it('says nothing about a Battlefield with no rules text', () => {

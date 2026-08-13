@@ -352,26 +352,12 @@ function normalizeCard(
       }
       return { card: { ...base, type: 'rune', domain }, gaps };
     }
-    case 'battlefield': {
-      // A Battlefield is not a Game Object in this engine: `BattlefieldState`
-      // holds a card id, not an entity, so there is nothing for an ability to
-      // hang off and nothing for `activeStatics` or `triggersFor` to sweep.
-      //
-      // Shipping the ability anyway would be worse than dropping it. The card
-      // would look modelled, the engine would silently never run it, and every
-      // simulated game would be quietly playing a different card — which is the
-      // exact failure the gap model exists to prevent.
-      const { abilities: _abilities, keywords: _keywords, ...plain } = base;
-      if (base.abilities !== undefined || base.keywords !== undefined) {
-        gap(
-          'abilities',
-          'A Battlefield is not a Game Object in this engine, so its ability has ' +
-            'nothing to hang off and would never run; the card is kept vanilla',
-          'degraded',
-        );
-      }
-      return { card: { ...plain, type: 'battlefield' }, gaps };
-    }
+    case 'battlefield':
+      // 170 makes a Battlefield a Game Object with its own entity, so 170.8's
+      // Passive, 170.9's Triggered and 170.10's Activated abilities all have
+      // something to hang off and are kept. They used to be dropped and
+      // recorded, because `BattlefieldState` held only a card id.
+      return { card: { ...base, type: 'battlefield' }, gaps };
     default:
       problems.push(`${rawId}: unhandled card type "${info.type}"`);
       return { gaps };

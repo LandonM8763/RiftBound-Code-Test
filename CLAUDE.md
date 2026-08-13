@@ -118,12 +118,7 @@ What is **not** built yet, in rough dependency order:
    keywords and "enters ready" are built; a *dynamic* Might ("increased by your
    points"), a duration ("units you play this turn enter ready") and a rule
    change ("opponents can only play units to their base") are not.
-3. **Abilities on Battlefields.** A Battlefield is not a Game Object here —
-   `BattlefieldState` holds a card id, not an entity — so nothing sweeps one for
-   abilities. Ingest drops them and records a gap rather than shipping a card
-   that looks modelled and silently never runs. 12 cards in the corpus. The same
-   gap is why `TokenSpec.type` excludes the Battlefield tokens of 187.8-187.9.
-4. **Conditional and modal effects** — "if this kills it", "unless its
+3. **Conditional and modal effects** — "if this kills it", "unless its
    controller…", "choose one •…", "for each…". *State* predicates and "if you
    paid the additional cost" are built; what is left is a condition on an
    effect's own outcome, counting, and modes.
@@ -487,7 +482,7 @@ builds the batch on top of it. Keep that split — a win rate computed inside
 | `view.ts` | Per-player observable view; redacts hidden zones |
 | `token.ts` | Tokens (179-187): Creating them, and 186.1's rule that one leaving the Board stops existing |
 | `invariants.ts` | `checkInvariants(state)`, run after every action when fuzzing |
-| `setup.ts` | `createGame` — entity creation, shuffles, opening hands, opens in the Mulligan |
+| `setup.ts` | `createGame` — entity creation (Units, Runes and a Game Object per Battlefield, 170), shuffles, opening hands, opens in the Mulligan |
 
 The view exposes **effective Might, the Showdown, Contested status and
 per-turn Scoring** because all of it is public at the table — a Unit's Might is
@@ -614,12 +609,17 @@ Four things are load-bearing:
 - **A `self` static is read off the card in hand**, exactly like a `self` cost
   modifier, because that is where the card still is when the question matters.
 
-**Battlefields cannot carry any of this.** `BattlefieldState` holds a card id
-rather than an entity, so there is no Game Object for `activeStatics` or
-`triggersFor` to find. Ingest therefore *drops* a Battlefield's abilities and
-records a gap: shipping them would leave a card that looks modelled while the
-engine silently never ran it, which is precisely the plausible-and-wrong outcome
-the gap model exists to prevent.
+**Battlefields carry these too** (170.8). `BattlefieldState.entity` is the Game
+Object `activeStatics` finds, and 170.5 makes a Battlefield *a Location*, so its
+own entity sits at its own index — which means `here` on one of its statics
+resolves to itself with no special case at all. "Units here have +1 Might" is
+one scope-plus-grant static like any other.
+
+A Battlefield's Passive is swept regardless of who Controls it, because 170.5
+makes it a property of the Location. Its *Triggered* and *Activated* abilities
+are scoped to the controller instead: every one the corpus prints speaks of
+holding or conquering, so an Uncontrolled Battlefield (170.11.b) offers nobody
+its abilities.
 
 ### State predicates
 
@@ -770,9 +770,11 @@ Four things are load-bearing:
   the Board (186), never played from a hand, so its cost is never paid and its
   domains never checked against a Domain Identity.
 
-**Battlefield tokens (187.8, 187.9) are excluded**, for the same reason
-Battlefield abilities are: `BattlefieldState` holds a card id rather than an
-entity, so one could be created and then never consulted.
+**Battlefield tokens (187.8, 187.9) are still excluded**, but no longer for want
+of a Game Object — Battlefields have one now. They need rule 438's Replace,
+which swaps a card or token in place of another, and 652.2.a's rule that a
+Battlefield leaving play is Replaced by a token Battlefield with no abilities.
+None of that is built.
 
 Token definitions are seeded into every game by `createGame` rather than
 discovered from a deck list, because 181 supplies them with the game and they
@@ -1260,6 +1262,10 @@ What it still cannot supply:
 | Power pip Domains | 18 | `powerCost` is a pip *count*, so a multi-Domain card's cost is ambiguous |
 | `might` | 1 | One Unit record has none |
 | Champion Tag on Signature cards | 0 dropped, 30 degraded | See the inference below |
+
+Battlefield abilities used to appear here too; 170 gives each Battlefield a
+Game Object now, so the six whose text the grammar reads keep their abilities
+and actually run them.
 
 ### The inferences it makes
 
