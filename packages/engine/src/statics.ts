@@ -25,6 +25,7 @@ import {
 } from '@riftbound/cards';
 
 import { conditionMet, type ConditionContext } from './condition.js';
+import { countOf } from './count.js';
 import { dependencyMet } from './dependency.js';
 import { entityCard, getEntity, type EntityId, type GameState, type PlayerId } from './state.js';
 
@@ -135,10 +136,30 @@ export function staticMight(state: GameState, unit: EntityId): number {
       continue;
     }
     if (reaches(state, source, controller, ability.affects, unit)) {
-      total += might;
+      total += might * grantMultiplier(state, source, controller, ability);
     }
   }
   return total;
+}
+
+/**
+ * How many times a static's grant applies — 1 unless it reads a count.
+ *
+ * "I have +1 Might for each friendly gear" is `might: 1` with a `per`. No
+ * `might` function is handed to `countOf` here, and that is the point: this is
+ * called from inside `mightOf`, so a count that read Might back would recurse
+ * forever. The parser refuses that combination outright (see `Count`), and this
+ * is the belt to its braces — such a count would read 0 rather than hang.
+ */
+function grantMultiplier(
+  state: GameState,
+  source: EntityId,
+  controller: PlayerId,
+  ability: StaticAbility,
+): number {
+  return ability.grant.per === undefined
+    ? 1
+    : countOf(state, controller, source, ability.grant.per);
 }
 
 /**
@@ -159,7 +180,16 @@ export function keywordsOf(state: GameState, unit: EntityId): readonly Keyword[]
       continue;
     }
     if (reaches(state, source, controller, ability.affects, unit)) {
-      (granted ??= []).push(...keywords);
+      const times = grantMultiplier(state, source, controller, ability);
+      // "I have ASSAULT equal to the number of enemy units here" — the printed
+      // value is per-unit, so the count scales it. 807.2 sums instances anyway,
+      // so a scaled value and N copies mean the same thing; one keyword is
+      // cheaper to read.
+      for (const keyword of keywords) {
+        (granted ??= []).push(
+          'value' in keyword ? { ...keyword, value: keyword.value * times } : keyword,
+        );
+      }
     }
   }
 

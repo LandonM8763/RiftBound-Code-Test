@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 105 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 110 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -475,6 +475,7 @@ builds the batch on top of it. Keep that split — a win rate computed inside
 | `abilities.ts` | Activated/Triggered abilities: what may be activated, what a game event triggers |
 | `dependency.ts` | Dependent Keywords (812, 824); its own module because both abilities and cost modifiers are gateable and `costs.ts` sits below `abilities.ts` |
 | `condition.ts` | State predicates, asked by statics, cost modifiers, effects and "enters ready" alike |
+| `count.ts` | Numbers read off the state, asked by the same three; also answers `Condition`'s `controls` |
 | `additional.ts` | Additional Costs (356.2): what can be paid, and paying it |
 | `statics.ts` | Static and Passive abilities: Might, granted keywords, entering ready |
 | `costs.ts` | Rule 356's layers: what a card or ability actually costs to play |
@@ -620,6 +621,40 @@ makes it a property of the Location. Its *Triggered* and *Activated* abilities
 are scoped to the controller instead: every one the corpus prints speaks of
 holding or conquering, so an Uncontrolled Battlefield (170.11.b) offers nobody
 its abilities.
+
+### Dynamic values
+
+`cards/count.ts` holds the data, `engine/count.ts` evaluates it.
+
+**One `Count` type, for the same measured reason `Condition` is one type**: the
+corpus asks the same arithmetic in three places — a cost discount ("I cost 1
+less **for each card in your trash**"), an effect's amount ("draw 1 **for each
+of your MIGHTY units**") and a static's grant ("I have ASSAULT **equal to the
+number of enemy units here**"). `CostCount` is now an alias of it, and
+`Condition`'s `controls` predicate is answered by the same sweep asked for a
+yes/no — one implementation, so the two can never disagree about what "another
+unit here" means.
+
+A count is *asked*, never executed, exactly like a condition.
+
+Four things are load-bearing:
+
+- **"Equal to N" and "+1 for each N" are the same arithmetic**, so `per` is one
+  field that multiplies whatever the grant or effect gives. 807.1.b.3 makes a
+  bare ASSAULT 1, which is exactly the per-unit value a count then scales.
+- **A count that reads Might may never appear in a static's grant.** MIGHTY is
+  rules 706-709 — a *description*, not a keyword, true exactly while Might is 5
+  or greater — so counting Mighty Units calls `mightOf`, which consults statics,
+  which would recurse straight back. The parser refuses that combination, and
+  `staticMight` hands `countOf` no Might function as the belt to that braces:
+  such a count reads 0 rather than hanging. The same reasoning already keeps
+  `Condition` from reading Might.
+- **A cost discount *may* read Might.** `mightOf` consults statics and cost
+  modifiers, not costs, so there is no cycle back — which is why `countFor`
+  passes `mightOf` through where `staticMight` does not.
+- **"You or allies" reads as "you".** The engine models no teams and no
+  sanctioned Mode of Play has any (485 is the 1v1 Duel), so a player's allies
+  are nobody and the two readings coincide everywhere this engine can be played.
 
 ### State predicates
 
@@ -1097,7 +1132,7 @@ edits by how far they move it, and swapping the objective swaps what the tool is
 for without touching the search.
 
 **The default is `CONSISTENCY`, and the reason is not taste.** A *simulated*
-objective is not trustworthy yet: 363 of the 468 cards with rules text still
+objective is not trustworthy yet: 358 of the 468 cards with rules text still
 play as vanilla, so a simulator cannot see what most cards do. Optimizing
 against it would cut the card whose text the engine ignores and keep the vanilla
 body with better stats — confidently wrong advice. Consistency depends on cost
@@ -1250,7 +1285,7 @@ deck builds and validates from it with no issues, and the engine plays complete
 games with it — 300 games, all decided, heuristic 58.7% ± 5.5 against random.
 
 79 of those cards carry an ability and 14 a keyword. The keyword figure is low
-against the 105 that parse because keywords ride the same all-or-nothing rule:
+against the 110 that parse because keywords ride the same all-or-nothing rule:
 a card whose other clause is unreadable keeps neither. 11 create Tokens, 6
 carry Accelerate, 5 return a card to hand and 3 grant a keyword.
 
@@ -1298,7 +1333,7 @@ would be worse than none — "Deal 6 to it unless its controller has you draw 2"
 reduced to "deal 6" is a card that plays, looks right, and is wrong.
 
 It covers `Draw N`, `Deal N to a unit [at a battlefield]`, `Give a unit +N
-Might this turn`, `Give a unit <KEYWORD> [N] this turn`, `Kill`, `Ready`, `Buff`, `Heal`, `Discard N`, `Channel N
+Might this turn`, `Give a unit <KEYWORD> [N] this turn`, `Draw N for each <count>`, `Kill`, `Ready`, `Buff`, `Heal`, `Discard N`, `Channel N
 rune(s) [exhausted]`, `ADD` resources, `Gain N XP` and
 `Return <a unit|me|a <type> from your trash> to <its|my|your> owner's hand`; the self-targeting forms
 (`Ready/Buff/Heal/Exhaust/Recall me`, `Give me +N Might this turn`); sequences
@@ -1318,14 +1353,14 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 105 of the 468 cards that have text**, and the shape of what is
+**Coverage is 110 of the 468 cards that have text**, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 105 |
-| Blocked | 363 |
+| Fully parsed | 110 |
+| Blocked | 358 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 3 or 4 times, everything else once or
@@ -1366,7 +1401,8 @@ See [State predicates](#state-predicates).
 investments. See [Additional Costs](#additional-costs-rule-3562).
 
 **Tokens took it 78 → 89**, **Accelerate 89 → 95**, **zone movement 95 → 100**, and
-**effect-granted keywords plus two wider conditions 100 → 105.**
+**effect-granted keywords plus two wider conditions 100 → 105**, and **dynamic
+values 105 → 110.**
 
 #### How the ranking was measured wrong, and what fixed it
 
@@ -1405,13 +1441,16 @@ one mechanic at a time and then in build order:
 | **Wider `controls` predicates** — now built | **+2 delivered** |
 | Statics beyond scope-plus-grant, minus the two now readable | +2 |
 | Durations and delayed effects ("the next spell you play…") | +3 |
-| Counting / dynamic values | +2 |
+| **Counting / dynamic values** — now built | **+3 projected, +5 delivered** |
 | Non-standard ability costs | +2 |
 | Effect-outcome predicates ("if this kills it") | +1 |
 | Modal effects ("choose one •…") | +0 |
 
 **Projections run optimistic, except when they do not.** Additional Costs
-projected +8 and delivered +4; tokens projected +9 and delivered +11. A
+projected +8 and delivered +4; tokens projected +9 and delivered +11, and
+dynamic values +3 against +5 — that one beat its projection because building
+the count properly also picked up wordings the counterfactual's crude rewrite
+had mangled rather than unlocked. A
 counterfactual rewrite proves a *clause* stops blocking, which is neither an
 upper nor a lower bound on what a real implementation reaches — treat these as
 a ranking, not a forecast.
@@ -1440,25 +1479,20 @@ What the corpus is blocked on now, in the order measurement puts them:
    mechanic left. It is also the most expensive: facedown cards are a
    hidden-information mechanic the state model has no representation for, and
    it reaches `view.ts`. Four cards print a bare `HIDDEN`.
-2. **Counting and dynamic values** — "draw 1 for each of your MIGHTY units",
-   "I have ASSAULT equal to the number of enemy units here". +3. `CostCount`
-   already does this shape for discounts; effects and statics would want the
-   same idea.
-3. **Durations and delayed effects** — "the next spell you play this turn costs
+2. **Durations and delayed effects** — "the next spell you play this turn costs
    5 less", "opponents can't play cards this turn". +3, but three cards wanting
    three different mechanics.
-4. **The rest of statics beyond a scope plus a grant** — +2 now that the two
-   readable predicates are in. "My Might is increased by your points" is
-   dynamic (see 2), and "While I'm attacking or defending alone" needs a
-   combat-role predicate that `Condition` deliberately cannot express, because
-   a condition that reads Might back would recurse through `mightOf`.
-5. **The six other refused keywords**, each blocked on a mechanic: Attach
+3. **The rest of statics beyond a scope plus a grant** — "While I'm attacking
+   or defending alone" needs a combat-role predicate that `Condition`
+   deliberately cannot express, because a condition that reads Might back would
+   recurse through `mightOf`.
+4. **The six other refused keywords**, each blocked on a mechanic: Attach
    (Equip, Weaponmaster, Quick-Draw), Predict (Vision), Power of any Domain
    (Deflect). Repeat is blocked on nothing and worth +0.
-6. **Conditional and modal effects** — "if this kills it", "unless its
+5. **Conditional and modal effects** — "if this kills it", "unless its
    controller…", "choose one •…". +1 and +0. The effect model has no outcome
    conditions and no modes.
-7. **Non-standard ability costs** — "Spend my buff:", "Recycle 1 from your
+6. **Non-standard ability costs** — "Spend my buff:", "Recycle 1 from your
    trash:", "you may exhaust me to …". +2. `ActivatedAbility.cost` is Energy,
    Power and the exhaust; 16 cards want more.
 

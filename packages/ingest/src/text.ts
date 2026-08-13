@@ -18,8 +18,10 @@ import {
   UNMODELLED_KEYWORDS,
   tokenByName,
   tokenMight,
+  readsMight,
   type CardAbilities,
   type CardType,
+  type Count,
   type Domain,
   type CardEffect,
   type AdditionalCost,
@@ -103,12 +105,15 @@ function normalize(line: string): string {
  * a Tank is a wrong card, not a simpler one, and rule 002 makes the card's text
  * supersede the rules.
  *
- * `mighty` is here rather than in `UNMODELLED_KEYWORDS` because it is a *state*
- * cards refer to ("when one of your units becomes MIGHTY") rather than a
- * keyword ability in the glossary.
+ * MIGHTY is deliberately *not* here. Rules 706-709 make it a description of a
+ * Unit (Might >= 5) rather than a keyword ability, and no card prints it as a
+ * bare line — every use is inside a phrase like "for each of your MIGHTY
+ * units", which a clause rule has to match in full or fail. Listing it would
+ * refuse the phrases the count grammar can now read, and the all-or-nothing
+ * rule already refuses the ones it cannot.
  */
 const REFUSED_KEYWORDS = new RegExp(
-  `\\b(${[...Object.keys(UNMODELLED_KEYWORDS), 'mighty'].join('|')})\\b`,
+  `\\b(${Object.keys(UNMODELLED_KEYWORDS).join('|')})\\b`,
   'i',
 );
 
@@ -156,6 +161,70 @@ function keywordNamed(name: string, value: string | undefined): Keyword | undefi
   return undefined;
 }
 
+/**
+ * A count read off the state: "your MIGHTY units", "enemy units here", "other
+ * battlefield you or allies control".
+ *
+ * Only the wordings the corpus actually prints, and only counts the state can
+ * answer — one it cannot is refused, exactly as an unreadable predicate is.
+ *
+ * "you or allies" reads as "you". The engine models no teams and no sanctioned
+ * Mode of Play has any (485 is the 1v1 Duel), so a player's allies are nobody
+ * and the two readings coincide everywhere this engine can be played.
+ */
+const COUNTS: readonly {
+  readonly pattern: RegExp;
+  readonly build: (match: RegExpMatchArray) => Count | undefined;
+}[] = [
+  {
+    // 708: Mighty is Might >= 5, a description rather than a keyword.
+    pattern: /^(?:your|friendly) mighty units$/i,
+    build: () => ({ kind: 'controlled', who: 'you', what: 'unit', mighty: true }),
+  },
+  {
+    pattern: /^(?:each )?buffed friendly units?(?: (?:at|in) my battlefield| here)?$/i,
+    build: () => ({ kind: 'controlled', who: 'you', what: 'unit', here: true, buffed: true }),
+  },
+  {
+    pattern: /^(friendly|enemy|your) ([A-Za-z'-]+?)s?(?: (here))?$/i,
+    build: (m) => {
+      const who = (m[1] ?? '').toLowerCase() === 'enemy' ? 'opponent' : 'you';
+      const noun = (m[2] ?? '').toLowerCase();
+      const what = CARD_TYPES.find((type) => type === noun);
+      return {
+        kind: 'controlled',
+        who,
+        what: what ?? 'unit',
+        ...(what === undefined ? { tag: noun } : {}),
+        ...(m[3] === undefined ? {} : { here: true }),
+      };
+    },
+  },
+  {
+    // "each other battlefield you or allies control"
+    pattern: /^other battlefields? (?:you|you or allies) controls?$/i,
+    build: () => ({
+      kind: 'controlled',
+      who: 'you',
+      what: 'battlefield',
+      excludeSelf: true,
+    }),
+  },
+  { pattern: /^cards? in your trash$/i, build: () => ({ kind: 'cardsInTrash' }) },
+];
+
+/** Read a "for each …" / "the number of …" phrase, or refuse it. */
+function parseCount(phrase: string): Count | undefined {
+  const text = phrase.trim().replace(/[.]+$/, '').replace(/^the number of\s+/i, '');
+  for (const rule of COUNTS) {
+    const match = text.match(rule.pattern);
+    if (match !== null) {
+      return rule.build(match);
+    }
+  }
+  return undefined;
+}
+
 /** A clause that consumes the whole line, mapping to zero or more effects. */
 interface ClauseRule {
   readonly pattern: RegExp;
@@ -168,6 +237,17 @@ const UNIT_FRIENDLY: TargetSpec = { kind: 'unit', scope: 'friendly' };
 const UNIT_ENEMY: TargetSpec = { kind: 'unit', scope: 'enemy' };
 
 const CLAUSES: readonly ClauseRule[] = [
+  {
+    // "Draw 1 for each of your MIGHTY units" — the printed number is per-thing.
+    pattern: /^draw (\d+|one|two|three|four|five) for each (?:of )?(.+)$/i,
+    build: (m) => {
+      const n = count(m[1] ?? '');
+      const per = parseCount(m[2] ?? '');
+      return n === undefined || per === undefined
+        ? undefined
+        : { effects: [{ kind: 'draw', count: n, per }], target: NO_TARGET };
+    },
+  },
   {
     pattern: /^draw (\d+|one|two|three|four|five)$/i,
     build: (m) => {
@@ -1027,7 +1107,7 @@ export function parseStatic(line: string): StaticAbility | undefined {
 
   // "<scope> have/has <+N Might | KEYWORD…>". "an additional +1 Might" is the
   // same statement with a word of emphasis in it.
-  const have = text.match(/^(.+?) (?:have|has) (?:an additional )?(.+)$/i);
+  const have = text.match(/^(.+?) (?:have|has|gets?) (?:an additional )?(.+)$/i);
   if (have === null) {
     return undefined;
   }
@@ -1036,19 +1116,49 @@ export function parseStatic(line: string): StaticAbility | undefined {
     return undefined;
   }
 
-  const body = (have[2] ?? '').trim();
+  let body = (have[2] ?? '').trim();
+
+  // "I have +1 Might **for each friendly gear**", "I have ASSAULT **equal to
+  // the number of enemy units here**". The count multiplies whatever the grant
+  // gives, so it is peeled off first and the rest parses as an ordinary grant.
+  let per: Count | undefined;
+  const dynamic = body.match(/^(.+?) (?:for each|equal to) (.+)$/i);
+  if (dynamic !== null) {
+    per = parseCount(dynamic[2] ?? '');
+    if (per === undefined) {
+      return undefined;
+    }
+    // A count that reads Might cannot appear in a static's grant: `mightOf`
+    // consults statics, so it would recurse through this one. Refused rather
+    // than allowed to read 0, which would be a quietly weaker card.
+    if (readsMight(per)) {
+      return undefined;
+    }
+    body = (dynamic[1] ?? '').trim();
+    // "ASSAULT equal to N" prints no value, and 807.1.b.3 makes a bare keyword
+    // 1 — which is exactly the per-unit value the count then scales.
+  }
+
   const might = body.match(/^([+-]\d+) might$/i);
   if (might !== null) {
     const amount = Number.parseInt(might[1] ?? '', 10);
     return Number.isNaN(amount)
       ? undefined
-      : { affects: scope, grant: { might: amount }, ...(condition ? { condition } : {}) };
+      : {
+          affects: scope,
+          grant: { might: amount, ...(per === undefined ? {} : { per }) },
+          ...(condition ? { condition } : {}),
+        };
   }
 
   const keywords = grantedKeywords(body);
   return keywords === undefined
     ? undefined
-    : { affects: scope, grant: { keywords }, ...(condition ? { condition } : {}) };
+    : {
+        affects: scope,
+        grant: { keywords, ...(per === undefined ? {} : { per }) },
+        ...(condition ? { condition } : {}),
+      };
 }
 
 /** A trigger condition together with any per-turn limit its wording implies. */

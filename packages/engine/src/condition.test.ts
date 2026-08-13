@@ -10,8 +10,10 @@ import { CardRegistry, cardId, cost, type CardDefinition } from '@riftbound/card
 import { makeBattlefield, makeGear, makeLegend, makeRune, makeUnit } from '@riftbound/cards/testing';
 import { describe, expect, it } from 'vitest';
 
+import { mightOf } from './combat.js';
+import { countOf } from './count.js';
 import { conditionMet } from './condition.js';
-import { moveEntity, withPlayer } from './mutate.js';
+import { moveEntity, withEntity, withPlayer } from './mutate.js';
 import { reduce } from './reduce.js';
 import { createGame, type DeckList } from './setup.js';
 import {
@@ -386,5 +388,106 @@ describe('"here" on a controls predicate (355.9)', () => {
 
     expect(conditionMet(state, player, source, HERE)).toBe(false);
     expect(conditionMet(state, player, undefined, HERE)).toBe(false);
+  });
+});
+
+describe('counts read off the state (dynamic values)', () => {
+  it('counts what a player controls, by type and tag', () => {
+    let state = inMainPhase('count-basic');
+    const player = state.activePlayer;
+    const before = countOf(state, player, undefined, {
+      kind: 'controlled',
+      who: 'you',
+      what: 'unit',
+    });
+
+    const [withUnit] = onBoard(state, PLAIN.id);
+    state = withUnit;
+
+    expect(
+      countOf(state, player, undefined, { kind: 'controlled', who: 'you', what: 'unit' }),
+    ).toBe(before + 1);
+  });
+
+  it('708: counts a Unit as MIGHTY exactly while its Might is 5 or more', () => {
+    let state = inMainPhase('count-mighty');
+    const player = state.activePlayer;
+    const [placed, unit] = onBoard(state, PLAIN.id);
+    state = placed;
+
+    const mighty = { kind: 'controlled', who: 'you', what: 'unit', mighty: true } as const;
+    // PLAIN is 2 Might, so nothing qualifies yet.
+    expect(countOf(state, player, undefined, mighty, mightOf)).toBe(0);
+
+    // 708's threshold is 5, so +3 is exactly enough.
+    state = withEntity(state, unit, (e) => ({ ...e, mightBonus: 3 }));
+    expect(mightOf(state, unit)).toBe(5);
+    expect(countOf(state, player, undefined, mighty, mightOf)).toBe(1);
+  });
+
+  it('reads 0 for a Mighty count when no Might function is supplied', () => {
+    // That is the guard against recursion: a static's grant asks without one,
+    // because `mightOf` is what is asking. The parser refuses the combination,
+    // so this is the belt to its braces rather than a reachable path.
+    let state = inMainPhase('count-no-might');
+    const player = state.activePlayer;
+    const [placed, unit] = onBoard(state, PLAIN.id);
+    state = withEntity(placed, unit, (e) => ({ ...e, mightBonus: 5 }));
+
+    expect(
+      countOf(state, player, undefined, {
+        kind: 'controlled',
+        who: 'you',
+        what: 'unit',
+        mighty: true,
+      }),
+    ).toBe(0);
+  });
+
+  it('702: counts buffed Units, which reads a counter rather than Might', () => {
+    let state = inMainPhase('count-buffed');
+    const player = state.activePlayer;
+    const [a, source] = onBoard(state, PLAIN.id);
+    state = moveEntity(a, source, battlefieldLocation(0));
+    const [b, friend] = onBoard(state, PLAIN.id);
+    state = moveEntity(b, friend, battlefieldLocation(0));
+
+    const buffedHere = {
+      kind: 'controlled',
+      who: 'you',
+      what: 'unit',
+      here: true,
+      buffed: true,
+    } as const;
+
+    expect(countOf(state, player, source, buffedHere)).toBe(0);
+    state = withEntity(state, friend, (e) => ({ ...e, buffs: 1 }));
+    expect(countOf(state, player, source, buffedHere)).toBe(1);
+  });
+
+  it('counts Battlefields, excluding the source`s own', () => {
+    let state = inMainPhase('count-battlefields');
+    const player = state.activePlayer;
+    const others = {
+      kind: 'controlled',
+      who: 'you',
+      what: 'battlefield',
+      excludeSelf: true,
+    } as const;
+
+    // Take Control of both Battlefields.
+    state = {
+      ...state,
+      battlefields: state.battlefields.map((battlefield) => ({
+        ...battlefield,
+        controller: player,
+      })),
+    };
+
+    // Asked by Battlefield 0's own Game Object, it does not count itself.
+    const source = state.battlefields[0]!.entity;
+    expect(countOf(state, player, source, others)).toBe(state.battlefields.length - 1);
+    // Asked by something that is not a Battlefield, all of them count.
+    expect(countOf(state, player, undefined, others)).toBe(state.battlefields.length);
   });
 });

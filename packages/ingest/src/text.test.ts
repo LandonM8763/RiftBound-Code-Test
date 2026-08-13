@@ -977,3 +977,78 @@ describe('additional costs (rule 356.2)', () => {
     expect(parsed.unparsed.length).toBeGreaterThan(0);
   });
 });
+
+describe('dynamic values (counts read off the state)', () => {
+  it('reads "draw 1 for each of your MIGHTY units" (706-709)', () => {
+    expect(parseCardText('Draw 1 for each of your MIGHTY units.').effect).toEqual({
+      target: { kind: 'none' },
+      effects: [
+        {
+          kind: 'draw',
+          count: 1,
+          per: { kind: 'controlled', who: 'you', what: 'unit', mighty: true },
+        },
+      ],
+    });
+  });
+
+  it('reads a keyword value "equal to" a count', () => {
+    expect(
+      parseCardText('I have ASSAULT equal to the number of enemy units here.').abilities
+        ?.statics?.[0],
+    ).toEqual({
+      affects: { who: 'self' },
+      // 807.1.b.3 makes a bare ASSAULT 1, which is the per-unit value scaled.
+      grant: {
+        keywords: [{ kind: 'assault', value: 1 }],
+        per: { kind: 'controlled', who: 'opponent', what: 'unit', here: true },
+      },
+    });
+  });
+
+  it('reads "+1 Might for each …" and accepts "get" as well as "have"', () => {
+    expect(
+      parseCardText('I get +1 might for each buffed friendly unit at my battlefield.').abilities
+        ?.statics?.[0],
+    ).toEqual({
+      affects: { who: 'self' },
+      grant: {
+        might: 1,
+        per: { kind: 'controlled', who: 'you', what: 'unit', here: true, buffed: true },
+      },
+    });
+  });
+
+  it('counts other Battlefields, excluding the one it is printed on', () => {
+    const parsed = parseCardText(
+      'When you conquer here, draw 1 for each other battlefield you or allies control.',
+    );
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.triggered?.[0]?.effect.effects[0]).toEqual({
+      kind: 'draw',
+      count: 1,
+      per: { kind: 'controlled', who: 'you', what: 'battlefield', excludeSelf: true },
+    });
+  });
+
+  it('refuses a static grant whose count reads Might', () => {
+    // `mightOf` consults statics, so a static counting MIGHTY Units would
+    // recurse through itself. Refused rather than read as 0, which would be a
+    // quietly weaker card.
+    expect(parseCardText('I have +1 Might for each of your MIGHTY units.').unparsed).toHaveLength(
+      1,
+    );
+  });
+
+  it('refuses a count the state cannot answer', () => {
+    expect(parseCardText('Draw 1 for each card in an opponent hand.').unparsed).toHaveLength(1);
+  });
+
+  it('leaves the plain forms alone', () => {
+    expect(parseCardText('Draw 2.').effect?.effects[0]).toEqual({ kind: 'draw', count: 2 });
+    expect(parseCardText('Units here have +1 Might.').abilities?.statics?.[0]).toEqual({
+      affects: { who: 'any', here: true },
+      grant: { might: 1 },
+    });
+  });
+});

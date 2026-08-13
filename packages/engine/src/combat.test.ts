@@ -12,7 +12,7 @@ import { makeBattlefield, makeLegend, makeRune, makeUnit } from '@riftbound/card
 import { describe, expect, it } from 'vitest';
 
 import { assignDamage, combatResult, mightOf, sumMight } from './combat.js';
-import { keywordsOf } from './statics.js';
+import { keywordsOf, unitKeywordValue } from './statics.js';
 import { checkInvariants } from './invariants.js';
 import { moveEntity, withEntity } from './mutate.js';
 import { reduce } from './reduce.js';
@@ -846,4 +846,159 @@ describe('keywords granted by an effect (rule 801.3.a)', () => {
     expect(mightOf(state, unit)).toBe(2);
   });
 
+});
+
+/**
+ * Dynamic values in static grants (rules 706-709 for MIGHTY, 355.9 for "here").
+ *
+ * "I have ASSAULT equal to the number of enemy units here" and "I get +1 Might
+ * for each buffed friendly unit at my battlefield" are the same shape: a grant
+ * whose printed value is per-thing, scaled by a count. The count must be
+ * re-read every time, exactly like any other static — that is what separates it
+ * from an effect that writes a number once.
+ */
+describe('dynamic values in static grants', () => {
+  /** "I have ASSAULT equal to the number of enemy units here." */
+  const WARMONGER = makeUnit(2, ['fury'], {
+    id: cardId('D-020'),
+    name: 'Warmonger',
+    cost: cost(1),
+    abilities: {
+      statics: [
+        {
+          affects: { who: 'self' },
+          grant: { keywords: [{ kind: 'assault', value: 1 }] },
+        },
+      ],
+    },
+  });
+
+  /** The same card with the count attached, built separately for clarity. */
+  const DYNAMIC_WARMONGER = makeUnit(2, ['fury'], {
+    id: cardId('D-021'),
+    name: 'Dynamic Warmonger',
+    cost: cost(1),
+    abilities: {
+      statics: [
+        {
+          affects: { who: 'self' },
+          grant: {
+            keywords: [{ kind: 'assault', value: 1 }],
+            per: { kind: 'controlled', who: 'opponent', what: 'unit', here: true },
+          },
+        },
+      ],
+    },
+  });
+
+  /** "I get +1 Might for each buffed friendly unit at my battlefield." */
+  const KINGPIN = makeUnit(2, ['fury'], {
+    id: cardId('D-022'),
+    name: 'Kingpin',
+    cost: cost(1),
+    abilities: {
+      statics: [
+        {
+          affects: { who: 'self' },
+          grant: {
+            might: 1,
+            per: { kind: 'controlled', who: 'you', what: 'unit', here: true, buffed: true },
+          },
+        },
+      ],
+    },
+  });
+
+  const REGISTRY = CardRegistry.from([
+    LEGEND,
+    CHAMPION,
+    SMALL,
+    DYNAMIC_WARMONGER,
+    KINGPIN,
+    FURY_RUNE,
+    ...BATTLEFIELDS,
+  ] as CardDefinition[]);
+
+  function game(seed: string): GameState {
+    const list: DeckList = {
+      legend: LEGEND.id,
+      champion: CHAMPION.id,
+      main: [
+        ...Array.from({ length: 8 }, () => SMALL.id),
+        ...Array.from({ length: 4 }, () => DYNAMIC_WARMONGER.id),
+        ...Array.from({ length: 4 }, () => KINGPIN.id),
+      ],
+      runes: Array.from({ length: 8 }, () => FURY_RUNE.id),
+      battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
+    };
+    let state = pastMulligan(
+      createGame({ decks: [list, list], registry: REGISTRY, seed }).state,
+    );
+    while (state.phase !== 'main' && !isOver(state)) {
+      state = reduce(state, { type: 'resolvePhase' }).state;
+    }
+    return state;
+  }
+
+  it('scales a keyword value by the count, and re-reads it as the board changes', () => {
+    let state = game('dyn-assault');
+    const mine = state.activePlayer;
+    const theirs = playerId((mine + 1) % state.players.length);
+
+    const [a, warmonger] = place(state, mine, DYNAMIC_WARMONGER, 0);
+    state = a;
+
+    // No enemy Units here: ASSAULT 1 x 0 is nothing at all.
+    expect(unitKeywordValue(state, warmonger, 'assault')).toBe(0);
+    expect(mightOf(state, warmonger, 'attacker')).toBe(2);
+
+    const [b] = place(state, theirs, SMALL, 0);
+    state = b;
+    expect(unitKeywordValue(state, warmonger, 'assault')).toBe(1);
+    // 807.1.c: Assault is Might while attacking.
+    expect(mightOf(state, warmonger, 'attacker')).toBe(3);
+
+    const [c] = place(state, theirs, SMALL, 0);
+    state = c;
+    expect(unitKeywordValue(state, warmonger, 'assault')).toBe(2);
+    expect(mightOf(state, warmonger, 'attacker')).toBe(4);
+    // Still nothing while defending — the keyword is conditioned on the role.
+    expect(mightOf(state, warmonger, 'defender')).toBe(2);
+  });
+
+  it('355.9: counts only enemies at the source`s own Battlefield', () => {
+    let state = game('dyn-here');
+    const mine = state.activePlayer;
+    const theirs = playerId((mine + 1) % state.players.length);
+
+    const [a, warmonger] = place(state, mine, DYNAMIC_WARMONGER, 0);
+    state = a;
+    const [b] = place(state, theirs, SMALL, 1);
+    state = b;
+
+    // The enemy is at Battlefield 1, so "here" does not reach them.
+    expect(unitKeywordValue(state, warmonger, 'assault')).toBe(0);
+  });
+
+  it('scales Might by a count of buffed friendly Units (702)', () => {
+    let state = game('dyn-might');
+    const mine = state.activePlayer;
+
+    const [a, kingpin] = place(state, mine, KINGPIN, 0);
+    state = a;
+    const [b, friend] = place(state, mine, SMALL, 0);
+    state = b;
+
+    expect(mightOf(state, kingpin)).toBe(2);
+
+    state = withEntity(state, friend, (e) => ({ ...e, buffs: 1 }));
+    // +1 per buffed friendly Unit here, and 703 gives the friend its own +1.
+    expect(mightOf(state, kingpin)).toBe(3);
+    expect(mightOf(state, friend)).toBe(3);
+  });
+
+  it('a grant with no count is unchanged', () => {
+    // The plain form must not pay for the dynamic one.
+    expect(WARMONGER.abilities?.statics?.[0]?.grant.per).toBeUndefined();
+  });
 });

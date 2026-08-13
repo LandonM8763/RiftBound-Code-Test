@@ -11,6 +11,7 @@ import type { AbilityDependency } from './ability.js';
 import type { CardType } from './card.js';
 import type { Condition } from './condition.js';
 import type { Cost } from './cost.js';
+import type { Count } from './count.js';
 import type { Domain } from './domain.js';
 
 /**
@@ -64,11 +65,14 @@ export type CostPayer =
  * for the same reason a missing card field is: a discount that is plausible and
  * wrong makes a card playable at the wrong time.
  */
-export type CostCount =
-  /** "for each card in your trash" */
-  | { readonly kind: 'cardsInTrash' }
-  /** "for each card you've played this turn" — the same list Legion reads (812.1.c). */
-  | { readonly kind: 'cardsPlayedThisTurn' };
+/**
+ * A counted amount for a discount.
+ *
+ * An alias of the shared `Count` rather than a type of its own: "for each card
+ * in your trash" is the same arithmetic a static's grant and an effect's amount
+ * ask for, and one vocabulary is what stops the three drifting.
+ */
+export type CostCount = Count;
 
 /**
  * What a modifier does, tagged by the rule 356 layer it belongs to.

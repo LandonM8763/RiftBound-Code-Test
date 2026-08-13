@@ -1,5 +1,6 @@
 import type { CardType } from './card.js';
 import type { Condition } from './condition.js';
+import type { Count } from './count.js';
 import type { Domain } from './domain.js';
 import type { Keyword } from './keyword.js';
 
@@ -77,7 +78,15 @@ export type DestinationSpec =
 
 /** A single thing a card does. */
 export type Effect =
-  | { readonly kind: 'draw'; readonly count: number }
+  /**
+   * "Draw 1", or "draw 1 **for each of your MIGHTY units**".
+   *
+   * `per` multiplies: the amount is `count` when it is absent, and
+   * `count * <the count>` when it is present. Written that way rather than as a
+   * union so the plain form stays a plain number, which is what almost every
+   * card prints.
+   */
+  | { readonly kind: 'draw'; readonly count: number; readonly per?: Count | undefined }
   /** Rule 417: mark damage on the target. */
   | { readonly kind: 'dealDamage'; readonly amount: number }
   /** Rule 418: clear marked damage from the target. */

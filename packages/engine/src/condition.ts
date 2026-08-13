@@ -10,15 +10,10 @@
  * is refused at ingest, because one that silently reads false makes a card
  * quietly weaker than printed.
  */
-import { isSourceCondition, type Condition, type ControlledKind } from '@riftbound/cards';
+import { isSourceCondition, type Condition } from '@riftbound/cards';
 
-import {
-  entityCard,
-  getPlayer,
-  type EntityId,
-  type GameState,
-  type PlayerId,
-} from './state.js';
+import { countOf } from './count.js';
+import { getPlayer, type EntityId, type GameState, type PlayerId } from './state.js';
 
 /**
  * Is `condition` satisfied for `player`?
@@ -65,17 +60,20 @@ export function conditionMet(
   }
 
   switch (condition.kind) {
-    case 'controls': {
-      const seats =
-        condition.who === 'you'
-          ? [player]
-          : state.players.map((seat) => seat.id).filter((seat) => seat !== player);
-      let total = 0;
-      for (const seat of seats) {
-        total += countControlled(state, seat, condition, source);
-      }
-      return total >= condition.min;
-    }
+    case 'controls':
+      // The same sweep a `Count` does, asked for a yes/no. One implementation,
+      // in `count.ts`, so the two can never disagree about what "another unit
+      // here" means.
+      return (
+        countOf(state, player, source, {
+          kind: 'controlled',
+          who: condition.who,
+          what: condition.what,
+          ...(condition.tag === undefined ? {} : { tag: condition.tag }),
+          ...(condition.here === undefined ? {} : { here: condition.here }),
+          ...(condition.excludeSelf === undefined ? {} : { excludeSelf: condition.excludeSelf }),
+        }) >= condition.min
+      );
 
     case 'scoreWithin': {
       // 194.3: measured against the Victory Score, so a Mode of Play that sets
@@ -106,79 +104,4 @@ export function conditionMet(
       // guard rather than an exhaustiveness assertion.
       throw new Error(`Unknown condition: ${JSON.stringify(condition)}`);
   }
-}
-
-/** How many things of the named kind `seat` controls right now. */
-function countControlled(
-  state: GameState,
-  seat: PlayerId,
-  condition: Extract<Condition, { kind: 'controls' }>,
-  source: EntityId | undefined,
-): number {
-  if (condition.what === 'battlefield') {
-    // A Battlefield is not an entity here, so it is counted off the board state
-    // rather than swept for. Tags on a Battlefield are unreachable for the same
-    // reason, and a tagged Battlefield predicate is refused at ingest.
-    return state.battlefields.filter((battlefield) => battlefield.controller === seat).length;
-  }
-
-  // 355.9: "here" is the source's own Battlefield. A source that names none —
-  // one in a Base, or a card still in hand — counts nothing.
-  let here: number | undefined;
-  if (condition.here === true) {
-    const at = source === undefined ? undefined : state.entities[source]?.location;
-    if (at?.kind !== 'battlefield') {
-      return 0;
-    }
-    here = at.index;
-  }
-
-  let total = 0;
-  for (const entity of boardEntities(state, seat)) {
-    if (condition.excludeSelf === true && entity === source) {
-      continue;
-    }
-    if (here !== undefined) {
-      const at = state.entities[entity]?.location;
-      if (at?.kind !== 'battlefield' || at.index !== here) {
-        continue;
-      }
-    }
-    const card = entityCard(state, entity);
-    if (card.type !== (condition.what as ControlledKind)) {
-      continue;
-    }
-    // 133.8.a gives an ordinary tag no rules meaning of its own, but a card may
-    // still ask about one — "another Dragon", "a Poro".
-    if (condition.tag !== undefined && !hasTag(card.tags, condition.tag)) {
-      continue;
-    }
-    total += 1;
-  }
-  return total;
-}
-
-function hasTag(tags: readonly string[], tag: string): boolean {
-  const wanted = tag.toLowerCase();
-  return tags.some((candidate) => candidate.toLowerCase() === wanted);
-}
-
-/** Everything `player` controls that is on the Board (rule 380). */
-function boardEntities(state: GameState, player: PlayerId): EntityId[] {
-  const found: EntityId[] = [];
-  const seat = state.players[player];
-  if (seat !== undefined) {
-    // Channelled Runes are on the Board: 161.1.a has a Rune stay there until it
-    // is Recycled or otherwise removed, which is what makes "while you have 8+
-    // runes" a question this predicate can answer at all.
-    found.push(...seat.zones.base, ...seat.zones.legendZone, ...seat.zones.runes);
-  }
-  for (const battlefield of state.battlefields) {
-    for (const unit of battlefield.units) {
-      if (state.entities[unit]?.controller === player) {
-        found.push(unit);
-      }
-    }
-  }
-  return found;
 }

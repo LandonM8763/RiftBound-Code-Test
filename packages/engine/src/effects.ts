@@ -8,7 +8,9 @@
 import type { CardEffect, DestinationSpec, Effect, TargetSpec } from '@riftbound/cards';
 
 import type { TriggerEventInstance } from './abilities.js';
+import { mightOf } from './combat.js';
 import { conditionMet } from './condition.js';
+import { countOf } from './count.js';
 import type { GameEvent } from './events.js';
 import { moveEntity, withEntity, withPlayer } from './mutate.js';
 import { createTokens, sendToNonBoardZone } from './token.js';
@@ -223,8 +225,14 @@ function applyEffect(
 ): GameState {
   const target = choices.target;
   switch (effect.kind) {
-    case 'draw':
-      return context.drawCards(state, controller, effect.count, events);
+    case 'draw': {
+      // "Draw 1 for each of your MIGHTY units": the printed number is per-unit,
+      // so the count multiplies it. `mightOf` is safe to consult here — an
+      // effect executes, it is not something `mightOf` consults back.
+      const times =
+        effect.per === undefined ? 1 : countOf(state, controller, source, effect.per, mightOf);
+      return context.drawCards(state, controller, effect.count * times, events);
+    }
 
     case 'dealDamage': {
       if (target === undefined || !onBoard(state, target)) {

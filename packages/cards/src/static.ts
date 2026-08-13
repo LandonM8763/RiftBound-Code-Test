@@ -19,6 +19,7 @@
  */
 import type { AbilityDependency } from './ability.js';
 import type { Condition } from './condition.js';
+import type { Count } from './count.js';
 import type { Keyword } from './keyword.js';
 
 /**
@@ -65,6 +66,18 @@ export interface StaticGrant {
    * consulted while the card is still in hand.
    */
   readonly entersReady?: boolean | undefined;
+  /**
+   * A value read off the state, multiplying everything numeric in this grant.
+   *
+   * "I have +1 Might **for each friendly gear**" is `might: 1` with this set;
+   * "I have ASSAULT **equal to the number of enemy units here**" is
+   * `keywords: [ASSAULT 1]` with the same. One field rather than one per grant
+   * kind, because "equal to N" and "+1 for each N" are the same arithmetic.
+   *
+   * **A count that reads Might is refused here**, because `mightOf` consults
+   * statics and would recurse through this. See `Count`.
+   */
+  readonly per?: Count | undefined;
 }
 
 export interface StaticAbility {

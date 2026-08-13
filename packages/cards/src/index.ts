@@ -23,6 +23,8 @@ export { isMandatory } from './additional-cost.js';
 export type { AdditionalCost, CostPayment } from './additional-cost.js';
 
 export { isSourceCondition } from './condition.js';
+export { readsMight } from './count.js';
+export type { Count } from './count.js';
 export type { Condition, ControlledKind } from './condition.js';
 
 export { UNMODELLED_KEYWORDS, hasKeyword, keywordValue } from './keyword.js';

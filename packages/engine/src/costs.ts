@@ -24,12 +24,13 @@ import {
   type CostTarget,
 } from '@riftbound/cards';
 
+import { mightOf } from './combat.js';
 import { conditionMet, type ConditionContext } from './condition.js';
+import { countOf } from './count.js';
 import { dependencyMet } from './dependency.js';
 import {
   entityCard,
   getEntity,
-  getPlayer,
   type EntityId,
   type GameState,
   type PlayerId,
@@ -171,10 +172,9 @@ export function abilityCost(state: GameState, player: PlayerId, base: Cost): Cos
  * card's controller's trash.
  */
 export function countFor(state: GameState, of: PlayerId, count: CostCount): number {
-  const seat = getPlayer(state, of);
-  return count.kind === 'cardsInTrash'
-    ? seat.zones.trash.length
-    : seat.playedThisTurn.length;
+  // Might is safe to read here, unlike inside a static's grant: `mightOf`
+  // consults statics and cost modifiers, not costs, so there is no cycle back.
+  return countOf(state, of, undefined, count, mightOf);
 }
 
 /**
