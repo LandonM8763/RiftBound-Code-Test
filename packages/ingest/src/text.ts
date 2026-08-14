@@ -1743,6 +1743,24 @@ export function parseCardText(text: string, card: CardFacts = {}): ParsedText {
       continue;
     }
 
+    // 821.1.c: Weaponmaster is "When you play me, you may choose a Card you
+    // control with the Equipment tag … Pay the cost of its Equip ability,
+    // reduced by [A], to attach it to this unit." A Play Effect with a target
+    // and a payment, all of which the model has, so it desugars too.
+    if (/^weaponmaster$/i.test(line)) {
+      triggered.push({
+        condition: { event: 'played', subject: 'self' },
+        optional: true,
+        effect: {
+          target: { kind: 'gear', scope: 'friendly' },
+          // 135.2.e.5: the reduction is one `[A]`, which the export renders as
+          // "1 Rune less" in the reminder.
+          effects: [{ kind: 'equip', discountAnyPower: 1 }],
+        },
+      });
+      continue;
+    }
+
     // 819.1.d: Quick-Draw is "[Reaction]" plus "When you play this, attach it
     // to a unit you control" — two things the model already has, so it
     // desugars rather than becoming a keyword.

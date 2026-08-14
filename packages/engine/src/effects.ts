@@ -8,12 +8,14 @@
 import type { CardEffect, DestinationSpec, Effect, TargetSpec } from '@riftbound/cards';
 
 import type { TriggerEventInstance } from './abilities.js';
-import { attach, detach } from './attach.js';
+import { attach, detach, equipAbilityOf } from './attach.js';
 import { mightOf } from './combat.js';
 import { conditionMet } from './condition.js';
+import { abilityCost } from './costs.js';
 import { countOf } from './count.js';
 import type { GameEvent } from './events.js';
 import { moveEntity, withEntity, withPlayer } from './mutate.js';
+import { canPay, payFrom } from './play.js';
 import { createTokens, sendToNonBoardZone } from './token.js';
 import type { EntityId, GameState, Location, PlayerId } from './state.js';
 import {
@@ -123,6 +125,19 @@ export function legalTargets(
     );
   }
 
+  // 821.1.c: "a Card you control with the Equipment tag" — a Gear on the Board,
+  // whether it is already Attached to something or not (the reminder's "even if
+  // it's already attached", and 434.1.f handles the move).
+  if (spec.kind === 'gear') {
+    const found: EntityId[] = [];
+    for (const id of boardEntitiesOf(state, controller)) {
+      if (entityCard(state, id).type === 'gear') {
+        found.push(id);
+      }
+    }
+    return found;
+  }
+
   // Neither makes the player choose: `none` affects nobody in particular and
   // `self` is already determined by which card the text is printed on.
   if (spec.kind !== 'unit') {
@@ -161,6 +176,19 @@ export function legalTargets(
     .map(({ unit }) => unit);
 }
 
+/** Everything `player` controls that is on the Board (rule 380). */
+function boardEntitiesOf(state: GameState, player: PlayerId): EntityId[] {
+  const found: EntityId[] = [...getPlayer(state, player).zones.base];
+  for (const battlefield of state.battlefields) {
+    for (const id of battlefield.units) {
+      if (getEntity(state, id).controller === player) {
+        found.push(id);
+      }
+    }
+  }
+  return found;
+}
+
 /** Whether a chosen target is still valid (rule 358.1, the Check Legality step). */
 export function isValidTarget(
   state: GameState,
@@ -170,7 +198,7 @@ export function isValidTarget(
 ): boolean {
   // A self-targeting card takes no chosen target; supplying one is an error,
   // not a different reading.
-  if (spec.kind !== 'unit' && spec.kind !== 'trashCard') {
+  if (spec.kind !== 'unit' && spec.kind !== 'trashCard' && spec.kind !== 'gear') {
     return target === undefined;
   }
   return target !== undefined && legalTargets(state, controller, spec).includes(target);
@@ -489,6 +517,34 @@ function applyEffect(
 
     case 'detach':
       return detach(state, source);
+
+    // 821: Weaponmaster. The chosen Equipment's *own* Equip cost is paid, and
+    // the Equipment is Attached to the source — the opposite direction from
+    // `attach` above, because 821.1.c is printed on the Unit rather than on the
+    // Gear.
+    case 'equip': {
+      if (target === undefined || !onBoard(state, target) || !onBoard(state, source)) {
+        return state;
+      }
+      const equip = equipAbilityOf(state, target);
+      // 821.1.c.4: a chosen card with no Equip cost cannot pay one, so nothing
+      // happens — 821.1.c.5 leaves it exactly where it was.
+      if (equip === undefined) {
+        return state;
+      }
+      const owed = abilityCost(state, controller, equip.cost, {
+        anyPower: effect.discountAnyPower ?? 0,
+      });
+      if (!canPay(getPlayer(state, controller).pool, owed)) {
+        return state;
+      }
+      let next = withPlayer(state, controller, (current) => ({
+        ...current,
+        pool: payFrom(current.pool, owed),
+      }));
+      events.push({ type: 'attached', card: target, topMost: source });
+      return attach(next, target, source);
+    }
 
     // "Return it to its owner's hand." Rule 412 lists no Return action, so this
     // is a plain zone move — and deliberately not a Recall (455), which keeps

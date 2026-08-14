@@ -91,7 +91,13 @@ export type CostChange =
    */
   | { readonly kind: 'ignoreBase'; readonly component: 'energy' | 'power' | 'both' }
   /** 356.3: a cost increase. */
-  | { readonly kind: 'increase'; readonly energy?: number | undefined; readonly power?: readonly Domain[] | undefined }
+  | {
+      readonly kind: 'increase';
+      readonly energy?: number | undefined;
+      readonly power?: readonly Domain[] | undefined;
+      /** `[A]` (135.2.e.5): Power of any Domain — what 809.1.c's Deflect adds. */
+      readonly anyPower?: number | undefined;
+    }
   /**
    * 356.4: a discount.
    *
@@ -104,6 +110,14 @@ export type CostChange =
       readonly energy?: number | undefined;
       readonly power?: readonly Domain[] | undefined;
       readonly minimumEnergy?: number | undefined;
+      /**
+       * `[A]` pips removed (135.2.e.5) — 821's "reduced by [A]".
+       *
+       * 821.1.c.3 falls straight out of removing pips that are there: a cost
+       * that contains no `[A]` "can still be paid, but will not be reduced",
+       * which is what subtracting from zero does.
+       */
+      readonly anyPower?: number | undefined;
       /**
        * "1 less **for each** card in your trash" — an amount counted off the
        * state rather than printed.

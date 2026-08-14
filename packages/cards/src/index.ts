@@ -1,7 +1,7 @@
 export { DOMAINS, isDomain, withinIdentity } from './domain.js';
 export type { Domain, DomainIdentity } from './domain.js';
 
-export { FREE, cost, powerOf, totalRuneCost } from './cost.js';
+export { FREE, anyPowerOf, cost, powerOf, totalRuneCost } from './cost.js';
 export type { Cost } from './cost.js';
 
 export { cardId, costOf, effectOf, isChampionUnit, isPlayable, isSignature } from './card.js';

@@ -7,13 +7,22 @@
  * *Unit* becomes the Top-Most Card (818.1.b.2). So the Gear's Effect Text reads
  * as though printed on the Unit — 718.3 for its abilities, 718.4 for its Might.
  */
-import { CardRegistry, cardId, cost, type CardDefinition, type TargetSpec } from '@riftbound/cards';
+import {
+  CardRegistry,
+  cardId,
+  cost,
+  totalRuneCost,
+  type CardDefinition,
+  type TargetSpec,
+} from '@riftbound/cards';
 import { makeBattlefield, makeGear, makeLegend, makeRune, makeUnit } from '@riftbound/cards/testing';
 import { describe, expect, it } from 'vitest';
 
 import { activatableAbilities } from './abilities.js';
 import { attach, attachmentsOf, detach } from './attach.js';
 import { mightOf } from './combat.js';
+import { executeEffect } from './effects.js';
+import { canPay, payFrom } from './play.js';
 import { checkInvariants } from './invariants.js';
 import { moveEntity } from './mutate.js';
 import { reduce } from './reduce.js';
@@ -372,5 +381,203 @@ describe('abilities move with the attachment (718.2-718.3)', () => {
     expect(state.entities[gear]!.attachedTo).toBe(unit);
     expect(mightOf(state, unit)).toBe(3);
     checkInvariants(state);
+  });
+});
+
+/**
+ * Weaponmaster (821) and `[A]`, Power of any Domain (135.2.e.5).
+ *
+ * These are one piece of work because the keyword's reduction is stated in
+ * `[A]`, and `Cost` had no way to say it. The reduction is also the half that
+ * does nothing on any Equipment printed so far — 821.1.c.3 says a cost with no
+ * `[A]` in it "will not be reduced", and every printed Equip cost is Energy
+ * plus a named Domain.
+ */
+/**
+ * Run one Weaponmaster equip effect.
+ *
+ * `executeEffect` rather than the reducer, because what is under test is the
+ * payment and the Attach; the trigger reaching the Chain with a chosen target
+ * is `abilities.test.ts`'s subject and the fuzz harness's.
+ */
+function executeEffectFor(
+  state: GameState,
+  controller: number,
+  source: EntityId,
+  target: EntityId,
+): GameState {
+  return executeEffect(
+    state,
+    { controller: controller as never, source, choices: { target } },
+    { target: { kind: 'gear', scope: 'friendly' }, effects: [{ kind: 'equip', discountAnyPower: 1 }] },
+    [],
+    {
+      drawCards: (current) => current,
+      queueDeaths: (current) => current,
+      afterMove: (current) => current,
+      raise: (current) => current,
+    },
+  );
+}
+
+describe('Weaponmaster (821)', () => {
+  /** "EQUIP Fury" — cost 1 Fury Power, so a pool of one Fury pip pays it. */
+  const SWORD_EQUIP = makeGear(['fury'], {
+    id: cardId('A-040'),
+    name: 'Equip Sword',
+    cost: cost(1),
+    abilities: {
+      activated: [
+        {
+          cost: cost(0, 'fury'),
+          exhaustSelf: false,
+          effect: { target: { kind: 'unit', scope: 'friendly' }, effects: [{ kind: 'attach' }] },
+        },
+      ],
+    },
+    attached: { mightBonus: 2 },
+  });
+
+  /** A Gear with no Equip ability at all — 821.1.c.4's case. */
+  const INERT = makeGear(['fury'], { id: cardId('A-041'), name: 'Inert', cost: cost(1) });
+
+  const WEAPONMASTER = makeUnit(2, ['fury'], {
+    id: cardId('A-042'),
+    name: 'Weaponmaster',
+    cost: cost(1),
+    abilities: {
+      triggered: [
+        {
+          condition: { event: 'played', subject: 'self' },
+          optional: true,
+          effect: {
+            target: { kind: 'gear', scope: 'friendly' },
+            effects: [{ kind: 'equip', discountAnyPower: 1 }],
+          },
+        },
+      ],
+    },
+  });
+
+  const WM_REGISTRY = CardRegistry.from([
+    LEGEND,
+    CHAMPION,
+    PLAIN,
+    SWORD_EQUIP,
+    INERT,
+    WEAPONMASTER,
+    RUNE,
+    ...BATTLEFIELDS,
+  ] as CardDefinition[]);
+
+  function wmGame(seed: string): GameState {
+    const list: DeckList = {
+      legend: LEGEND.id,
+      champion: CHAMPION.id,
+      main: [
+        ...Array.from({ length: 6 }, () => PLAIN.id),
+        ...Array.from({ length: 4 }, () => SWORD_EQUIP.id),
+        ...Array.from({ length: 3 }, () => INERT.id),
+        ...Array.from({ length: 3 }, () => WEAPONMASTER.id),
+      ],
+      runes: Array.from({ length: 8 }, () => RUNE.id),
+      battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
+    };
+    let state = createGame({ decks: [list, list], registry: WM_REGISTRY, seed }).state;
+    while (state.phase === 'mulligan') {
+      state = reduce(state, { type: 'mulligan', cards: [] }).state;
+    }
+    while (state.phase !== 'main' && !isOver(state)) {
+      state = reduce(state, { type: 'resolvePhase' }).state;
+    }
+    return state;
+  }
+
+  /** Give the active player enough Fury Power to pay an Equip cost. */
+  function withFury(state: GameState, amount: number): GameState {
+    const player = state.activePlayer;
+    return {
+      ...state,
+      players: state.players.map((seat) =>
+        seat.id === player
+          ? { ...seat, pool: { ...seat.pool, power: { ...seat.pool.power, fury: amount } } }
+          : seat,
+      ),
+    };
+  }
+
+  it('821.1.c: pays the chosen Equipment`s own Equip cost and Attaches it', () => {
+    let state = withFury(wmGame('wm-pay'), 1);
+    const player = state.activePlayer;
+    const [a, gear] = onBoard(state, SWORD_EQUIP.id);
+    const [b, unit] = onBoard(a, WEAPONMASTER.id);
+    state = b;
+
+    state = executeEffectFor(state, player, unit, gear);
+
+    // The *Gear* is attached to the *Unit* — the opposite direction from Equip.
+    expect(state.entities[gear]!.attachedTo).toBe(unit);
+    expect(mightOf(state, unit)).toBe(4);
+    // 1 Fury Power spent.
+    expect(state.players[player]!.pool.power.fury).toBe(0);
+    checkInvariants(state);
+  });
+
+  it('821.1.c.5: an unpayable cost leaves the Equipment exactly where it was', () => {
+    let state = withFury(wmGame('wm-broke'), 0);
+    const [a, gear] = onBoard(state, SWORD_EQUIP.id);
+    const [b, unit] = onBoard(a, WEAPONMASTER.id);
+    const before = b;
+
+    const after = executeEffectFor(before, before.activePlayer, unit, gear);
+    expect(after.entities[gear]!.attachedTo).toBeUndefined();
+  });
+
+  it('821.1.c.4: a chosen card with no Equip ability cannot pay one', () => {
+    let state = withFury(wmGame('wm-inert'), 5);
+    const [a, gear] = onBoard(state, INERT.id);
+    const [b, unit] = onBoard(a, WEAPONMASTER.id);
+
+    const after = executeEffectFor(b, b.activePlayer, unit, gear);
+    expect(after.entities[gear]!.attachedTo).toBeUndefined();
+    // Nothing was paid either.
+    expect(after.players[b.activePlayer]!.pool.power.fury).toBe(5);
+  });
+
+  it('821.1.c.3: a cost with no [A] in it is not reduced', () => {
+    // The Equip cost is 1 Fury Power, not `[A]`, so the discount removes
+    // nothing and the Fury still has to be paid.
+    let state = withFury(wmGame('wm-noreduce'), 0);
+    const [a, gear] = onBoard(state, SWORD_EQUIP.id);
+    const [b, unit] = onBoard(a, WEAPONMASTER.id);
+    expect(executeEffectFor(b, b.activePlayer, unit, gear).entities[gear]!.attachedTo).toBeUndefined();
+  });
+});
+
+describe('[A], Power of any Domain (135.2.e.5)', () => {
+  const POOL = {
+    energy: 2,
+    power: { fury: 1, calm: 1, mind: 0, body: 0, chaos: 0, order: 0 },
+  };
+
+  it('135.2.e.5.a: is paid by Power of any Domain', () => {
+    expect(canPay(POOL, { energy: 0, power: [], anyPower: 2 })).toBe(true);
+    expect(canPay(POOL, { energy: 0, power: [], anyPower: 3 })).toBe(false);
+  });
+
+  it('does not let one pip pay both a named Domain and an [A]', () => {
+    // One Fury and one Calm cannot cover "Fury plus two [A]"; asking each
+    // Domain separately would say yes.
+    expect(canPay(POOL, { energy: 0, power: ['fury'], anyPower: 2 })).toBe(false);
+    expect(canPay(POOL, { energy: 0, power: ['fury'], anyPower: 1 })).toBe(true);
+  });
+
+  it('spends real pips when paid', () => {
+    const after = payFrom(POOL, { energy: 0, power: [], anyPower: 2 });
+    expect(after.power.fury + after.power.calm).toBe(0);
+  });
+
+  it('counts toward the Rune cost of a card (137, 414, 416)', () => {
+    expect(totalRuneCost({ energy: 1, power: ['fury'], anyPower: 2 })).toBe(4);
   });
 });

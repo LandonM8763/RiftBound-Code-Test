@@ -12,6 +12,7 @@
  * found.
  */
 import {
+  anyPowerOf,
   isPlayable,
   layerOf,
   modifierApplies,
@@ -156,8 +157,23 @@ export function totalCost(
  * decreases as a card's, so it runs the same layers — but only modifiers that
  * name abilities apply, since "cards cost 1 less" is not about abilities.
  */
-export function abilityCost(state: GameState, player: PlayerId, base: Cost): Cost {
-  return applyModifiers(base, 'ability', player, activeModifiers(state), state);
+export function abilityCost(
+  state: GameState,
+  player: PlayerId,
+  base: Cost,
+  /**
+   * 821.1.c's "reduced by [A]": a discount applied *alongside* rule 356's
+   * layers rather than instead of them, because Weaponmaster reduces the Equip
+   * cost as it would be if the ability were being activated (821.1.c.2) — so
+   * every ordinary modifier still applies first.
+   */
+  reduce: { readonly anyPower?: number } = {},
+): Cost {
+  const modified = applyModifiers(base, 'ability', player, activeModifiers(state), state);
+  const anyPower = Math.max(0, anyPowerOf(modified) - (reduce.anyPower ?? 0));
+  // Rebuilt rather than spread, so a reduction to zero actually clears the
+  // field instead of leaving the pre-reduction one behind.
+  return { energy: modified.energy, power: modified.power, ...(anyPower === 0 ? {} : { anyPower }) };
 }
 
 /**
@@ -243,7 +259,9 @@ export function applyModifiers(
       case 'ignoreBase':
         cost = {
           energy: change.component === 'power' ? cost.energy : 0,
+          // `[A]` is Power (135.2.e.5), so ignoring the Power cost ignores it.
           power: change.component === 'energy' ? cost.power : [],
+          ...(change.component === 'energy' ? { anyPower: anyPowerOf(cost) } : {}),
         };
         break;
 
@@ -252,6 +270,7 @@ export function applyModifiers(
         cost = {
           energy: cost.energy + (change.energy ?? 0),
           power: [...cost.power, ...(change.power ?? [])],
+          anyPower: anyPowerOf(cost) + (change.anyPower ?? 0),
         };
         break;
 
@@ -273,7 +292,11 @@ export function applyModifiers(
   }
 
   // 356.6: Energy and Power costs can't be reduced below 0.
-  return { energy: Math.max(0, cost.energy), power: cost.power };
+  return {
+    energy: Math.max(0, cost.energy),
+    power: cost.power,
+    ...(anyPowerOf(cost) === 0 ? {} : { anyPower: Math.max(0, anyPowerOf(cost)) }),
+  };
 }
 
 /** Which of rule 356's three payer cases this modifier is looking at. */
@@ -321,6 +344,10 @@ function discount(
     }
   }
 
-  return { energy, power };
+  // 821.1.c.3: a cost with no `[A]` in it "will not be reduced", which is what
+  // taking pips off zero already does — no special case needed.
+  const anyPower = Math.max(0, anyPowerOf(cost) - (change.anyPower ?? 0));
+
+  return { energy, power, ...(anyPower === 0 ? {} : { anyPower }) };
 }
 

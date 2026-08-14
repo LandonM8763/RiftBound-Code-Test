@@ -376,7 +376,7 @@ describe('keywords (rules 800-828)', () => {
   });
 
   it('refuses a keyword the engine does not model, with a stated reason', () => {
-    for (const keyword of ['HIDDEN', 'DEFLECT', 'WEAPONMASTER', 'VISION', 'REPEAT 2']) {
+    for (const keyword of ['HIDDEN', 'DEFLECT', 'VISION', 'REPEAT 2']) {
       expect(parseCardText(keyword).unparsed).toHaveLength(1);
     }
     expect(Object.keys(UNMODELLED_KEYWORDS)).toContain('hidden');
@@ -1161,5 +1161,27 @@ describe('several sentences on one line', () => {
     // Merging is for rules text only; a second ability of a kind would
     // silently lose the first.
     expect(parseCardText('Exhaust: Draw 1. Exhaust: Draw 2.').unparsed).toHaveLength(1);
+  });
+});
+
+describe('Weaponmaster (821)', () => {
+  it('821.1.c: desugars into an optional Play Effect that Equips a chosen Gear', () => {
+    const parsed = parseCardText('WEAPONMASTER');
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.triggered?.[0]).toEqual({
+      condition: { event: 'played', subject: 'self' },
+      optional: true,
+      effect: {
+        target: { kind: 'gear', scope: 'friendly' },
+        // 135.2.e.5: the reduction is one `[A]`, printed as "1 Rune less".
+        effects: [{ kind: 'equip', discountAnyPower: 1 }],
+      },
+    });
+  });
+
+  it('is no longer among the refused keywords', () => {
+    expect(Object.keys(UNMODELLED_KEYWORDS)).not.toContain('weaponmaster');
+    expect(Object.keys(UNMODELLED_KEYWORDS)).not.toContain('equip');
+    expect(Object.keys(UNMODELLED_KEYWORDS)).not.toContain('quick-draw');
   });
 });

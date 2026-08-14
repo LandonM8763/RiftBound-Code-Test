@@ -12,6 +12,8 @@
  *   pool to be filled first reaches exactly the same states.
  */
 import {
+  DOMAINS,
+  anyPowerOf,
   isMandatory,
   isPlayable,
   powerOf,
@@ -32,12 +34,19 @@ export function canPay(pool: RunePool, cost: Cost): boolean {
   if (pool.energy < cost.energy) {
     return false;
   }
-  for (const domain of new Set(cost.power)) {
-    if (powerIn(pool, domain) < powerOf(cost, domain)) {
+  let spare = 0;
+  for (const domain of DOMAINS) {
+    const held = powerIn(pool, domain);
+    const owed = powerOf(cost, domain);
+    if (held < owed) {
       return false;
     }
+    spare += held - owed;
   }
-  return true;
+  // 135.2.e.5.a: `[A]` is paid by Power of any Domain, so what is left over
+  // once every named Domain is covered has to stretch across all of it. Asking
+  // each Domain separately would let one surplus pip pay two [A].
+  return spare >= anyPowerOf(cost);
 }
 
 /** Remove a cost's resources from a pool (rule 444.1). Assumes `canPay`. */
@@ -45,6 +54,21 @@ export function payFrom(pool: RunePool, cost: Cost): RunePool {
   const power: Record<Domain, number> = { ...pool.power };
   for (const domain of cost.power) {
     power[domain] -= 1;
+  }
+  // Which Domain pays an `[A]` is the player's choice (135.2.e.5.a) and the
+  // engine makes it for them, in a fixed Domain order. Nothing downstream can
+  // observe the difference today: the pool empties at the start of the Main
+  // Phase and again in the Ending Phase (316.3, 317.2.e), so a leftover pip of
+  // one Domain rather than another survives only until the next spend. Expose
+  // the choice when a card cares which Domain is left.
+  let owed = anyPowerOf(cost);
+  for (const domain of DOMAINS) {
+    if (owed === 0) {
+      break;
+    }
+    const spend = Math.min(owed, power[domain]);
+    power[domain] -= spend;
+    owed -= spend;
   }
   return { energy: pool.energy - cost.energy, power };
 }
@@ -123,13 +147,17 @@ export interface PlayableCheck {
 function withResourceCosts(cost: Cost, costs: readonly AdditionalCost[]): Cost {
   let energy = cost.energy;
   let power = [...cost.power];
+  let anyPower = anyPowerOf(cost);
   for (const additional of costs) {
     if (additional.pay.kind === 'resources') {
       energy += additional.pay.cost.energy;
       power = [...power, ...additional.pay.cost.power];
+      // 809.1.c's Deflect cost is `[A]`, so this sum has to carry it or an
+      // unaffordable Deflect would read as free.
+      anyPower += anyPowerOf(additional.pay.cost);
     }
   }
-  return { energy, power };
+  return { energy, power, ...(anyPower === 0 ? {} : { anyPower }) };
 }
 
 /**

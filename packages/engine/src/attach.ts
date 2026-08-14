@@ -17,7 +17,7 @@
  * while it is. They are never both live, which is why `GearCard.attached` is a
  * separate field rather than more entries in `abilities`.
  */
-import type { AttachedText, CardAbilities, Keyword } from '@riftbound/cards';
+import type { ActivatedAbility, AttachedText, CardAbilities, Keyword } from '@riftbound/cards';
 
 import { moveEntity } from './mutate.js';
 import {
@@ -112,6 +112,33 @@ export function activeAbilities(
     found.push({ abilities, from: source });
   }
   return found;
+}
+
+/**
+ * The Equip ability of a Gear, if it has one (818).
+ *
+ * Identified by what it *does* rather than by a flag, because 818.1.c.2 defines
+ * Equip as exactly "[Cost]: Attach this gear to a unit you control" — so the
+ * Activated Ability whose effect is an `attach` is the Equip ability, and a
+ * separate marker would be a second source of truth that could disagree with
+ * the effect.
+ *
+ * Read off the card's own abilities rather than through `activeAbilities`,
+ * because 821.1.c says the necessary parts of an Equipment's Rules Text "are no
+ * longer Inactive if they are currently Inactive" — a Weaponmaster can take an
+ * Equipment that is already Attached, where 718.2 would otherwise hide it.
+ */
+export function equipAbilityOf(
+  state: GameState,
+  gear: EntityId,
+): ActivatedAbility | undefined {
+  const card = entityCard(state, gear);
+  if (card.type !== 'gear') {
+    return undefined;
+  }
+  return (card.abilities?.activated ?? []).find((ability) =>
+    ability.effect.effects.some((effect) => effect.kind === 'attach'),
+  );
 }
 
 /**

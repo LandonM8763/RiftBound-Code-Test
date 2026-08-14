@@ -60,7 +60,21 @@ export type TargetSpec =
    * `cardType` narrows to "a **unit** from your trash", which is how the corpus
    * prints it; omitted, any card qualifies.
    */
-  | { readonly kind: 'trashCard'; readonly cardType?: CardType | undefined };
+  | { readonly kind: 'trashCard'; readonly cardType?: CardType | undefined }
+  /**
+   * A Gear on the Board its controller owns — 821.1.c's "a Card you control
+   * with the Equipment tag".
+   *
+   * Separate from `unit` rather than a `cardType` on it, because the two admit
+   * different things: a Unit target can be damaged, killed, moved and healed,
+   * and a Gear can be none of those. Keeping them apart is what stops "deal 3
+   * to a unit" reaching an Equipment.
+   *
+   * 821.1.c.1 chooses an Equipment "whether it has an Equip ability or not",
+   * so nothing here requires one; what happens to a Gear without one is the
+   * `equip` effect's business (821.1.c.4: the cost cannot be paid).
+   */
+  | { readonly kind: 'gear'; readonly scope: 'friendly' };
 
 /**
  * Where a `move` effect sends its target (rule 449.1).
@@ -220,7 +234,26 @@ export type Effect =
    */
   | { readonly kind: 'attach' }
   /** Rule 435: unlink the source from whatever it is Attached to. */
-  | { readonly kind: 'detach' };
+  | { readonly kind: 'detach' }
+  /**
+   * Rule 821: pay the chosen Equipment's own Equip cost and Attach it to the
+   * source. Weaponmaster, and nothing else.
+   *
+   * **The direction is the opposite of `attach`.** `attach` links the source to
+   * the chosen Unit — the Gear's own Equip ability. This links the chosen *Gear*
+   * to the source Unit, because 821.1.c is printed on the Unit.
+   *
+   * It is also the one effect that *pays* something. The cost is read off the
+   * target, so it cannot be settled at step 3 the way every other cost is —
+   * 402.2 chooses the target, and only then is there a cost to work out.
+   * 821.1.c.5 makes an unpayable one a no-op rather than an error, which is why
+   * that is safe: the Equipment "stays in its current location, Attached to
+   * anything it was already Attached to".
+   *
+   * `discountAnyPower` is 821.1.c's "reduced by [A]". 821.1.c.3 needs no code:
+   * a cost with no `[A]` in it simply has none to remove.
+   */
+  | { readonly kind: 'equip'; readonly discountAnyPower?: number | undefined };
 
 /**
  * Recycle (rule 416) is deliberately **not** an effect primitive.
@@ -270,7 +303,10 @@ export function needsTarget(effect: CardEffect | undefined): boolean {
  * affects nobody in particular, the other is already determined.
  */
 export function needsTargetChoice(spec: TargetSpec | undefined): boolean {
-  return spec !== undefined && (spec.kind === 'unit' || spec.kind === 'trashCard');
+  return (
+    spec !== undefined &&
+    (spec.kind === 'unit' || spec.kind === 'trashCard' || spec.kind === 'gear')
+  );
 }
 
 /** True when playing this card requires the player to choose a Destination. */
