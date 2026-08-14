@@ -128,6 +128,32 @@ export interface GearCard extends CardBase {
   readonly cost: Cost;
   /** Rules text run when the Gear is played (rule 359.2.b). */
   readonly effect?: CardEffect | undefined;
+  /**
+   * What this Gear contributes to its Top-Most Card while Attached (716-719).
+   *
+   * Rule 724 is why this is separate from the card's ordinary abilities:
+   * **Effect Text is Inactive unless the card is Attached**, and 434.1.e makes
+   * the reverse true of its printed Rules Text. So a Gear has two sets of
+   * abilities that are never active at the same time, and collapsing them into
+   * one would give an unattached Gear abilities it does not have.
+   */
+  readonly attached?: AttachedText | undefined;
+}
+
+/**
+ * The half of a Gear that only exists while it is Attached (718.3-718.4).
+ *
+ * 718.3 appends the Effect Text's abilities to the Top-Most Card's Rules Text,
+ * and 718.4 has the Might Bonus modulate that card's Might — so from the
+ * equipped Unit's point of view these read exactly as though printed on it.
+ */
+export interface AttachedText {
+  /** 718.4: "Might +2" on the Gear, added to whatever it is Attached to. */
+  readonly mightBonus?: number | undefined;
+  /** Keywords the Gear lends its Top-Most Card, e.g. "ASSAULT 2". */
+  readonly keywords?: readonly Keyword[] | undefined;
+  /** Triggered, Activated and Static abilities appended by 718.3. */
+  readonly abilities?: CardAbilities | undefined;
 }
 
 /** Lives in the 12-card Rune deck and is Channelled to produce resources. */

@@ -125,6 +125,19 @@ export interface Entity {
    */
   readonly grantedKeywords: readonly Keyword[];
   /**
+   * The Top-Most Card this one is Attached to (716-719), if any.
+   *
+   * 718.5.d allows only one at a time, which is why this is a single id rather
+   * than a list — the reverse direction is a sweep, not a stored list, so the
+   * two can never disagree about who is attached to whom.
+   *
+   * 719.3 keeps a Top-Most Card and everything Attached to it at the same
+   * Location, and 719.3.a moves them together; `location` is still the single
+   * source of truth for where each one is, and `attach.ts` is what keeps them
+   * equal.
+   */
+  readonly attachedTo?: EntityId | undefined;
+  /**
    * Buff counters on a Unit (rules 701-705).
    *
    * A real counter, unlike `mightBonus`: each Buff contributes +1 Might (703)

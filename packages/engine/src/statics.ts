@@ -24,6 +24,7 @@ import {
   type ValuedKeywordKind,
 } from '@riftbound/cards';
 
+import { attachedKeywords, attachedMight } from './attach.js';
 import { conditionMet, type ConditionContext } from './condition.js';
 import { countOf } from './count.js';
 import { dependencyMet } from './dependency.js';
@@ -129,7 +130,10 @@ function reaches(
  * while some source on the Board is saying so.
  */
 export function staticMight(state: GameState, unit: EntityId): number {
-  let total = 0;
+  // 718.4: every Attached card's Might Bonus modulates its Top-Most Card's
+  // Might. Counted here rather than in `mightOf` so that every caller which
+  // already consults statics picks it up without a second lookup.
+  let total = attachedMight(state, unit);
   for (const { source, controller, ability } of activeStatics(state)) {
     const might = ability.grant.might;
     if (might === undefined || might === 0) {
@@ -191,6 +195,14 @@ export function keywordsOf(state: GameState, unit: EntityId): readonly Keyword[]
         );
       }
     }
+  }
+
+  // 718.3: an Attached card's Effect Text keywords read as though printed on
+  // the Top-Most Card — "EQUIP Fury / ASSAULT 2" gives the equipped Unit
+  // Assault, not the Gear.
+  const lent = attachedKeywords(state, unit);
+  if (lent.length > 0) {
+    (granted ??= []).push(...lent);
   }
 
   // "Give a unit ASSAULT 3 this turn" (801.3.a). Unlike a static this is *on*

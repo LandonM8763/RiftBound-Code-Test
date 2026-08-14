@@ -41,6 +41,7 @@ import {
 import { totalCost } from './costs.js';
 import { canPay, payFrom, timingAllows, validUnitLocations } from './play.js';
 import { canPayAdditional, payAdditional as performPayment } from './additional.js';
+import { moveAttachments } from './attach.js';
 import { entersReady } from './statics.js';
 import { sendToNonBoardZone } from './token.js';
 import { Rng } from './rng.js';
@@ -1037,6 +1038,13 @@ function afterMove(
     if (contestedBefore === null && next.battlefields[to.index]?.contestedBy === player) {
       events.push({ type: 'battlefieldContested', battlefield: to.index, player });
     }
+  }
+
+  // 719.3.a: everything Attached follows its Top-Most Card, and 718.5.c stops
+  // it moving separately. Done before the Cleanup so Control is settled with
+  // the attachments already where they belong.
+  for (const unit of moved) {
+    next = moveAttachments(next, unit, to);
   }
 
   // 453: a Move is followed by a Cleanup.

@@ -14,6 +14,7 @@
 import { TOKEN_DEFINITIONS, isTokenCard, tokenCardId } from '@riftbound/cards';
 
 import type { GameEvent } from './events.js';
+import { attachmentsOf, detach } from './attach.js';
 import { moveEntity, type DeckEnd } from './mutate.js';
 import {
   entityCard,
@@ -49,10 +50,20 @@ export function sendToNonBoardZone(
   to: Location,
   end: DeckEnd = 'bottom',
 ): GameState {
-  if (!isToken(state, id)) {
-    return moveEntity(state, id, to, end);
+  // 719.5: when a Top-Most Card leaves the Board, everything Attached to it
+  // goes too — an Equipment cannot stay behind on an empty Battlefield.
+  let next = state;
+  for (const attached of attachmentsOf(state, id)) {
+    next = detach(next, attached);
+    next = sendToNonBoardZone(next, attached, to, end);
   }
-  return moveEntity(state, id, playerLocation(getEntity(state, id).owner, 'banishment'));
+  // 435.1: leaving the Board also ends this card's own Attached state.
+  next = detach(next, id);
+
+  if (!isToken(next, id)) {
+    return moveEntity(next, id, to, end);
+  }
+  return moveEntity(next, id, playerLocation(getEntity(next, id).owner, 'banishment'));
 }
 
 /**

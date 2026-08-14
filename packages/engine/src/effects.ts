@@ -8,6 +8,7 @@
 import type { CardEffect, DestinationSpec, Effect, TargetSpec } from '@riftbound/cards';
 
 import type { TriggerEventInstance } from './abilities.js';
+import { attach, detach } from './attach.js';
 import { mightOf } from './combat.js';
 import { conditionMet } from './condition.js';
 import { countOf } from './count.js';
@@ -474,6 +475,20 @@ function applyEffect(
         grantedKeywords: [...current.grantedKeywords, effect.keyword],
       }));
     }
+
+    // 434 / 818.1.c.2: attach the *source* to the chosen Unit, which becomes
+    // the Top-Most Card. The target is the Unit; what gets attached is never a
+    // choice, because Equip says "attach this gear".
+    case 'attach': {
+      if (target === undefined || !onBoard(state, target)) {
+        return state;
+      }
+      events.push({ type: 'attached', card: source, topMost: target });
+      return attach(state, source, target);
+    }
+
+    case 'detach':
+      return detach(state, source);
 
     // "Return it to its owner's hand." Rule 412 lists no Return action, so this
     // is a plain zone move — and deliberately not a Recall (455), which keeps

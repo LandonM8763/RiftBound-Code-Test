@@ -111,6 +111,7 @@ export function makeGear(
     type: 'gear',
     cost: overrides.cost ?? FREE,
     effect: overrides.effect,
+    attached: overrides.attached,
   };
 }
 

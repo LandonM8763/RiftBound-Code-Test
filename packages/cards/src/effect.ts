@@ -206,7 +206,21 @@ export type Effect =
    * have to persist, which is a different mechanic with different storage, so
    * the parser refuses it rather than guessing at an expiry.
    */
-  | { readonly kind: 'grantKeyword'; readonly keyword: Keyword };
+  | { readonly kind: 'grantKeyword'; readonly keyword: Keyword }
+  /**
+   * Rule 434: Attach the source to the chosen Unit, which becomes the Top-Most
+   * Card (818.1.b.2).
+   *
+   * The direction reads backwards from the card text and is worth stating: a
+   * Gear's "Equip a unit" attaches the *Gear* to the *Unit*, so the Unit is the
+   * Top-Most Card and the Gear's Effect Text then reads as though printed on
+   * it (718.3). `TargetSpec` names the Unit; the thing being attached is always
+   * the effect's own source, because 818.1.c.2 makes Equip "attach **this
+   * gear** to a unit you control".
+   */
+  | { readonly kind: 'attach' }
+  /** Rule 435: unlink the source from whatever it is Attached to. */
+  | { readonly kind: 'detach' };
 
 /**
  * Recycle (rule 416) is deliberately **not** an effect primitive.
