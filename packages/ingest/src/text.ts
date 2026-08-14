@@ -19,8 +19,11 @@ import {
   tokenByName,
   tokenMight,
   readsMight,
+  DOMAINS,
+  type AttachedText,
   type CardAbilities,
   type CardType,
+  type Cost,
   type Count,
   type Domain,
   type CardEffect,
@@ -43,6 +46,13 @@ export interface ParsedText {
   readonly abilities?: CardAbilities | undefined;
   /** Keywords the engine models (rules 800-828). */
   readonly keywords?: readonly Keyword[] | undefined;
+  /**
+   * Rule 136.1's Effect Text: what a Gear lends its Top-Most Card once
+   * Attached. Present only on a card that has an Equip ability to Attach it.
+   */
+  readonly attached?: AttachedText | undefined;
+  /** Rule 819.1.b: Quick-Draw gives a Gear Reaction timing. */
+  readonly reaction?: boolean | undefined;
   /** Clauses the grammar does not cover. Empty means the card is understood. */
   readonly unparsed: readonly string[];
 }
@@ -212,6 +222,43 @@ const COUNTS: readonly {
   },
   { pattern: /^cards? in your trash$/i, build: () => ({ kind: 'cardsInTrash' }) },
 ];
+
+/**
+ * A cost written as resources: "Fury", "1, Fury", "1 Body", "2", "Calm Calm".
+ *
+ * Rule 414 pays Energy by exhausting Runes and 416 pays Power by recycling
+ * them, so a cost is a number plus a list of Domains — which is exactly what
+ * the printed shorthand says once the separators are ignored. Anything that is
+ * not a number or a Domain refuses the whole phrase rather than being skipped:
+ * "Order, Kill a friendly unit" is a real Equip cost this model cannot state,
+ * and reading it as plain Order would make the card cheaper than printed.
+ */
+function parseResourceCost(phrase: string): Cost | undefined {
+  const parts = phrase
+    .trim()
+    .replace(/[.]+$/, '')
+    .split(/[,\s]+/)
+    .filter((part) => part.length > 0);
+  if (parts.length === 0) {
+    return undefined;
+  }
+
+  let energy = 0;
+  const power: Domain[] = [];
+  for (const part of parts) {
+    const number = count(part);
+    if (number !== undefined) {
+      energy += number;
+      continue;
+    }
+    const domain = DOMAINS.find((candidate) => candidate === part.toLowerCase());
+    if (domain === undefined) {
+      return undefined;
+    }
+    power.push(domain);
+  }
+  return { energy, power };
+}
 
 /** Read a "for each …" / "the number of …" phrase, or refuse it. */
 function parseCount(phrase: string): Count | undefined {
@@ -1393,6 +1440,46 @@ function parseLine(line: string): {
 }
 
 /**
+ * Join two sentences' rules text into one `CardEffect`, or refuse.
+ *
+ * "Deal 4 to a unit at a battlefield. Draw 1." is one run of clauses that
+ * happens to be punctuated with a full stop instead of "then", and rule 359.2.b
+ * reads a card top to bottom either way — so the two become one ordered list.
+ *
+ * The refusals are the same ones `parseEffects` makes within a sentence, plus
+ * one that only arises across sentences: a `condition` gates the *whole* clause
+ * it is attached to, so two sentences gated differently cannot become one
+ * effect without silently widening or narrowing that gate.
+ */
+function mergeEffects(a: CardEffect, b: CardEffect): CardEffect | undefined {
+  if (JSON.stringify(a.condition ?? null) !== JSON.stringify(b.condition ?? null)) {
+    return undefined;
+  }
+  // One target and one Destination for the whole card, as `CardEffect` says.
+  let target = a.target;
+  if (b.target.kind !== 'none') {
+    if (target.kind !== 'none' && JSON.stringify(target) !== JSON.stringify(b.target)) {
+      return undefined;
+    }
+    target = b.target;
+  }
+  const destination = a.destination ?? b.destination;
+  if (
+    a.destination !== undefined &&
+    b.destination !== undefined &&
+    JSON.stringify(a.destination) !== JSON.stringify(b.destination)
+  ) {
+    return undefined;
+  }
+  return {
+    target,
+    effects: [...a.effects, ...b.effects],
+    ...(destination === undefined ? {} : { destination }),
+    ...(a.condition === undefined ? {} : { condition: a.condition }),
+  };
+}
+
+/**
  * Parse a line that may hold more than one sentence.
  *
  * Returns the merged contribution, or `undefined` if any sentence is outside
@@ -1419,14 +1506,24 @@ function parseSentences(line: string): ReturnType<typeof parseLine> {
     if (parsed === undefined) {
       return undefined;
     }
-    // Two sentences of the same kind on one line would silently lose one, so
-    // that is a refusal rather than a merge.
-    for (const key of Object.keys(parsed) as (keyof typeof merged)[]) {
+    const { effect, ...rest } = parsed;
+
+    // Rules text is the one kind that *concatenates* across sentences; every
+    // other kind is a distinct ability, so a second one of the same kind would
+    // silently lose the first and is refused instead.
+    if (effect !== undefined) {
+      const combined = merged.effect === undefined ? effect : mergeEffects(merged.effect, effect);
+      if (combined === undefined) {
+        return undefined;
+      }
+      merged.effect = combined;
+    }
+    for (const key of Object.keys(rest) as (keyof typeof rest)[]) {
       if (merged[key] !== undefined) {
         return undefined;
       }
     }
-    Object.assign(merged, parsed);
+    Object.assign(merged, rest);
   }
   return merged;
 }
@@ -1497,6 +1594,99 @@ function accelerateCost(domains: readonly Domain[] | undefined): AdditionalCost 
 }
 
 /**
+ * "EQUIP Fury", "EQUIP 1, Fury", "EQUIP1, Calm", "EQUIP - Order, Kill a unit".
+ *
+ * The lookahead rather than `\b` is for "EQUIP1", which the export prints
+ * without a space: `\b` finds no boundary between two word characters.
+ */
+const EQUIP = /^equip(?=[\s\d-—:]|$)\s*(?:[-—:]\s*)?(.*)$/i;
+
+/** 137.1: the Might Bonus, printed in the card's lower right corner. */
+const MIGHT_BONUS = /(?:might\s*\+(\d+)|\+(\d+)\s*might)\.?\s*$/i;
+
+/**
+ * Split a card's text at its Equip line into Rules Text and Effect Text.
+ *
+ * Rule 136.1 puts the Effect Text in "a separate section of text below the
+ * Rules Text", and the export flattens the two into one string with no marker
+ * between them — so the split has to be inferred. The Equip line is the marker
+ * that works: 818 makes Equip an Activated Ability, which 724 says would be
+ * Inactive if it were Effect Text, so Equip is necessarily Rules Text and
+ * everything printed below it is the Effect Text it exists to deliver.
+ *
+ * A card with no Equip line has no Effect Text, which is 136.2.b's own reason:
+ * Effect Text does nothing unless the card can be Attached.
+ */
+function splitEffectText(text: string): { readonly rules: string; readonly effect?: string } {
+  const lines = text.split('\n');
+  const index = lines.findIndex((line) => EQUIP.test(normalize(line)));
+  if (index === -1) {
+    return { rules: text };
+  }
+  const below = lines.slice(index + 1).join('\n');
+  return below.trim() === ''
+    ? { rules: text }
+    : { rules: lines.slice(0, index + 1).join('\n'), effect: below };
+}
+
+/**
+ * Read a Gear's Effect Text into what it lends its Top-Most Card (718.3-718.4).
+ *
+ * Recursive rather than a second parser: 718.3 appends the Effect Text's
+ * *abilities* to the Top-Most Card's Rules Text, so they are ordinary abilities
+ * and the ordinary grammar reads them. What is refused is a bare effect — text
+ * that would run "when the card resolves" — because an Attached card never
+ * resolves and there is nothing for such a clause to mean.
+ *
+ * The Might Bonus is peeled off the last line only when the line does not
+ * otherwise parse. 137.1 puts it in the lower right corner and the export
+ * glues it onto whatever text ends up above it, so it can arrive as a line of
+ * its own ("Might +0"), tacked onto a keyword ("TANK +1 Might") or run into a
+ * sentence ("When I conquer, buff me.+1 Might"). Trying the unpeeled line
+ * first is what keeps "give a unit +2 Might this turn" intact.
+ */
+function parseEffectText(
+  text: string,
+  card: CardFacts,
+): { readonly attached: AttachedText; readonly unparsed: readonly string[] } {
+  const lines = text.split('\n').filter((line) => normalize(line) !== '');
+  const last = lines.length - 1;
+  const bonus = last >= 0 ? normalize(lines[last]!).match(MIGHT_BONUS) : null;
+
+  const attempts: { readonly text: string; readonly mightBonus?: number }[] = [];
+  if (bonus !== null) {
+    const peeled = [...lines];
+    peeled[last] = normalize(lines[last]!).replace(MIGHT_BONUS, '').trim();
+    attempts.push({
+      text: peeled.filter((line) => line !== '').join('\n'),
+      mightBonus: count(bonus[1] ?? bonus[2] ?? '') ?? 0,
+    });
+  }
+  attempts.push({ text: lines.join('\n') });
+
+  let fallback: { readonly attached: AttachedText; readonly unparsed: readonly string[] } | undefined;
+  for (const attempt of attempts) {
+    const inner = parseCardText(attempt.text, card);
+    const unparsed =
+      inner.effect === undefined
+        ? inner.unparsed
+        : // An Attached card has no resolution, so text that only makes sense
+          // as one is beyond this model rather than silently dropped.
+          [...inner.unparsed, attempt.text];
+    const attached: AttachedText = {
+      ...(attempt.mightBonus === undefined ? {} : { mightBonus: attempt.mightBonus }),
+      ...(inner.keywords === undefined ? {} : { keywords: inner.keywords }),
+      ...(inner.abilities === undefined ? {} : { abilities: inner.abilities }),
+    };
+    if (unparsed.length === 0) {
+      return { attached, unparsed };
+    }
+    fallback ??= { attached, unparsed };
+  }
+  return fallback ?? { attached: {}, unparsed: [] };
+}
+
+/**
  * Parse a card's printed text.
  *
  * The card is understood only when `unparsed` comes back empty; anything in it
@@ -1513,10 +1703,55 @@ export function parseCardText(text: string, card: CardFacts = {}): ParsedText {
   const statics: StaticAbility[] = [];
   const additionalCosts: AdditionalCost[] = [];
   const keywords: Keyword[] = [];
+  let reaction = false;
 
-  for (const rawLine of text.split('\n')) {
+  // 136.1: a Gear's Effect Text sits below its Rules Text and is read into a
+  // separate `AttachedText`, because 724 makes the two halves active at
+  // different times and collapsing them would give an unattached Gear
+  // abilities it does not have.
+  const split = splitEffectText(text);
+  const below = split.effect === undefined ? undefined : parseEffectText(split.effect, card);
+  if (below !== undefined) {
+    unparsed.push(...below.unparsed);
+  }
+
+  for (const rawLine of split.rules.split('\n')) {
     let line = normalize(rawLine);
     if (line === '') {
+      continue;
+    }
+
+    // 818.1.c.2: "Equip [Cost]" is short for "[Cost]: Attach this gear to a
+    // unit you control", so it is an ordinary Activated Ability whose effect is
+    // the Attach — not a keyword the engine needs a rule for.
+    const equip = line.match(EQUIP);
+    if (equip !== null) {
+      const cost = parseResourceCost(equip[1] ?? '');
+      if (cost === undefined) {
+        // 818.1.c.3 allows non-resource Equip costs. `ActivatedAbility.cost` is
+        // Energy and Power, so "Order, Kill a friendly unit" is refused rather
+        // than read as the resource half alone, which would be cheaper than
+        // printed.
+        unparsed.push(line);
+        continue;
+      }
+      activated.push({
+        cost,
+        exhaustSelf: false,
+        effect: { target: { kind: 'unit', scope: 'friendly' }, effects: [{ kind: 'attach' }] },
+      });
+      continue;
+    }
+
+    // 819.1.d: Quick-Draw is "[Reaction]" plus "When you play this, attach it
+    // to a unit you control" — two things the model already has, so it
+    // desugars rather than becoming a keyword.
+    if (/^quick-?draw$/i.test(line)) {
+      reaction = true;
+      triggered.push({
+        condition: { event: 'played', subject: 'self' },
+        effect: { target: { kind: 'unit', scope: 'friendly' }, effects: [{ kind: 'attach' }] },
+      });
       continue;
     }
 
@@ -1663,6 +1898,10 @@ export function parseCardText(text: string, card: CardFacts = {}): ParsedText {
       : {}),
     ...(Object.keys(abilities).length > 0 ? { abilities } : {}),
     ...(keywords.length > 0 ? { keywords } : {}),
+    ...(below === undefined || Object.keys(below.attached).length === 0
+      ? {}
+      : { attached: below.attached }),
+    ...(reaction ? { reaction } : {}),
     unparsed,
   };
 }

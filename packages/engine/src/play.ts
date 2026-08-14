@@ -79,12 +79,26 @@ export function timingAllows(
     return false;
   }
   if (state.closed) {
-    return card.type === 'spell' && card.timing === 'reaction';
+    return isReaction(card);
   }
   if (state.showdown) {
-    return card.type === 'spell';
+    // 308.1.a admits Actions and Reactions. Every Spell is one or the other,
+    // and 819.1.b makes a Quick-Draw Gear a Reaction as well.
+    return card.type === 'spell' || isReaction(card);
   }
   return true;
+}
+
+/**
+ * Rule 813: does this card have Reaction timing?
+ *
+ * Asked of the card rather than of Spells, because 819.1.b gives a Gear with
+ * Quick-Draw "Reaction inherently" — the keyword's whole point is that the Gear
+ * may be played in a Closed state, so a check that only looked at Spells would
+ * quietly ignore it.
+ */
+function isReaction(card: CardDefinition): boolean {
+  return (card.type === 'spell' || card.type === 'gear') && card.timing === 'reaction';
 }
 
 export interface PlayableCheck {

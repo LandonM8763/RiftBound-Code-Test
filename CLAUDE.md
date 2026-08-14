@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 110 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 124 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -52,10 +52,10 @@ What is built:
   **Activated and Triggered abilities** on an **interruptible phase machine**,
   **event-driven trigger conditions**, **rule 356 cost modification** including
   **Additional Costs**, **static and passive abilities**, **state predicates**,
-  **Tokens** (179-187), the **keywords** Assault, Shield, Tank,
-  Backline and Ganking, the **Dependent Keywords** Legion and Level,
-  first-class legal action generation, per-player observable views, and a
-  structural invariant checker.
+  **Tokens** (179-187), **Attachment** (434-435, 716-719), the **keywords**
+  Assault, Shield, Tank, Backline and Ganking, the **Dependent Keywords** Legion
+  and Level, first-class legal action generation, per-player observable views,
+  and a structural invariant checker.
 
   With Combat in, the engine can play a complete game of Riftbound: contest a
   Battlefield, fight over it, take Control, and score to 8.
@@ -102,14 +102,19 @@ quantity in `GameConfig` cites its rule number.
 What is **not** built yet, in rough dependency order:
 
 1. **The keywords that need mechanics the engine has no representation for.**
-   Assault, Shield, Tank, Backline and Ganking are built as engine rules and
-   **Accelerate desugars** (805.1.a is an Optional Additional Cost plus "if you
-   do, I enter ready", and both halves now exist). The rest are refused with a
-   stated reason in `UNMODELLED_KEYWORDS`, and each reason is a mechanic rather
-   than a keyword: Deflect wants a Power cost of any Domain that `Cost` cannot
-   express, Hidden wants facedown cards, Equip and Weaponmaster want Attach,
-   Vision wants Predict (436) — a look at the top card of a deck, which is a
-   mechanic rather than a choice-point problem now that 402.2 is built.
+   Assault, Shield, Tank, Backline and Ganking are built as engine rules;
+   **Accelerate, Equip and Quick-Draw desugar** (805.1.a is an Optional
+   Additional Cost plus "if you do, I enter ready"; 818.1.c.2 makes Equip an
+   Activated Ability that Attaches; 819.1.d makes Quick-Draw Reaction timing
+   plus a Play Effect that Attaches). The rest are refused with a stated reason
+   in `UNMODELLED_KEYWORDS`, and each reason is a mechanic rather than a
+   keyword: Deflect wants a Power cost of any Domain that `Cost` cannot express,
+   Hidden wants facedown cards, Vision wants Predict (436) — a look at the top
+   card of a deck, which is a mechanic rather than a choice-point problem now
+   that 402.2 is built — and **Weaponmaster wants a cost read off a target
+   chosen during resolution** (821.1.c pays the chosen Equipment's *own* Equip
+   cost, reduced), which neither `ActivatedAbility.cost` nor the Additional Cost
+   machinery can state because both settle a cost before the choice is made.
    **Repeat is the exception: it is no longer blocked** — 820.1.d is
    the same optional-cost shape — but it measured **+0 cards** and so is not
    built. Its reason in `UNMODELLED_KEYWORDS` records that rather than a
@@ -482,6 +487,7 @@ builds the batch on top of it. Keep that split — a win rate computed inside
 | `legal.ts` | `legalActions(state, player)` |
 | `view.ts` | Per-player observable view; redacts hidden zones |
 | `token.ts` | Tokens (179-187): Creating them, and 186.1's rule that one leaving the Board stops existing |
+| `attach.ts` | Attachment (434-435, 716-719): the link, and `activeAbilities`, which is the one honest answer to what a Game Object can do |
 | `invariants.ts` | `checkInvariants(state)`, run after every action when fuzzing |
 | `setup.ts` | `createGame` — entity creation (Units, Runes and a Game Object per Battlefield, 170), shuffles, opening hands, opens in the Mulligan |
 
@@ -712,7 +718,7 @@ whole design, and it sorts keywords into three kinds:
 
 | Kind | Where it lives | Examples |
 |---|---|---|
-| Shorthand for something already modelled | **desugared at ingest**, never reaches the engine as a keyword | Deathknell → a `dies` trigger (808.1.c); Temporary → a Beginning Phase self-kill (816.1.b); Action/Reaction → `SpellCard.timing` |
+| Shorthand for something already modelled | **desugared at ingest**, never reaches the engine as a keyword | Deathknell → a `dies` trigger (808.1.c); Temporary → a Beginning Phase self-kill (816.1.b); Action/Reaction → `SpellCard.timing`; Equip → an Activated Ability that Attaches (818.1.c.2); Quick-Draw → Reaction plus a Play Effect that Attaches (819.1.d) |
 | A genuine engine rule | `Keyword` on the card | Assault, Shield, Tank, Backline, Ganking |
 | A gate on an ordinary ability | `AbilityDependency` on the ability | Legion (812), Level (824) |
 
@@ -770,6 +776,54 @@ and a card's own Play Effect is checked while that card is already in the list.
 So `PlayerState.playedThisTurn` holds entity ids; a count would satisfy every
 Legion trigger on the first card played. It clears in the Ending Phase, because
 812.1.c scopes it to "the same turn".
+
+### Attachment
+
+Rules 434-435 and 716-719, with `GearCard.attached` in `cards/card.ts` and the
+engine in `engine/attach.ts`.
+
+**The direction reads backwards from the card text, and getting it wrong
+inverts everything else.** A Gear is what gets *Attached*; the **Unit** becomes
+the Top-Most Card (818.1.b.2). So "Equip a unit" attaches the Gear **to** the
+Unit, and from then on 718.3 appends the Gear's Effect Text abilities to *the
+Unit's* Rules Text and 718.4 adds its Might Bonus to the Unit's Might. "Me" in
+a Gear's Effect Text is the Unit.
+
+Five things are load-bearing:
+
+- **A card has two halves that are never live at once.** 718.2 makes an
+  Attached card's printed Rules Text Inactive and 724 makes its Effect Text
+  Inactive unless Attached. That is why `GearCard.attached` is a separate field
+  rather than more entries in `abilities`: collapsing them would give an
+  unattached Gear abilities it does not have, and let an Equipped one
+  re-activate its own Equip and walk itself onto another Unit.
+- **`activeAbilities` is the single answer to "what can this Game Object do".**
+  Four sweeps used to read `entityCard(state, id).abilities` directly — the
+  activation sweep, the trigger sweep, the static sweep and the cost-modifier
+  sweep — and all four now go through it. Adding a fifth reader that skips it
+  is how an Equipment silently stops working.
+- **`AbilityRef.from` separates whose ability it is from where the text is.**
+  The *source* is the Top-Most Card, because 718.3 makes the ability part of
+  that card's Rules Text — so "when I conquer, buff me" on an Equipment means
+  the equipped Unit conquering and the equipped Unit being buffed. `from` names
+  the Gear, because the ability's text is still printed there and has to be
+  findable. It also keys 383.3.e's per-turn limit, so two Gear at the same
+  ability index do not share one counter.
+- **719.5 takes attachments off the Board with their Top-Most Card**, which is
+  why `sendToNonBoardZone` recurses. A token attachment still stops existing
+  (186.1) on the way, because that funnel is the same one.
+- **The Might Bonus is a bonus, not a Buff.** 137.3.a applies it only while
+  Attached and stops the instant it is not, so `attachedMight` is *consulted* by
+  `mightOf` the way a static is, and nothing is ever written onto the Unit.
+
+**Ingest reads the two halves out of one flat string.** The export publishes
+Rules Text and Effect Text as one `description` with no marker between them, so
+the split is inferred from the Equip line: 818 makes Equip an Activated
+Ability, which 724 would make Inactive if it were Effect Text, so everything
+printed *below* Equip is the Effect Text. 137.1's Might Bonus is peeled off the
+last line only when that line does not otherwise parse — which is what keeps
+"give a unit +2 Might this turn" intact while still reading "TANK +1 Might",
+"Might +0" and "When I conquer, buff me.+1 Might".
 
 ### Tokens
 
@@ -1132,7 +1186,7 @@ edits by how far they move it, and swapping the objective swaps what the tool is
 for without touching the search.
 
 **The default is `CONSISTENCY`, and the reason is not taste.** A *simulated*
-objective is not trustworthy yet: 358 of the 468 cards with rules text still
+objective is not trustworthy yet: 344 of the 468 cards with rules text still
 play as vanilla, so a simulator cannot see what most cards do. Optimizing
 against it would cut the card whose text the engine ignores and keep the vanilla
 body with better stats — confidently wrong advice. Consistency depends on cost
@@ -1284,10 +1338,11 @@ covering every card type including 322 Units and 157 Champion Units. A legal
 deck builds and validates from it with no issues, and the engine plays complete
 games with it — 300 games, all decided, heuristic 58.7% ± 5.5 against random.
 
-79 of those cards carry an ability and 14 a keyword. The keyword figure is low
-against the 110 that parse because keywords ride the same all-or-nothing rule:
-a card whose other clause is unreadable keeps neither. 11 create Tokens, 6
-carry Accelerate, 5 return a card to hand and 3 grant a keyword.
+101 of those cards carry an ability and 15 a keyword. The keyword figure is low
+against the 124 that parse because keywords ride the same all-or-nothing rule:
+a card whose other clause is unreadable keeps neither. 13 create Tokens, 12
+carry Effect Text a Gear lends its Top-Most Card, 6 carry Accelerate, 5 return a
+card to hand and 3 grant a keyword.
 
 What it still cannot supply:
 
@@ -1353,14 +1408,14 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 110 of the 468 cards that have text**, and the shape of what is
+**Coverage is 124 of the 468 cards that have text**, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 110 |
-| Blocked | 358 |
+| Fully parsed | 124 |
+| Blocked | 344 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 3 or 4 times, everything else once or
@@ -1402,7 +1457,9 @@ investments. See [Additional Costs](#additional-costs-rule-3562).
 
 **Tokens took it 78 → 89**, **Accelerate 89 → 95**, **zone movement 95 → 100**, and
 **effect-granted keywords plus two wider conditions 100 → 105**, and **dynamic
-values 105 → 110.**
+values 105 → 110.** **Multi-sentence rules text took it 110 → 112**, and
+**Equip with the Effect Text 112 → 124** — the largest single step since tokens,
+and the one whose engine half (Attach) was already built.
 
 #### How the ranking was measured wrong, and what fixed it
 
@@ -1428,39 +1485,55 @@ worth rebuilding if it is not to hand — it is about fifty lines.
 
 #### What is left, ranked by measurement
 
-Re-measured by counterfactual from the 89 baseline (tokens in, Accelerate not),
-one mechanic at a time and then in build order:
+Re-measured by counterfactual from the **124** baseline, one mechanic at a time:
 
 | Mechanic | Alone |
 |---|---|
-| **Tokens (179-187)** — now built | **+9 projected, +11 delivered** |
-| The 8 refused keywords | +11 |
-| **Zone movement** — now built | **+8 projected, +5 delivered** |
-| **Accelerate (805)** — now built | **+5 projected, +6 delivered** |
-| **Keywords granted by an effect** — now built | **+2 projected, +3 delivered** |
-| **Wider `controls` predicates** — now built | **+2 delivered** |
-| Statics beyond scope-plus-grant, minus the two now readable | +2 |
+| **Weaponmaster (821)** | +6 |
+| **Hidden (811) and the Hide action (421)** | +4 |
+| Deflect (809) | +3 |
 | Durations and delayed effects ("the next spell you play…") | +3 |
-| **Counting / dynamic values** — now built | **+3 projected, +5 delivered** |
+| Vision (817) / Predict (436) | +2 |
 | Non-standard ability costs | +2 |
-| Effect-outcome predicates ("if this kills it") | +1 |
+| Statics beyond scope-plus-grant | +2 |
+| Effect-outcome predicates ("if this kills it") | +2 |
+| Repeat (820) | +1 |
 | Modal effects ("choose one •…") | +0 |
+| **All five remaining keywords together** | **+16** |
+
+What each round actually delivered, for calibrating the next projection:
+
+| Mechanic | Result |
+|---|---|
+| Tokens (179-187) | +9 projected, **+11** delivered |
+| Zone movement | +8 projected, **+5** delivered |
+| Accelerate (805) | +5 projected, **+6** delivered |
+| Keywords granted by an effect | +2 projected, **+3** delivered |
+| Wider `controls` predicates | **+2** delivered |
+| Counting / dynamic values | +3 projected, **+5** delivered |
+| Multi-sentence rules text | not projected, **+2** delivered |
+| Equip, Quick-Draw and the Effect Text | +11 projected, **+12** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
-projected +8 and delivered +4; tokens projected +9 and delivered +11, and
-dynamic values +3 against +5 — that one beat its projection because building
-the count properly also picked up wordings the counterfactual's crude rewrite
-had mangled rather than unlocked. A
+projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic
+values +3 against +5, and the Equip cluster +11 against +12 — those beat their
+projections because building the mechanic properly also picked up wordings the
+counterfactual's crude rewrite had mangled rather than unlocked. A
 counterfactual rewrite proves a *clause* stops blocking, which is neither an
 upper nor a lower bound on what a real implementation reaches — treat these as
 a ranking, not a forecast.
 
-**The keyword figure is still a trap**, and now more so. Accelerate was +5 of
-the +11 and it is built. What remains is Hidden +3, Vision +2, Deflect +1 and
-four at +0, each wanting a *different* deep mechanic (facedown cards, Predict,
-Power of any Domain, Attach). Repeat is not blocked at all any more — 820.1.d is
-the optional-cost shape that now exists — but it measures **+0**, so it stays
-refused with that as its stated reason.
+**A rewrite for a mechanic that is now built measures nonsense, not zero.** The
+EQUIP row of the keyword counterfactual reads **−10** against this baseline,
+because the rewrite replaces a line the real parser now reads with a stand-in
+that loses it. Delete a rewrite when its mechanic lands; leaving it in makes the
+next re-measurement quietly wrong.
+
+**The keyword figure is still a trap**, and now more so. Equip and Quick-Draw
+were the biggest part of it and they are built. What remains is Weaponmaster +6,
+Hidden +4, Deflect +3, Vision +2 and Repeat +1, each wanting a *different* deep
+mechanic: a cost read off a target chosen during resolution, facedown cards,
+Power of any Domain, Predict, and executing a Chain item's instructions twice.
 
 Additional Costs and state predicates were the two best single investments and
 **do not overlap**: together they measured +14 and delivered +10. The shortfall
@@ -1475,31 +1548,41 @@ round of this to do.
 
 What the corpus is blocked on now, in the order measurement puts them:
 
-1. **Hidden (811) and the Hide action (421)** — +4, and the largest single
-   mechanic left. It is also the most expensive: facedown cards are a
-   hidden-information mechanic the state model has no representation for, and
-   it reaches `view.ts`. Four cards print a bare `HIDDEN`.
-2. **Durations and delayed effects** — "the next spell you play this turn costs
+1. **Weaponmaster (821)** — +6, and the largest single mechanic left. 821.1.c
+   has it choose an Equipment you control and pay *that card's* Equip cost,
+   reduced, during its own resolution. Everything else about it exists now that
+   Attach does; what does not is a cost determined from a choice made after the
+   ability is already on the Chain. Both cost paths — `ActivatedAbility.cost`
+   and the Additional Cost machinery — settle a cost at step 3, before step
+   402.2's choice.
+2. **Hidden (811) and the Hide action (421)** — +4, and the most expensive:
+   facedown cards are a hidden-information mechanic the state model has no
+   representation for, and it reaches `view.ts`. 21 clauses print a bare
+   `HIDDEN`.
+3. **Durations and delayed effects** — "the next spell you play this turn costs
    5 less", "opponents can't play cards this turn". +3, but three cards wanting
    three different mechanics.
-3. **The rest of statics beyond a scope plus a grant** — "While I'm attacking
+4. **Deflect (809)** — +3. 809.1.c.1 makes it Power "of any Domain", which
+   `Cost` cannot express: its power is a fixed Domain list.
+5. **The rest of statics beyond a scope plus a grant** — "While I'm attacking
    or defending alone" needs a combat-role predicate that `Condition`
    deliberately cannot express, because a condition that reads Might back would
-   recurse through `mightOf`.
-4. **The six other refused keywords**, each blocked on a mechanic: Attach
-   (Equip, Weaponmaster, Quick-Draw), Predict (Vision), Power of any Domain
-   (Deflect). Repeat is blocked on nothing and worth +0.
-5. **Conditional and modal effects** — "if this kills it", "unless its
-   controller…", "choose one •…". +1 and +0. The effect model has no outcome
-   conditions and no modes.
+   recurse through `mightOf`. +2.
 6. **Non-standard ability costs** — "Spend my buff:", "Recycle 1 from your
    trash:", "you may exhaust me to …". +2. `ActivatedAbility.cost` is Energy,
    Power and the exhaust; 16 cards want more.
+7. **Conditional and modal effects** — "if this kills it", "unless its
+   controller…", "choose one •…". +2 and +0. The effect model has no outcome
+   conditions and no modes.
 
-**This is where the curve flattens.** The four rounds after Additional Costs
-delivered +11, +6, +5 and +5; everything above is +4 or less, and the two
-largest each need a subsystem rather than an extension. Coverage past ~120
-means paying subsystem prices for three or four cards at a time.
+**This is where the curve flattens.** The rounds after Additional Costs
+delivered +11, +6, +5, +5, +2 and +12; everything above is +6 or less, and each
+of the top three needs a subsystem rather than an extension. Coverage past ~140
+means paying subsystem prices for two or three cards at a time — which is the
+point at which a hand-authored overlay stops being an admission of defeat and
+starts being cheaper than the mechanic. `ingest/authored.ts` is that seam: it
+supplies an effect model for a named card, refuses itself if the card's printed
+text has changed since the entry was written, and touches no printed field.
 
 Self-targeting was on this list before keywords and triggers, and unlocked
 **nothing** — every self-targeting card was blocked on something else. That is

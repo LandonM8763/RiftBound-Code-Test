@@ -376,7 +376,7 @@ describe('keywords (rules 800-828)', () => {
   });
 
   it('refuses a keyword the engine does not model, with a stated reason', () => {
-    for (const keyword of ['HIDDEN', 'DEFLECT', 'EQUIP Calm', 'VISION', 'REPEAT 2']) {
+    for (const keyword of ['HIDDEN', 'DEFLECT', 'WEAPONMASTER', 'VISION', 'REPEAT 2']) {
       expect(parseCardText(keyword).unparsed).toHaveLength(1);
     }
     expect(Object.keys(UNMODELLED_KEYWORDS)).toContain('hidden');
@@ -1050,5 +1050,116 @@ describe('dynamic values (counts read off the state)', () => {
       affects: { who: 'any', here: true },
       grant: { might: 1 },
     });
+  });
+});
+
+/**
+ * Equip and the Effect Text (rules 136, 137, 718, 818, 819).
+ *
+ * Two things are being read out of one flat string here, because the export
+ * publishes the Rules Text and the Effect Text as one `description` with no
+ * marker between them. The Equip line is the marker: 818 makes it an Activated
+ * Ability, which 724 would make Inactive if it were Effect Text, so everything
+ * printed below it is the Effect Text.
+ */
+describe('Equip and Effect Text (818, 136.1)', () => {
+  it('818.1.c.2: reads Equip as an Activated Ability that Attaches', () => {
+    const parsed = parseCardText('EQUIP Fury');
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.activated?.[0]).toEqual({
+      cost: { energy: 0, power: ['fury'] },
+      exhaustSelf: false,
+      effect: { target: { kind: 'unit', scope: 'friendly' }, effects: [{ kind: 'attach' }] },
+    });
+  });
+
+  it('reads the three printed cost shapes', () => {
+    const cost = (text: string): unknown => parseCardText(text).abilities?.activated?.[0]?.cost;
+    expect(cost('EQUIP 1, Fury')).toEqual({ energy: 1, power: ['fury'] });
+    expect(cost('EQUIP 1 Body')).toEqual({ energy: 1, power: ['body'] });
+    // Printed without a space, which is why the pattern uses a lookahead.
+    expect(cost('EQUIP1, Calm')).toEqual({ energy: 1, power: ['calm'] });
+  });
+
+  it('818.1.c.3: refuses a non-resource Equip cost rather than reading half', () => {
+    // `ActivatedAbility.cost` is Energy and Power. Reading "Order, Kill a
+    // friendly unit" as plain Order would make the card cheaper than printed.
+    expect(parseCardText('EQUIP - Order, Kill a friendly unit').unparsed).toHaveLength(1);
+  });
+
+  it('137: takes the Might Bonus off the end of the Effect Text', () => {
+    const parsed = parseCardText('EQUIP Fury\nASSAULT 2\nMight +0');
+    expect(parsed.unparsed).toEqual([]);
+    // 718.3-718.4: both belong to the Top-Most Card, not to the Gear.
+    expect(parsed.attached).toEqual({ mightBonus: 0, keywords: [{ kind: 'assault', value: 2 }] });
+    expect(parsed.keywords).toBeUndefined();
+  });
+
+  it('reads a Might Bonus the export glued onto the line above it', () => {
+    // "When I conquer, buff me. (reminder)+1 Might" collapses to one line once
+    // the reminder is stripped, so the bonus has to be peeled off the tail.
+    const parsed = parseCardText('EQUIP Body\nWhen I conquer, buff me.+1 Might');
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.attached?.mightBonus).toBe(1);
+    expect(parsed.attached?.abilities?.triggered).toHaveLength(1);
+  });
+
+  it('does not mistake "give a unit +2 Might this turn" for a Might Bonus', () => {
+    // The unpeeled line is tried first for exactly this reason: it parses, so
+    // nothing is taken off it.
+    const parsed = parseCardText('EQUIP Body\nWhen I conquer, give a unit +2 Might this turn.');
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.attached?.mightBonus).toBeUndefined();
+  });
+
+  it('136.2.b: a card with no Equip line has no Effect Text', () => {
+    // Effect Text does nothing unless the card can be Attached, so a Gear that
+    // cannot be keeps its abilities as its own.
+    const parsed = parseCardText('Exhaust: Draw 1.');
+    expect(parsed.attached).toBeUndefined();
+    expect(parsed.abilities?.activated).toHaveLength(1);
+  });
+
+  it('819.1.d: Quick-Draw desugars into Reaction plus a Play Effect', () => {
+    const parsed = parseCardText('QUICK-DRAW\nEQUIP Fury\nMight +2');
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.reaction).toBe(true);
+    expect(parsed.abilities?.triggered?.[0]).toEqual({
+      condition: { event: 'played', subject: 'self' },
+      effect: { target: { kind: 'unit', scope: 'friendly' }, effects: [{ kind: 'attach' }] },
+    });
+  });
+
+  it('fails the whole card when the Effect Text does not read', () => {
+    // The all-or-nothing rule spans both halves: a Gear that Attaches and then
+    // lends nothing is a different card from the one printed.
+    const parsed = parseCardText('EQUIP Calm\nI am a mech.\n+1 Might');
+    expect(parsed.unparsed).toHaveLength(1);
+  });
+});
+
+describe('several sentences on one line', () => {
+  it('joins two runs of rules text into one ordered effect', () => {
+    // "Deal 4 ... . Draw 1." is one run of clauses punctuated with a full stop
+    // instead of "then", and 359.2.b reads a card top to bottom either way.
+    const parsed = parseCardText('Deal 4 to a unit at a battlefield. Draw 1.');
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.effect).toEqual({
+      target: { kind: 'unit', scope: 'any', atBattlefield: true },
+      effects: [{ kind: 'dealDamage', amount: 4 }, { kind: 'draw', count: 1 }],
+    });
+  });
+
+  it('refuses two sentences that want different targets', () => {
+    // `CardEffect` carries one target for the whole card.
+    expect(
+      parseCardText('Kill a friendly unit. Deal 2 to an enemy unit.').unparsed,
+    ).toHaveLength(1);
+  });
+
+  it('still refuses two abilities of the same kind on one line', () => {
+    // Merging is for rules text only; a second ability of a kind would
+    // silently lose the first.
+    expect(parseCardText('Exhaust: Draw 1. Exhaust: Draw 2.').unparsed).toHaveLength(1);
   });
 });

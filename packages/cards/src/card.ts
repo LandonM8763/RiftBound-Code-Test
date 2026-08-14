@@ -129,6 +129,15 @@ export interface GearCard extends CardBase {
   /** Rules text run when the Gear is played (rule 359.2.b). */
   readonly effect?: CardEffect | undefined;
   /**
+   * Rule 819.1.b: a Gear with Quick-Draw "has Reaction inherently".
+   *
+   * Timing is a property of a *card*, not of Spells — 806 and 813 are keywords
+   * and 813 puts no restriction on what may carry one. `SpellCard.timing` is
+   * required because every Spell prints one; a Gear only has timing when a
+   * keyword gives it one, so here it is optional and absent means Action.
+   */
+  readonly timing?: SpellTiming | undefined;
+  /**
    * What this Gear contributes to its Top-Most Card while Attached (716-719).
    *
    * Rule 724 is why this is separate from the card's ordinary abilities:

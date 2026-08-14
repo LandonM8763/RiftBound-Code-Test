@@ -24,7 +24,7 @@ import {
   type ValuedKeywordKind,
 } from '@riftbound/cards';
 
-import { attachedKeywords, attachedMight } from './attach.js';
+import { activeAbilities, attachedKeywords, attachedMight } from './attach.js';
 import { conditionMet, type ConditionContext } from './condition.js';
 import { countOf } from './count.js';
 import { dependencyMet } from './dependency.js';
@@ -48,19 +48,21 @@ export function activeStatics(state: GameState): readonly ActiveStatic[] {
   const found: ActiveStatic[] = [];
 
   const collect = (source: EntityId): void => {
-    const abilities = staticAbilities(entityCard(state, source).abilities);
-    if (abilities.length === 0) {
-      return;
-    }
     const controller = getEntity(state, source).controller;
-    for (const ability of abilities) {
-      if (!conditionMet(state, controller, source, ability.condition)) {
-        continue;
+    // 718.2/718.3: an Attached card's own Passives are Inactive and its
+    // Top-Most Card carries the Effect Text's instead. The *source* stays this
+    // entity either way, which is what makes "units here have +1 Might" on an
+    // Equipment measure from the Unit it is attached to.
+    for (const set of activeAbilities(state, source)) {
+      for (const ability of staticAbilities(set.abilities)) {
+        if (!conditionMet(state, controller, source, ability.condition)) {
+          continue;
+        }
+        if (!dependencyMet(state, source, controller, ability.dependsOn)) {
+          continue;
+        }
+        found.push({ source, controller, ability });
       }
-      if (!dependencyMet(state, source, controller, ability.dependsOn)) {
-        continue;
-      }
-      found.push({ source, controller, ability });
     }
   };
 

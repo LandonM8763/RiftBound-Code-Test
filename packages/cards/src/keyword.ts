@@ -120,10 +120,17 @@ export const UNMODELLED_KEYWORDS: Readonly<Record<string, string>> = Object.free
   // facedown cards — a hidden-information mechanic the state model has no
   // representation for.
   hidden: 'Hidden (811) needs facedown cards and the Hide action',
-  // 818.1.b / 821.1.c: both Attach a card to a Unit. There is no Attach.
-  equip: 'Equip (818) needs Attach',
-  weaponmaster: 'Weaponmaster (821) needs Attach',
-  'quick-draw': 'Quick-Draw (819) is an Equipment keyword; there is no Attach',
+  // Equip (818) and Quick-Draw (819) are *not* here. Attach exists now, and
+  // both desugar into it: 818.1.c.2 makes Equip "[Cost]: Attach this gear to a
+  // unit you control" — an Activated Ability — and 819.1.d makes Quick-Draw
+  // Reaction timing plus a Play Effect that Attaches.
+  //
+  // 821.1.c makes Weaponmaster pay *another card's* Equip cost, reduced,
+  // during its own resolution. That is a cost read off a target chosen at
+  // resolution time, which neither `ActivatedAbility.cost` nor the Additional
+  // Cost machinery can state: both settle a cost before the choice is made.
+  weaponmaster:
+    'Weaponmaster (821) pays a chosen Equipment`s Equip cost during resolution; costs are settled before choices here',
   // 817.1.b: "When this is played, predict" — and Predict (436.1) is a look at
   // the top card and a *choice*, made during resolution. That needs the same
   // sub-action protocol as ordering simultaneous triggers.

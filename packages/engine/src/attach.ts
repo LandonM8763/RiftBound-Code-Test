@@ -86,6 +86,35 @@ export function attachedAbilities(
 }
 
 /**
+ * Every set of abilities `entity` has right now, with the card each is read
+ * from (718.2, 718.3, 724).
+ *
+ * This is the only honest answer to "what can this Game Object do", and it is
+ * two rules rather than one:
+ *
+ * - **718.2** makes an Attached card's own printed Rules Text Inactive, so a
+ *   Gear that has been Equipped stops offering its Equip ability. Without this
+ *   an attached Gear could re-activate Equip and walk itself onto another Unit.
+ * - **718.3** appends each attachment's Effect Text abilities to this card's
+ *   Rules Text, so the equipped Unit gains them. `from` names the Gear those
+ *   were read off, because the ability has to be findable again; the *source*
+ *   is this entity, because that is whose Rules Text they are now part of and
+ *   what "me" in them refers to.
+ */
+export function activeAbilities(
+  state: GameState,
+  entity: EntityId,
+): readonly { readonly abilities: CardAbilities; readonly from?: EntityId }[] {
+  const own = entityCard(state, entity).abilities;
+  const found: { abilities: CardAbilities; from?: EntityId }[] =
+    getEntity(state, entity).attachedTo === undefined && own !== undefined ? [{ abilities: own }] : [];
+  for (const { source, abilities } of attachedAbilities(state, entity)) {
+    found.push({ abilities, from: source });
+  }
+  return found;
+}
+
+/**
  * Attach `card` to `topMost` (434).
  *
  * 434.1.f: attaching to a new Top-Most Card detaches it from its current one,

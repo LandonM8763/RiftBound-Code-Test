@@ -58,6 +58,11 @@ export type Action =
       readonly type: 'activateAbility';
       readonly source: EntityId;
       readonly index: number;
+      /**
+       * 718.3: the Attached card this ability was read from, when the source
+       * has it only because something is Equipped to it.
+       */
+      readonly from?: EntityId;
       readonly target?: EntityId;
       readonly destination?: Location;
     }

@@ -115,7 +115,14 @@ export function reduce(state: GameState, action: Action): ReduceResult {
     case 'mulligan':
       return mulligan(state, action.cards);
     case 'activateAbility':
-      return activateAbility(state, action.source, action.index, action.target, action.destination);
+      return activateAbility(
+        state,
+        action.source,
+        action.index,
+        action.from,
+        action.target,
+        action.destination,
+      );
     case 'resolveTrigger':
       return resolveTrigger(state, action.perform, action.target, action.destination);
     default: {
@@ -372,14 +379,14 @@ function activateAbility(
   state: GameState,
   source: EntityId,
   index: number,
+  from: EntityId | undefined,
   target: EntityId | undefined,
   destination: Location | undefined,
 ): ReduceResult {
   const player = requirePriority(state);
   const available = activatableAbilities(state, player);
   const chosen = available.find(
-    (candidate: { source: EntityId; index: number }) =>
-      candidate.source === source && candidate.index === index,
+    (candidate) => candidate.source === source && candidate.index === index && candidate.from === from,
   );
 
   if (chosen === undefined) {
@@ -414,7 +421,7 @@ function activateAbility(
         pending: false,
         target: target ?? null,
         destination: destination ?? null,
-        ability: { kind: 'activated', index },
+        ability: { kind: 'activated', index, ...(from === undefined ? {} : { from }) },
       },
     ],
     passes: 0,
@@ -887,7 +894,7 @@ function pass(state: GameState): ReduceResult {
       );
       if (top.ability.kind === 'triggered') {
         // 383.3.e: count it against any "N times each turn" limit.
-        const key = triggerKey(top.entity, top.ability.index);
+        const key = triggerKey(top.entity, top.ability.index, top.ability.from);
         next = {
           ...next,
           triggersUsed: { ...next.triggersUsed, [key]: (next.triggersUsed[key] ?? 0) + 1 },

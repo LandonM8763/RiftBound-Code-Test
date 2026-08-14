@@ -183,7 +183,30 @@ export interface TriggeredAbility {
 export interface AbilityRef {
   readonly kind: 'activated' | 'triggered';
   readonly index: number;
+  /**
+   * The Attached card lending this ability, when 718.3 is why the source has
+   * it — the entity id of the Gear, not of the Top-Most Card.
+   *
+   * The two are deliberately separate. 718.3 appends the Effect Text's
+   * abilities *to the Rules Text of the Top-Most Card*, so the ability belongs
+   * to that card: "when I conquer, buff me" on an Equipment means the equipped
+   * Unit conquering and the equipped Unit being buffed. But the ability's
+   * *text* lives on the Gear, so finding it again needs to know which card to
+   * read — which is what this is for. It also keys 383.3.e's per-turn limit,
+   * so two Gear at the same ability index do not share one counter.
+   */
+  readonly from?: EntityId | undefined;
 }
+
+/**
+ * An entity id, as an opaque number.
+ *
+ * Declared here rather than imported: `@riftbound/cards` sits below the engine
+ * and must not depend on it, and an `AbilityRef` has to be able to name the
+ * card an ability came from. The engine's own `EntityId` is the same branded
+ * number and the two unify.
+ */
+export type EntityId = number & { readonly __brand: 'EntityId' };
 
 export interface CardAbilities {
   readonly activated?: readonly ActivatedAbility[] | undefined;

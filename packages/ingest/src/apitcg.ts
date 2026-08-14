@@ -27,6 +27,7 @@ import {
 
 import type { Gap } from './gaps.js';
 import type { CardSource, IngestResult } from './source.js';
+import { authoredFor } from './authored.js';
 import { parseCardText } from './text.js';
 
 /** The source's name for "no Domain", which is the absence of one. */
@@ -216,8 +217,16 @@ function normalizeCard(
   // 805.1.a.1 pays Accelerate's Power with the Unit's own Domain, which is not
   // in the printed line — the one fact the grammar cannot read off the text.
   const parsed = parseCardText(description, { domains });
-  const understood = parsed.unparsed.length === 0;
+  const parsedWhole = parsed.unparsed.length === 0;
 
+  // A card the grammar cannot read may still have a hand-authored model. The
+  // parser is always tried first: an authored entry is the fallback for wording
+  // no shared rule covers, never a way to override what the grammar reads.
+  const authored = parsedWhole ? undefined : authoredFor(name, description);
+  const model = authored?.stale === false ? authored.card : undefined;
+  const understood = parsedWhole || model !== undefined;
+
+  const abilities = parsedWhole ? parsed.abilities : model?.abilities;
   const base = {
     id,
     name,
@@ -226,16 +235,26 @@ function normalizeCard(
     tags: [] as readonly string[],
     signature: info.signature,
     ...(championTag === undefined ? {} : { championTag }),
-    ...(understood && parsed.abilities !== undefined ? { abilities: parsed.abilities } : {}),
+    ...(abilities === undefined ? {} : { abilities }),
     // Keywords ride on the same all-or-nothing rule as everything else. A card
     // whose other clause is unreadable keeps neither: half a card is the
     // failure mode this design exists to avoid, and Assault without the
     // Deathknell next to it is still the wrong card.
-    ...(understood && parsed.keywords !== undefined ? { keywords: parsed.keywords } : {}),
+    ...(parsedWhole && parsed.keywords !== undefined ? { keywords: parsed.keywords } : {}),
   };
-  const cardEffect = understood ? parsed.effect : undefined;
+  const cardEffect = parsedWhole ? parsed.effect : model?.effect;
 
-  if (!understood) {
+  if (authored?.stale === true) {
+    // The card's text changed since the entry was written, so the authored
+    // model may no longer describe it. Refusing is the same discipline the
+    // parser follows: a plausible-but-wrong card is worse than a vanilla one.
+    gap(
+      'text',
+      'A hand-authored effect exists for this card but was written against ' +
+        'different printed text, so it is refused and the card plays as vanilla',
+      'degraded',
+    );
+  } else if (!understood) {
     gap(
       'text',
       `Rules text not covered by the effect grammar, so the card plays as vanilla: ` +
@@ -340,6 +359,17 @@ function normalizeCard(
               type: 'gear',
               cost,
               ...(cardEffect === undefined ? {} : { effect: cardEffect }),
+              // 136.1's Effect Text and 819.1.b's inherent Reaction. Both ride
+              // the all-or-nothing rule with everything else: a Gear whose
+              // Equip line reads but whose Effect Text does not keeps neither,
+              // because a Gear that Attaches and then lends nothing is a
+              // different card from the one printed.
+              ...(parsedWhole && parsed.attached !== undefined
+                ? { attached: parsed.attached }
+                : {}),
+              ...(parsedWhole && parsed.reaction === true
+                ? { timing: 'reaction' as const }
+                : {}),
             },
             gaps,
           };

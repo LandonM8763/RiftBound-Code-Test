@@ -1,4 +1,6 @@
 export { APITCG_SOURCE, canonicalName, championTagFromName, parseCardType, plainText, timingFromText } from './apitcg.js';
+export { AUTHORED_CARDS, authoredFor, normalizeForAuthoring } from './authored.js';
+export type { AuthoredCard } from './authored.js';
 export { COMMUNITY_SOURCE, stripHtml } from './community.js';
 export {
   parseAdditionalCost,

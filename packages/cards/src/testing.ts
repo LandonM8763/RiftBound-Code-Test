@@ -112,6 +112,7 @@ export function makeGear(
     cost: overrides.cost ?? FREE,
     effect: overrides.effect,
     attached: overrides.attached,
+    timing: overrides.timing,
   };
 }
 

@@ -25,6 +25,7 @@ import {
   type TriggerEvent,
 } from '@riftbound/cards';
 
+import { activeAbilities, attachedTextOf } from './attach.js';
 import { abilityCost } from './costs.js';
 import { dependencyMet } from './dependency.js';
 import { canPay } from './play.js';
@@ -78,16 +79,23 @@ export interface TriggerEventInstance {
   readonly ordinal?: number | undefined;
 }
 
-/** Resolve a Chain item's ability back to its definition. */
+/**
+ * Resolve a Chain item's ability back to its definition.
+ *
+ * `ref.from` is 718.3's case: the ability belongs to `source` — the Top-Most
+ * Card — but its text is printed on the Attached card, so that is where it has
+ * to be read from.
+ */
 export function abilityFor(
   state: GameState,
   source: EntityId,
   ref: AbilityRef,
 ): ActivatedAbility | TriggeredAbility | undefined {
-  const card = entityCard(state, source);
+  const abilities =
+    ref.from === undefined ? entityCard(state, source).abilities : attachedTextOf(state, ref.from)?.abilities;
   return ref.kind === 'activated'
-    ? activatedAbilities(card.abilities)[ref.index]
-    : triggeredAbilities(card.abilities)[ref.index];
+    ? activatedAbilities(abilities)[ref.index]
+    : triggeredAbilities(abilities)[ref.index];
 }
 
 /**
@@ -110,31 +118,48 @@ export function activatableAbilities(
   readonly ability: ActivatedAbility;
   /** Rule 403: the cost after modification, which is what gets paid. */
   readonly cost: Cost;
+  /** 718.3: the Attached card this ability was read from, if any. */
+  readonly from?: EntityId | undefined;
 }[] {
   // 381: "only ... on the Controlling Player's Turn and during an Open State".
   if (state.activePlayer !== player || isClosed(state) || state.showdown !== null) {
     return [];
   }
 
-  const found: { source: EntityId; index: number; ability: ActivatedAbility; cost: Cost }[] = [];
+  const found: {
+    source: EntityId;
+    index: number;
+    from?: EntityId;
+    ability: ActivatedAbility;
+    cost: Cost;
+  }[] = [];
   for (const source of boardEntities(state, player)) {
     const entity = getEntity(state, source);
-    const abilities = activatedAbilities(entityCard(state, source).abilities);
-
-    abilities.forEach((ability, index) => {
-      // 414: an exhaust cost cannot be paid by something already exhausted.
-      if (ability.exhaustSelf === true && entity.exhausted) {
-        return;
-      }
-      if (!dependencyMet(state, source, player, ability.dependsOn)) {
-        return;
-      }
-      const cost = abilityCost(state, player, ability.cost);
-      if (!canPay(getPlayer(state, player).pool, cost)) {
-        return;
-      }
-      found.push({ source, index, ability, cost });
-    });
+    // 718.2/718.3: an Attached card's own abilities are Inactive and its
+    // Top-Most Card gains the Effect Text's instead, so what a Game Object can
+    // do is asked rather than read straight off its card.
+    for (const set of activeAbilities(state, source)) {
+      activatedAbilities(set.abilities).forEach((ability, index) => {
+        // 414: an exhaust cost cannot be paid by something already exhausted.
+        if (ability.exhaustSelf === true && entity.exhausted) {
+          return;
+        }
+        if (!dependencyMet(state, source, player, ability.dependsOn)) {
+          return;
+        }
+        const cost = abilityCost(state, player, ability.cost);
+        if (!canPay(getPlayer(state, player).pool, cost)) {
+          return;
+        }
+        found.push({
+          source,
+          index,
+          ...(set.from === undefined ? {} : { from: set.from }),
+          ability,
+          cost,
+        });
+      });
+    }
   }
   return found;
 }
@@ -331,18 +356,24 @@ export function triggersFor(
 
   const pending: PendingTrigger[] = [];
   for (const { source, controller } of candidates) {
-    triggeredAbilities(entityCard(state, source).abilities).forEach((ability, index) => {
-      if (!matchesTrigger(state, instance, source, controller, ability.condition)) {
-        return;
-      }
-      if (!dependencyMet(state, source, controller, ability.dependsOn)) {
-        return;
-      }
-      if (!withinTurnLimit(state, source, index, ability)) {
-        return;
-      }
-      pending.push({ source, controller, ability: { kind: 'triggered', index } });
-    });
+    for (const set of activeAbilities(state, source)) {
+      triggeredAbilities(set.abilities).forEach((ability, index) => {
+        if (!matchesTrigger(state, instance, source, controller, ability.condition)) {
+          return;
+        }
+        if (!dependencyMet(state, source, controller, ability.dependsOn)) {
+          return;
+        }
+        if (!withinTurnLimit(state, source, index, ability, set.from)) {
+          return;
+        }
+        pending.push({
+          source,
+          controller,
+          ability: { kind: 'triggered', index, ...(set.from === undefined ? {} : { from: set.from }) },
+        });
+      });
+    }
   }
 
   return pending;
@@ -359,17 +390,24 @@ export function withinTurnLimit(
   source: EntityId,
   index: number,
   ability: TriggeredAbility,
+  from?: EntityId | undefined,
 ): boolean {
   const limit = ability.limitPerTurn;
   if (limit === undefined) {
     return true;
   }
-  return (state.triggersUsed[triggerKey(source, index)] ?? 0) < limit;
+  return (state.triggersUsed[triggerKey(source, index, from)] ?? 0) < limit;
 }
 
-/** Stable key for the per-turn trigger counter. */
-export function triggerKey(source: EntityId, index: number): string {
-  return `${source}:${index}`;
+/**
+ * Stable key for the per-turn trigger counter.
+ *
+ * `from` is part of it because 718.3 can give one Unit abilities from several
+ * Gear, and two of them at the same index would otherwise share a counter —
+ * one "once each turn" would silently spend the other's use.
+ */
+export function triggerKey(source: EntityId, index: number, from?: EntityId | undefined): string {
+  return from === undefined ? `${source}:${index}` : `${source}:${from}:${index}`;
 }
 
 /** Everything `player` controls that is on the Board (rule 380). */

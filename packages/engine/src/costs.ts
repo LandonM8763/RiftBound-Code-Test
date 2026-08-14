@@ -27,14 +27,9 @@ import {
 import { mightOf } from './combat.js';
 import { conditionMet, type ConditionContext } from './condition.js';
 import { countOf } from './count.js';
+import { activeAbilities } from './attach.js';
 import { dependencyMet } from './dependency.js';
-import {
-  entityCard,
-  getEntity,
-  type EntityId,
-  type GameState,
-  type PlayerId,
-} from './state.js';
+import { getEntity, type EntityId, type GameState, type PlayerId } from './state.js';
 
 /** A modifier in play, with the player whose Passive Ability is supplying it. */
 export interface ActiveModifier {
@@ -63,22 +58,22 @@ export function activeModifiers(state: GameState): readonly ActiveModifier[] {
   const found: ActiveModifier[] = [];
 
   const collect = (entity: EntityId): void => {
-    const modifiers = entityCard(state, entity).abilities?.costModifiers;
-    if (modifiers === undefined) {
-      return;
-    }
     const controller = getEntity(state, entity).controller;
-    for (const modifier of modifiers) {
-      if (modifier.applies.scope === 'self') {
-        continue;
+    // 718.2/718.3, exactly as for statics: an Attached card's own Passives stop
+    // and its Top-Most Card carries the Effect Text's instead.
+    for (const set of activeAbilities(state, entity)) {
+      for (const modifier of set.abilities.costModifiers ?? []) {
+        if (modifier.applies.scope === 'self') {
+          continue;
+        }
+        if (!dependencyMet(state, entity, controller, modifier.dependsOn)) {
+          continue;
+        }
+        if (!conditionMet(state, controller, entity, modifier.condition)) {
+          continue;
+        }
+        found.push({ controller, modifier });
       }
-      if (!dependencyMet(state, entity, controller, modifier.dependsOn)) {
-        continue;
-      }
-      if (!conditionMet(state, controller, entity, modifier.condition)) {
-        continue;
-      }
-      found.push({ controller, modifier });
     }
   };
 
