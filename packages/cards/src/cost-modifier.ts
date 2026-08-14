@@ -40,7 +40,21 @@ export type CostTarget = CardType | 'ability';
  */
 export interface CostFilter {
   readonly types?: readonly CostTarget[] | undefined;
-  readonly scope: 'self' | 'friendly' | 'any';
+  readonly scope: 'self' | 'friendly' | 'opponent' | 'any';
+  /**
+   * 809.1.c: applies only to a Spell or Ability that **chooses this modifier's
+   * own source** — Deflect, and nothing else so far.
+   *
+   * The only filter that depends on a choice rather than on the board, which is
+   * why `totalCost` takes the chosen target: a Deflect makes one card cost more
+   * to point at this Unit and nothing at all to point elsewhere, so a cost
+   * computed per card rather than per target would be wrong both ways.
+   *
+   * Deflect pairs it with `scope: 'opponent'`, because 809.1.c is about
+   * "Spells and abilities **an opponent controls**" — `any` would tax the
+   * Deflecting player's own spells for choosing their own Unit.
+   */
+  readonly choosesSource?: boolean | undefined;
 }
 
 /**
@@ -193,6 +207,10 @@ export function modifierApplies(
     return payer === 'self' && (filter.types === undefined || filter.types.includes(target));
   }
   if (filter.scope === 'friendly' && payer === 'opponent') {
+    return false;
+  }
+  // The mirror, and 809.1.c's "Spells and abilities an opponent controls".
+  if (filter.scope === 'opponent' && payer !== 'opponent') {
     return false;
   }
   const types = filter.types;

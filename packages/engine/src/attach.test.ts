@@ -15,13 +15,22 @@ import {
   type CardDefinition,
   type TargetSpec,
 } from '@riftbound/cards';
-import { makeBattlefield, makeGear, makeLegend, makeRune, makeUnit } from '@riftbound/cards/testing';
+import {
+  makeBattlefield,
+  makeGear,
+  makeLegend,
+  makeRune,
+  makeSpell,
+  makeUnit,
+} from '@riftbound/cards/testing';
 import { describe, expect, it } from 'vitest';
 
 import { activatableAbilities } from './abilities.js';
 import { attach, attachmentsOf, detach } from './attach.js';
 import { mightOf } from './combat.js';
 import { executeEffect } from './effects.js';
+import { totalCost } from './costs.js';
+import { legalActions } from './legal.js';
 import { canPay, payFrom } from './play.js';
 import { checkInvariants } from './invariants.js';
 import { moveEntity } from './mutate.js';
@@ -579,5 +588,142 @@ describe('[A], Power of any Domain (135.2.e.5)', () => {
 
   it('counts toward the Rune cost of a card (137, 414, 416)', () => {
     expect(totalRuneCost({ energy: 1, power: ['fury'], anyPower: 2 })).toBe(4);
+  });
+});
+
+/**
+ * Deflect (809).
+ *
+ * The one cost modifier that depends on a *choice* rather than on the board:
+ * 809.1.c taxes a Spell an opponent controls for choosing the Unit it is
+ * printed on, so the same card in the same hand has two Total Costs depending
+ * on where it is pointed.
+ */
+describe('Deflect (809)', () => {
+  /** "DEFLECT 2" — opponents pay 2 more [A] to choose me. */
+  const DEFLECTOR = makeUnit(3, ['fury'], {
+    id: cardId('A-050'),
+    name: 'Deflector',
+    cost: cost(1),
+    abilities: {
+      costModifiers: [
+        {
+          applies: {
+            types: ['unit', 'spell', 'gear', 'ability'],
+            scope: 'opponent',
+            choosesSource: true,
+          },
+          change: { kind: 'increase', anyPower: 2 },
+        },
+      ],
+    },
+  });
+
+  const BOLT = makeSpell(['fury'], {
+    id: cardId('A-051'),
+    name: 'Bolt',
+    cost: cost(1),
+    timing: 'action',
+    effect: { target: { kind: 'unit', scope: 'any' }, effects: [{ kind: 'dealDamage', amount: 1 }] },
+  });
+
+  const D_REGISTRY = CardRegistry.from([
+    LEGEND,
+    CHAMPION,
+    PLAIN,
+    DEFLECTOR,
+    BOLT,
+    RUNE,
+    ...BATTLEFIELDS,
+  ] as CardDefinition[]);
+
+  function deflectGame(seed: string): GameState {
+    const list: DeckList = {
+      legend: LEGEND.id,
+      champion: CHAMPION.id,
+      main: [
+        ...Array.from({ length: 6 }, () => PLAIN.id),
+        ...Array.from({ length: 5 }, () => DEFLECTOR.id),
+        ...Array.from({ length: 5 }, () => BOLT.id),
+      ],
+      runes: Array.from({ length: 8 }, () => RUNE.id),
+      battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
+    };
+    let state = createGame({ decks: [list, list], registry: D_REGISTRY, seed }).state;
+    while (state.phase === 'mulligan') {
+      state = reduce(state, { type: 'mulligan', cards: [] }).state;
+    }
+    while (state.phase !== 'main' && !isOver(state)) {
+      state = reduce(state, { type: 'resolvePhase' }).state;
+    }
+    return state;
+  }
+
+  /** Put a card of `id` onto the given player's Base. */
+  function onBoardFor(
+    state: GameState,
+    player: number,
+    id: CardDefinition['id'],
+  ): [GameState, EntityId] {
+    const card = state.players[player]!.zones.mainDeck.find(
+      (candidate) => state.entities[candidate]!.card === id,
+    );
+    if (card === undefined) {
+      throw new Error(`No ${id} left for ${player}`);
+    }
+    return [moveEntity(state, card, playerLocation(player as never, 'base')), card];
+  }
+
+  it('809.1.c: raises the cost only for the Unit that has it', () => {
+    let state = deflectGame('deflect-cost');
+    const me = state.activePlayer;
+    const them = me === 0 ? 1 : 0;
+    const [a, guarded] = onBoardFor(state, them, DEFLECTOR.id);
+    const [b, plain] = onBoardFor(a, them, PLAIN.id);
+    state = b;
+
+    // Pointed at the Deflector: 1 Energy plus two [A]. Pointed anywhere else:
+    // the printed cost.
+    expect(totalCost(state, me, BOLT, {}, guarded)).toEqual({
+      energy: 1,
+      power: [],
+      anyPower: 2,
+    });
+    expect(totalCost(state, me, BOLT, {}, plain)).toEqual({ energy: 1, power: [] });
+  });
+
+  it('809.1.c: does not tax its own controller`s spells', () => {
+    let state = deflectGame('deflect-friendly');
+    const me = state.activePlayer;
+    const [a, mine] = onBoardFor(state, me, DEFLECTOR.id);
+    state = a;
+    expect(totalCost(state, me, BOLT, {}, mine)).toEqual({ energy: 1, power: [] });
+  });
+
+  it('drops the play from `legalActions` when the tax cannot be paid', () => {
+    let state = deflectGame('deflect-legal');
+    const me = state.activePlayer;
+    const them = me === 0 ? 1 : 0;
+    const [a, guarded] = onBoardFor(state, them, DEFLECTOR.id);
+    const [b, plain] = onBoardFor(a, them, PLAIN.id);
+    // A Bolt in hand and exactly enough for its printed cost, but not the tax.
+    const bolt = b.players[me]!.zones.mainDeck.find(
+      (candidate) => b.entities[candidate]!.card === BOLT.id,
+    )!;
+    state = moveEntity(b, bolt, playerLocation(me, 'hand'));
+    state = {
+      ...state,
+      players: state.players.map((seat) =>
+        seat.id === me ? { ...seat, pool: { ...seat.pool, energy: 5 } } : seat,
+      ),
+    };
+
+    const plays = legalActions(state, me).filter(
+      (action) => action.type === 'playCard' && action.card === bolt,
+    );
+    const chosen = plays.map((action) => (action as { target?: EntityId }).target);
+    expect(chosen).toContain(plain);
+    // 809.1.c: no Power in the pool, so the Deflected target is unaffordable.
+    expect(chosen).not.toContain(guarded);
   });
 });

@@ -41,6 +41,14 @@ export interface ActiveModifier {
    * is what a `self` filter asks about. Board modifiers are never `self`.
    */
   readonly own?: boolean | undefined;
+  /**
+   * The Game Object the modifier is printed on, when it came off the Board.
+   *
+   * Needed only by 809.1.c's `choosesSource`: a Deflect applies to the cost of
+   * a Spell that chooses *this* Unit, so the comparison needs an identity.
+   * `undefined` for a `self` modifier, which is read off a card still in hand.
+   */
+  readonly source?: EntityId | undefined;
 }
 
 /**
@@ -73,7 +81,7 @@ export function activeModifiers(state: GameState): readonly ActiveModifier[] {
         if (!conditionMet(state, controller, entity, modifier.condition)) {
           continue;
         }
-        found.push({ controller, modifier });
+        found.push({ controller, modifier, source: entity });
       }
     }
   };
@@ -137,6 +145,16 @@ export function totalCost(
   card: CardDefinition,
   /** 356.2.b: whether the optional Additional Cost was declared at step 2. */
   context: ConditionContext = {},
+  /**
+   * The Game Object this play chooses (355.6), when it chooses one.
+   *
+   * Rule 356 is otherwise a question about the card alone, and this is the one
+   * modifier that breaks that: 809.1.c's Deflect taxes a Spell for choosing a
+   * particular Unit, so the same card has two different Total Costs depending
+   * on where it is pointed. `legalActions` already enumerates one action per
+   * target, which is why threading it here costs nothing structurally.
+   */
+  chosen?: EntityId | undefined,
 ): Cost | undefined {
   if (!isPlayable(card)) {
     return undefined;
@@ -147,6 +165,7 @@ export function totalCost(
     player,
     modifiersFor(state, player, card, context),
     state,
+    chosen,
   );
 }
 
@@ -225,11 +244,20 @@ export function applyModifiers(
   active: readonly ActiveModifier[],
   /** Needed only to resolve counted amounts; omit for fixed-amount modifiers. */
   state?: GameState,
+  /** 809.1.c: which Game Object this play chooses, for a `choosesSource` filter. */
+  chosen?: EntityId | undefined,
 ): Cost {
   const relevant = active
-    .filter(({ controller, modifier, own }) =>
-      modifierApplies(modifier.applies, target, payerFor(controller, player, own)),
-    )
+    .filter(({ controller, modifier, own, source }) => {
+      // 809.1.c: a Deflect applies only when the play chooses the Unit it is
+      // printed on. Written as a gate here rather than inside `modifierApplies`
+      // because it is about a *choice*, and that function is a pure statement
+      // about the filter, the card type and who is paying.
+      if (modifier.applies.choosesSource === true && (chosen === undefined || chosen !== source)) {
+        return false;
+      }
+      return modifierApplies(modifier.applies, target, payerFor(controller, player, own));
+    })
     .map(({ controller, modifier }) => resolveCount(modifier.change, controller, state));
 
   // Sort by rule 356's layer, then put bounded discounts before unbounded ones.

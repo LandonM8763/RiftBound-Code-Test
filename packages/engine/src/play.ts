@@ -26,7 +26,7 @@ import {
 import { canPayAdditional } from './additional.js';
 import { totalCost } from './costs.js';
 
-import type { Entity, GameState, Location, PlayerId, RunePool } from './state.js';
+import type { Entity, EntityId, GameState, Location, PlayerId, RunePool } from './state.js';
 import { entityCard, getPlayer, playerLocation, powerIn } from './state.js';
 
 /** Whether a pool covers a cost (rule 357.1). */
@@ -161,6 +161,30 @@ function withResourceCosts(cost: Cost, costs: readonly AdditionalCost[]): Cost {
 }
 
 /**
+ * The Total Cost of one play, or `undefined` when this player cannot pay it.
+ *
+ * `chosen` is the Game Object the play would choose, which matters because of
+ * 809.1.c: a Deflect taxes a Spell for choosing a particular Unit, so the same
+ * card in the same hand has two answers depending on where it is pointed.
+ * `legalActions` asks once per target it is about to offer.
+ */
+export function affordable(
+  state: GameState,
+  player: PlayerId,
+  card: CardDefinition,
+  payAdditional: boolean,
+  chosen?: EntityId | undefined,
+): Cost | undefined {
+  const additional = card.abilities?.additionalCosts ?? [];
+  const paid = payAdditional ? additional : additional.filter(isMandatory);
+  const cost = totalCost(state, player, card, { paidAdditionalCost: payAdditional }, chosen);
+  if (cost === undefined) {
+    return undefined;
+  }
+  return canPay(getPlayer(state, player).pool, withResourceCosts(cost, paid)) ? cost : undefined;
+}
+
+/**
  * Cards in `player`'s hand they could legally play and afford right now.
  *
  * A card whose Additional Cost is optional appears twice — once for each
@@ -169,13 +193,29 @@ function withResourceCosts(cost: Cost, costs: readonly AdditionalCost[]): Cost {
  * paid does not appear at all: 356.2.a makes paying it part of playing the
  * card, so an unpayable one makes the card unplayable, the same shape as 422.3
  * for a Discard that cannot be performed.
+ *
+ * Called with no `chosen`, the cost this checks is a **lower bound** for a card
+ * that will go on to choose a target, because the only choice-dependent
+ * modifier is 809.1.c's Deflect and it only ever *increases*. `legalActions`
+ * re-asks `affordable` per target and drops the ones that stop being payable.
+ * A choice-dependent *discount* would need this gate to move rather than that
+ * one; the parser produces none, and this is where to look if one appears.
  */
 export function playableFromHand(
   state: GameState,
   player: PlayerId,
   timing: { readonly closed: boolean; readonly showdown: boolean },
+  /**
+   * 809.1.c: the Game Object this play would choose.
+   *
+   * Deflect makes the same card cost different amounts depending on where it is
+   * pointed, so affordability is a question about the (card, target) pair
+   * rather than about the card. `legalActions` asks once per target it is about
+   * to offer; the plain call with no target answers for a card that chooses
+   * nothing, which is almost all of them.
+   */
+  chosen?: EntityId | undefined,
 ): { readonly entity: Entity; readonly check: PlayableCheck }[] {
-  const pool = getPlayer(state, player).pool;
   const results: { entity: Entity; check: PlayableCheck }[] = [];
 
   for (const id of getPlayer(state, player).zones.hand) {
@@ -198,9 +238,8 @@ export function playableFromHand(
     }
 
     const offer = (payAdditional: boolean): void => {
-      const paid = payAdditional ? [...mandatory, ...optional] : mandatory;
-      const cost = totalCost(state, player, card, { paidAdditionalCost: payAdditional });
-      if (cost === undefined || !canPay(pool, withResourceCosts(cost, paid))) {
+      const cost = affordable(state, player, card, payAdditional, chosen);
+      if (cost === undefined) {
         return;
       }
       results.push({ entity, check: { card, cost, payAdditional } });

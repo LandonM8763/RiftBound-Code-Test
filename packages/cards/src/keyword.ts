@@ -113,9 +113,10 @@ export const UNMODELLED_KEYWORDS: Readonly<Record<string, string>> = Object.free
   // on something else as well. Build it when that number moves.
   repeat:
     'Repeat (820) needs the effect executed twice on resolution; measured at 0 cards unlocked, so it is not built',
-  // 809.1.d: a *Mandatory* Additional Cost, and 809.1.c.1 makes it Power "of
-  // any Domain", which `Cost` cannot express — its power is a Domain list.
-  deflect: 'Deflect (809) is a Mandatory Additional Cost in Power of any Domain; Cost cannot express either',
+  // Deflect (809) is not here either. 809.1.c is a Passive cost increase of
+  // `[A]` on Spells and Abilities an opponent controls that choose this Game
+  // Object — the one modifier that depends on a *choice* rather than on the
+  // board, which is why `totalCost` takes the chosen target.
   // 811.1.c: a prerequisite for the Hide Discretionary Action, which needs
   // facedown cards — a hidden-information mechanic the state model has no
   // representation for.

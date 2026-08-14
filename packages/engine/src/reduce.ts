@@ -233,7 +233,9 @@ function playCard(
     }
   }
 
-  const cost = totalCost(state, player, definition, { paidAdditionalCost: payAdditional });
+  // 809.1.c: the chosen Game Object is part of what the card costs, because a
+  // Deflect taxes a Spell for choosing the Unit it is printed on.
+  const cost = totalCost(state, player, definition, { paidAdditionalCost: payAdditional }, target);
   if (cost === undefined) {
     throw new IllegalActionError(`${definition.name} is not a playable card`);
   }

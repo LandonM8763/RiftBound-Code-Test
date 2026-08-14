@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 130 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 134 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -828,6 +828,16 @@ by what it *does* — the Activated Ability whose effect is an `attach` — beca
 818.1.c.2 defines Equip as exactly that, and a separate marker would be a
 second source of truth.
 
+**Deflect (809) is the one cost modifier that depends on a choice.** 809.1.c
+makes a Spell or Ability an opponent controls cost `[A]` more *for choosing this
+Game Object*, so the same card in the same hand has two Total Costs depending on
+where it is pointed. That is why `totalCost` takes the chosen target and
+`CostFilter` gained `choosesSource` — and why `legalActions` re-asks
+`affordable` per target instead of once per card. `playableFromHand` still gates
+on the untargeted cost, which is a *lower* bound because every `choosesSource`
+modifier is an increase; a choice-dependent discount would need that gate to
+move rather than this one.
+
 **`[A]` is Power of any Domain (135.2.e.5), and it is a `Cost` field of its
 own.** Not more entries in `power`: the Domain is not unknown, there is none.
 `canPay` asks it as one question about the *surplus* across every Domain once
@@ -1205,7 +1215,7 @@ edits by how far they move it, and swapping the objective swaps what the tool is
 for without touching the search.
 
 **The default is `CONSISTENCY`, and the reason is not taste.** A *simulated*
-objective is not trustworthy yet: 338 of the 468 cards with rules text still
+objective is not trustworthy yet: 334 of the 468 cards with rules text still
 play as vanilla, so a simulator cannot see what most cards do. Optimizing
 against it would cut the card whose text the engine ignores and keep the vanilla
 body with better stats — confidently wrong advice. Consistency depends on cost
@@ -1358,7 +1368,7 @@ deck builds and validates from it with no issues, and the engine plays complete
 games with it — 300 games, all decided, heuristic 58.7% ± 5.5 against random.
 
 101 of those cards carry an ability and 15 a keyword. The keyword figure is low
-against the 130 that parse because keywords ride the same all-or-nothing rule:
+against the 134 that parse because keywords ride the same all-or-nothing rule:
 a card whose other clause is unreadable keeps neither. 13 create Tokens, 12
 carry Effect Text a Gear lends its Top-Most Card, 6 carry Accelerate, 5 return a
 card to hand and 3 grant a keyword.
@@ -1427,14 +1437,14 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 130 of the 468 cards that have text**, and the shape of what is
+**Coverage is 134 of the 468 cards that have text**, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 130 |
-| Blocked | 338 |
+| Fully parsed | 134 |
+| Blocked | 334 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 3 or 4 times, everything else once or
@@ -1478,8 +1488,8 @@ investments. See [Additional Costs](#additional-costs-rule-3562).
 **effect-granted keywords plus two wider conditions 100 → 105**, and **dynamic
 values 105 → 110.** **Multi-sentence rules text took it 110 → 112**, and
 **Equip with the Effect Text 112 → 124** — the largest single step since tokens,
-and the one whose engine half (Attach) was already built — and **Weaponmaster
-with `[A]` 124 → 130**.
+and the one whose engine half (Attach) was already built — **Weaponmaster with
+`[A]` 124 → 130**, and **Deflect 130 → 134**.
 
 #### How the ranking was measured wrong, and what fixed it
 
@@ -1511,7 +1521,7 @@ Re-measured by counterfactual from the **124** baseline, one mechanic at a time:
 |---|---|
 | ~~Weaponmaster (821)~~ — now built | **+6 projected, +6 delivered** |
 | **Hidden (811) and the Hide action (421)** | +4 |
-| Deflect (809) | +3 |
+| ~~Deflect (809)~~ — now built | **+3 projected, +4 delivered** |
 | Durations and delayed effects ("the next spell you play…") | +3 |
 | Vision (817) / Predict (436) | +2 |
 | Non-standard ability costs | +2 |
@@ -1534,6 +1544,7 @@ What each round actually delivered, for calibrating the next projection:
 | Multi-sentence rules text | not projected, **+2** delivered |
 | Equip, Quick-Draw and the Effect Text | +11 projected, **+12** delivered |
 | Weaponmaster (821) with `[A]` | +6 projected, **+6** delivered |
+| Deflect (809) | +3 projected, **+4** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic
@@ -1550,11 +1561,10 @@ because the rewrite replaces a line the real parser now reads with a stand-in
 that loses it. Delete a rewrite when its mechanic lands; leaving it in makes the
 next re-measurement quietly wrong.
 
-**The keyword figure is still a trap**, and now more so. Equip and Quick-Draw
-were the biggest part of it and they are built. What remains is Weaponmaster +6,
-Hidden +4, Deflect +3, Vision +2 and Repeat +1, each wanting a *different* deep
-mechanic: a cost read off a target chosen during resolution, facedown cards,
-Power of any Domain, Predict, and executing a Chain item's instructions twice.
+**The keyword tail is now nearly spent.** Equip, Quick-Draw, Weaponmaster and
+Deflect are all built; what remains is Hidden +4, Vision +2 and Repeat +1 — and
+each wants a *different* deep mechanic: facedown cards, Predict (436), and
+executing a Chain item's instructions a second time.
 
 Additional Costs and state predicates were the two best single investments and
 **do not overlap**: together they measured +14 and delivered +10. The shortfall
@@ -1576,24 +1586,20 @@ What the corpus is blocked on now, in the order measurement puts them:
 2. **Durations and delayed effects** — "the next spell you play this turn costs
    5 less", "opponents can't play cards this turn". +3, but three cards wanting
    three different mechanics.
-3. **Deflect (809)** — +3, and the cheapest of these now. 809.1.c.1's "Power of
-   any Domain" is `[A]` and `Cost` states it; what is left is that a Deflect is
-   a cost increase conditioned on *which Game Object a spell chooses*, so
-   `totalCost` would have to be asked per target rather than per card.
-4. **The rest of statics beyond a scope plus a grant** — "While I'm attacking
+3. **The rest of statics beyond a scope plus a grant** — "While I'm attacking
    or defending alone" needs a combat-role predicate that `Condition`
    deliberately cannot express, because a condition that reads Might back would
    recurse through `mightOf`. +2.
-5. **Non-standard ability costs** — "Spend my buff:", "Recycle 1 from your
+4. **Non-standard ability costs** — "Spend my buff:", "Recycle 1 from your
    trash:", "you may exhaust me to …". +2. `ActivatedAbility.cost` is Energy,
    Power and the exhaust; 16 cards want more.
-6. **Conditional and modal effects** — "if this kills it", "unless its
+5. **Conditional and modal effects** — "if this kills it", "unless its
    controller…", "choose one •…". +2 and +0. The effect model has no outcome
    conditions and no modes.
 
 **This is where the curve flattens.** The rounds after Additional Costs
-delivered +11, +6, +5, +5, +2, +12 and +6; everything above is +4 or less, and
-each of the top three needs a subsystem rather than an extension. Coverage past
+delivered +11, +6, +5, +5, +2, +12, +6 and +4; everything above is +4 or less,
+and the largest of them needs a subsystem rather than an extension. Coverage past
 ~140 means paying subsystem prices for two or three cards at a time — which is the
 point at which a hand-authored overlay stops being an admission of defeat and
 starts being cheaper than the mechanic. `ingest/authored.ts` is that seam: it

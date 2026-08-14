@@ -376,7 +376,7 @@ describe('keywords (rules 800-828)', () => {
   });
 
   it('refuses a keyword the engine does not model, with a stated reason', () => {
-    for (const keyword of ['HIDDEN', 'DEFLECT', 'VISION', 'REPEAT 2']) {
+    for (const keyword of ['HIDDEN', 'VISION', 'REPEAT 2']) {
       expect(parseCardText(keyword).unparsed).toHaveLength(1);
     }
     expect(Object.keys(UNMODELLED_KEYWORDS)).toContain('hidden');
@@ -1183,5 +1183,29 @@ describe('Weaponmaster (821)', () => {
     expect(Object.keys(UNMODELLED_KEYWORDS)).not.toContain('weaponmaster');
     expect(Object.keys(UNMODELLED_KEYWORDS)).not.toContain('equip');
     expect(Object.keys(UNMODELLED_KEYWORDS)).not.toContain('quick-draw');
+    expect(Object.keys(UNMODELLED_KEYWORDS)).not.toContain('deflect');
+  });
+});
+
+describe('Deflect (809)', () => {
+  it('809.1.c: desugars into a cost increase gated on choosing this object', () => {
+    const parsed = parseCardText('DEFLECT 2');
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.costModifiers?.[0]).toEqual({
+      applies: {
+        types: ['unit', 'spell', 'gear', 'ability'],
+        scope: 'opponent',
+        choosesSource: true,
+      },
+      // 809.1.c.1: the Power may always be of any Domain, which is `[A]`.
+      change: { kind: 'increase', anyPower: 2 },
+    });
+  });
+
+  it('809.1.b.3: an omitted value is 1', () => {
+    expect(parseCardText('DEFLECT').abilities?.costModifiers?.[0]?.change).toEqual({
+      kind: 'increase',
+      anyPower: 1,
+    });
   });
 });

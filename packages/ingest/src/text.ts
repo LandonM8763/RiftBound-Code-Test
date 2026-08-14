@@ -1743,6 +1743,28 @@ export function parseCardText(text: string, card: CardFacts = {}): ParsedText {
       continue;
     }
 
+    // 809.1.c: Deflect X is "Spells and abilities an opponent controls that
+    // target me cost X more Power to play as an additional cost for each time
+    // they choose me", and 809.1.c.1 makes that Power any Domain — which `[A]`
+    // now states. A Passive cost increase, gated on the play choosing this
+    // Game Object.
+    const deflect = line.match(/^deflect(?:\s+(\d+))?$/i);
+    if (deflect !== null) {
+      // 809.1.b.3: an omitted value is 1.
+      costModifiers.push({
+        applies: {
+          // 809.1.d puts it on "Spells and Abilities", both of which pay.
+          types: ['unit', 'spell', 'gear', 'ability'],
+          // "an opponent controls" — `any` would tax the Deflecting player's
+          // own spells for choosing their own Unit.
+          scope: 'opponent',
+          choosesSource: true,
+        },
+        change: { kind: 'increase', anyPower: count(deflect[1] ?? '1') ?? 1 },
+      });
+      continue;
+    }
+
     // 821.1.c: Weaponmaster is "When you play me, you may choose a Card you
     // control with the Equipment tag … Pay the cost of its Equip ability,
     // reduced by [A], to attach it to this unit." A Play Effect with a target

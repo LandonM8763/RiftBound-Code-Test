@@ -4,7 +4,7 @@ import { effectOf, needsTargetChoice, type CardEffect, type TargetSpec } from '@
 import { abilityFor, activatableAbilities } from './abilities.js';
 import { legalDestinations, legalTargets } from './effects.js';
 import { standardMoves } from './move.js';
-import { playableFromHand, validUnitLocations } from './play.js';
+import { affordable, playableFromHand, validUnitLocations } from './play.js';
 import type { EntityId, GameState, Location, PlayerId } from './state.js';
 import { entityCard, getPlayer, isClosed, isOver, isShowdown } from './state.js';
 
@@ -118,6 +118,12 @@ export function legalActions(state: GameState, player: PlayerId): readonly Actio
       : [undefined];
 
     for (const target of targets) {
+      // 809.1.c: a Deflect makes this card cost more to point at *that* Unit
+      // and nothing extra to point elsewhere, so affordability is re-asked per
+      // target rather than answered once for the card.
+      if (affordable(state, player, check.card, check.payAdditional, target) === undefined) {
+        continue;
+      }
       // A `move` effect needs its Destination chosen now too (449.1), so the
       // offer is the product of the two choices — the same treatment targets
       // already get, for the same rule 355.8 reason.
