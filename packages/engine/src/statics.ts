@@ -292,3 +292,63 @@ export function entersReady(
   }
   return false;
 }
+
+/**
+ * Extra Locations this card may be played to (rule 355.2.b).
+ *
+ * 355.2.a's default is the controller's Base or a Battlefield they Control;
+ * this is the permission that widens it, and 170.11 names the two states cards
+ * ask for. Gathered from the same two places `entersReady` is: the card's own
+ * `self` static, read from hand because "you may play **me**" has to be
+ * answerable before the card is anywhere, and the Board for the wider wording
+ * ("Friendly units may be played to open battlefields").
+ *
+ * A permission, so several union rather than intersect and none can take a
+ * Location away.
+ */
+export function extraPlayLocations(
+  state: GameState,
+  player: PlayerId,
+  card: CardDefinition,
+): ReadonlySet<'open' | 'occupiedEnemy'> {
+  const allowed = new Set<'open' | 'occupiedEnemy'>();
+
+  for (const ability of staticAbilities(card.abilities)) {
+    if (ability.grant.playTo === undefined || ability.affects.who !== 'self') {
+      continue;
+    }
+    // Same split as `entersReady`: a source-relative condition cannot hold for
+    // a card still in hand, but a state predicate is answerable.
+    if (ability.condition !== undefined && isSourceCondition(ability.condition)) {
+      continue;
+    }
+    if (
+      conditionMet(state, player, undefined, ability.condition) &&
+      dependencyMet(state, undefined, player, ability.dependsOn)
+    ) {
+      for (const where of ability.grant.playTo) {
+        allowed.add(where);
+      }
+    }
+  }
+
+  for (const { controller, ability } of activeStatics(state)) {
+    if (ability.grant.playTo === undefined || ability.affects.who === 'self') {
+      continue;
+    }
+    // `here` cannot be answered before the Unit has a Location, exactly as in
+    // `entersReady`, so it is not honoured rather than guessed at.
+    if (ability.affects.here === true) {
+      continue;
+    }
+    const friendly = controller === player;
+    const who = ability.affects.who;
+    if ((who === 'friendly' && friendly) || (who === 'enemy' && !friendly) || who === 'any') {
+      for (const where of ability.grant.playTo) {
+        allowed.add(where);
+      }
+    }
+  }
+
+  return allowed;
+}

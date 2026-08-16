@@ -136,7 +136,7 @@ export function legalActions(state: GameState, player: PlayerId): readonly Actio
           ...(check.payAdditional ? { payAdditional: true } : {}),
         };
         if (check.card.type === 'unit') {
-          for (const location of validUnitLocations(state, player)) {
+          for (const location of validUnitLocations(state, player, check.card)) {
             actions.push({ type: 'playCard', card: entity.id, location, ...choices });
           }
         } else {

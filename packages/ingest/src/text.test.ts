@@ -1209,3 +1209,59 @@ describe('Deflect (809)', () => {
     });
   });
 });
+
+/**
+ * Lines the export publishes without their parentheses.
+ *
+ * Reminder text is stripped before parsing, but the export sometimes flattens a
+ * reminder into the rules text — and then the glossary wording for a keyword,
+ * or a bare restatement of a rule, arrives where an ability would be.
+ */
+describe('flattened reminder text', () => {
+  it('815.1.b / 826.3: reads the glossary wording as the keyword', () => {
+    expect(parseCardText('I must be assigned combat damage first.').keywords).toEqual([
+      { kind: 'tank' },
+    ]);
+    expect(parseCardText('I must be assigned combat damage last.').keywords).toEqual([
+      { kind: 'backline' },
+    ]);
+  });
+
+  it('702.3: a line that only restates a rule grants nothing', () => {
+    // A token reference card whose whole text is rule 702.3. Understood, with
+    // no ability — refusing it would fail a card that has no rules text.
+    const parsed = parseCardText('A unit may have no more than one buff at a time.');
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities).toBeUndefined();
+    expect(parsed.keywords).toBeUndefined();
+  });
+
+  it('does not read a near-restatement as nothing', () => {
+    // The list is closed on purpose: a *near* restatement is how a real ability
+    // gets silently dropped.
+    expect(parseCardText('A unit may have no more than two buffs at a time.').unparsed).toHaveLength(
+      1,
+    );
+  });
+});
+
+describe('play-location permissions (355.2.b)', () => {
+  it('reads "you may play me to an open battlefield"', () => {
+    const parsed = parseCardText('You may play me to an open battlefield.');
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.statics?.[0]).toEqual({
+      affects: { who: 'self' },
+      grant: { playTo: ['open'] },
+    });
+  });
+
+  it('reads the wider scope, and the occupied-enemy case', () => {
+    expect(parseCardText('Friendly units may be played to open battlefields.').abilities?.statics?.[0]).toEqual({
+      affects: { who: 'friendly' },
+      grant: { playTo: ['open'] },
+    });
+    expect(
+      parseCardText('You may play me to an occupied enemy battlefield.').abilities?.statics?.[0],
+    ).toEqual({ affects: { who: 'self' }, grant: { playTo: ['occupiedEnemy'] } });
+  });
+});

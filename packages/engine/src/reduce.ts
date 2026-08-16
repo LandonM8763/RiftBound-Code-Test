@@ -811,7 +811,9 @@ function resolvePermanentLocation(
     // 359.2.d: non-Unit Gear always enters at the player's Base.
     return playerLocation(player, 'base');
   }
-  const allowed = validUnitLocations(state, player);
+  // 355.2.b: the card itself may widen where it is Valid to play — "You may
+  // play me to an open battlefield".
+  const allowed = validUnitLocations(state, player, definition);
   if (location === undefined) {
     return allowed[0] as Location;
   }

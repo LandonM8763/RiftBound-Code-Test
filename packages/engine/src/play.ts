@@ -24,6 +24,7 @@ import {
 } from '@riftbound/cards';
 
 import { canPayAdditional } from './additional.js';
+import { extraPlayLocations } from './statics.js';
 import { totalCost } from './costs.js';
 
 import type { Entity, EntityId, GameState, Location, PlayerId, RunePool } from './state.js';
@@ -74,13 +75,40 @@ export function payFrom(pool: RunePool, cost: Cost): RunePool {
 }
 
 /**
- * Locations a Unit may be played to (rule 355.2.a): the controller's Base, or a
- * Battlefield that controller controls.
+ * Locations a Unit may be played to (rule 355.2).
+ *
+ * 355.2.a is the default — the controller's Base, or a Battlefield that
+ * controller Controls. 355.2.b lets a card widen it, which is what `card` is
+ * for: "You may play me to an open battlefield" makes a Location valid that
+ * otherwise is not. Omitting `card` asks the default question, which is what
+ * every caller that is not about a specific card wants.
  */
-export function validUnitLocations(state: GameState, player: PlayerId): Location[] {
+export function validUnitLocations(
+  state: GameState,
+  player: PlayerId,
+  card?: CardDefinition | undefined,
+): Location[] {
+  const extra = card === undefined ? undefined : extraPlayLocations(state, player, card);
   const locations: Location[] = [playerLocation(player, 'base')];
   state.battlefields.forEach((battlefield, index) => {
     if (battlefield.controller === player) {
+      locations.push({ kind: 'battlefield', index });
+      return;
+    }
+    if (extra === undefined || extra.size === 0) {
+      return;
+    }
+    // 170.11.c: "open" is unoccupied *and* uncontrolled — both halves, so a
+    // Battlefield an opponent controls with no Units at it is not open.
+    const occupied = battlefield.units.length > 0;
+    const uncontrolled = battlefield.controller === null;
+    if (extra.has('open') && !occupied && uncontrolled) {
+      locations.push({ kind: 'battlefield', index });
+      return;
+    }
+    // 170.11.a: "occupied" means a Unit is present; "enemy" is the opponent's
+    // Control, which is what makes this distinct from `open`.
+    if (extra.has('occupiedEnemy') && occupied && !uncontrolled) {
       locations.push({ kind: 'battlefield', index });
     }
   });

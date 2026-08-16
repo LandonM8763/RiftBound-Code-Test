@@ -147,9 +147,36 @@ const MODELLED_KEYWORDS: readonly {
     pattern: /^shield(?:\s+(\d+))?$/i,
     build: (m) => ({ kind: 'shield', value: count(m[1] ?? '1') ?? 1 }),
   },
-  { pattern: /^tank$/i, build: () => ({ kind: 'tank' }) },
-  { pattern: /^backline$/i, build: () => ({ kind: 'backline' }) },
+  // Some cards print the glossary wording where the keyword would go, because
+  // the export flattens a reminder that lost its parentheses. 815.1.b and
+  // 826.3 are those exact sentences, so they are the keyword.
+  {
+    pattern: /^(?:tank|i must be assigned combat damage first\.?)$/i,
+    build: () => ({ kind: 'tank' }),
+  },
+  {
+    pattern: /^(?:backline|i must be assigned combat damage last\.?)$/i,
+    build: () => ({ kind: 'backline' }),
+  },
   { pattern: /^ganking$/i, build: () => ({ kind: 'ganking' }) },
+];
+
+/**
+ * Lines that restate a rule and grant nothing (002).
+ *
+ * Reminder text is parenthesised and stripped before parsing, but the export
+ * sometimes publishes it without the parentheses — a token reference card whose
+ * whole text is rule 702.3, for instance. Such a line carries no ability, so
+ * reading it as nothing is what the card says; refusing it would fail a card
+ * that has no rules text at all.
+ *
+ * Deliberately a closed list of exact sentences. Anything that looks like a
+ * restatement but is not on it stays unparsed, because a *near* restatement is
+ * how a real ability gets silently dropped.
+ */
+const RULES_RESTATEMENTS: readonly RegExp[] = [
+  // 702.3: "Only one buff counter may be on a unit at a time."
+  /^a unit may have no more than one buff at a time$/i,
 ];
 
 /**
@@ -1152,6 +1179,29 @@ export function parseStatic(line: string): StaticAbility | undefined {
       : { affects: scope, grant: { entersReady: true }, ...(condition ? { condition } : {}) };
   }
 
+  // 355.2.b: "You may play me to an open battlefield", "Friendly units may be
+  // played to open battlefields." A permission that widens 355.2.a's default,
+  // and 170.11 defines the two states cards name.
+  const playTo = text.match(
+    /^(?:you may play (me|.+?)|(.+?) may be played) to (?:an? )?(open|occupied enemy) battlefields?$/i,
+  );
+  if (playTo !== null) {
+    const who = (playTo[1] ?? playTo[2] ?? '').trim();
+    const scope =
+      /^me$/i.test(who)
+        ? ({ who: 'self' } as StaticScope)
+        : STATIC_SCOPES.find((entry) => entry.pattern.test(who))?.scope;
+    if (scope === undefined) {
+      return undefined;
+    }
+    const where = /^open$/i.test(playTo[3] ?? '') ? 'open' : 'occupiedEnemy';
+    return {
+      affects: scope,
+      grant: { playTo: [where] },
+      ...(condition ? { condition } : {}),
+    };
+  }
+
   // "<scope> have/has <+N Might | KEYWORD…>". "an additional +1 Might" is the
   // same statement with a word of emphasis in it.
   const have = text.match(/^(.+?) (?:have|has|gets?) (?:an additional )?(.+)$/i);
@@ -1792,6 +1842,12 @@ export function parseCardText(text: string, card: CardFacts = {}): ParsedText {
         condition: { event: 'played', subject: 'self' },
         effect: { target: { kind: 'unit', scope: 'friendly' }, effects: [{ kind: 'attach' }] },
       });
+      continue;
+    }
+
+    // A line that only restates a rule grants nothing, so it is understood and
+    // contributes nothing. See `RULES_RESTATEMENTS`.
+    if (RULES_RESTATEMENTS.some((pattern) => pattern.test(line.replace(/[.]+$/, '')))) {
       continue;
     }
 

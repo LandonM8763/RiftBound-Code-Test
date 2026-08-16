@@ -67,6 +67,21 @@ export interface StaticGrant {
    */
   readonly entersReady?: boolean | undefined;
   /**
+   * 355.2.b: permission to play a Unit to a Location that is not normally
+   * Valid — "You may play me to an open battlefield."
+   *
+   * 355.2.a's default is the controller's Base or a Battlefield they Control,
+   * and 170.11 names the two states cards widen it to: `open` is unoccupied
+   * *and* uncontrolled (170.11.c), `occupiedEnemy` is one an opponent Controls
+   * with a Unit present (170.11.a).
+   *
+   * A permission rather than a restriction, so several stack by union and none
+   * can take a Location away. Read off the card in hand for a `self` static,
+   * the same as `entersReady` — "you may play **me**" has to be answerable
+   * before the card is anywhere.
+   */
+  readonly playTo?: readonly ('open' | 'occupiedEnemy')[] | undefined;
+  /**
    * A value read off the state, multiplying everything numeric in this grant.
    *
    * "I have +1 Might **for each friendly gear**" is `might: 1` with this set;

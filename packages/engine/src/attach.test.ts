@@ -31,7 +31,7 @@ import { mightOf } from './combat.js';
 import { executeEffect } from './effects.js';
 import { totalCost } from './costs.js';
 import { legalActions } from './legal.js';
-import { canPay, payFrom } from './play.js';
+import { canPay, payFrom, validUnitLocations } from './play.js';
 import { checkInvariants } from './invariants.js';
 import { moveEntity } from './mutate.js';
 import { reduce } from './reduce.js';
@@ -44,6 +44,7 @@ import {
   playerLocation,
   type EntityId,
   type GameState,
+  type PlayerId,
 } from './state.js';
 
 const LEGEND = makeLegend(['fury'], { id: cardId('A-000') });
@@ -725,5 +726,104 @@ describe('Deflect (809)', () => {
     expect(chosen).toContain(plain);
     // 809.1.c: no Power in the pool, so the Deflected target is unaffordable.
     expect(chosen).not.toContain(guarded);
+  });
+});
+
+/**
+ * Play-location permissions (355.2.b).
+ *
+ * 355.2.a's default is the controller's Base or a Battlefield they Control, and
+ * 170.11 names the two states cards widen it to.
+ */
+describe('play-location permissions (355.2.b)', () => {
+  const SNEAK = makeUnit(2, ['fury'], {
+    id: cardId('A-060'),
+    name: 'Sneak',
+    cost: cost(1),
+    abilities: { statics: [{ affects: { who: 'self' }, grant: { playTo: ['open'] } }] },
+  });
+  const RAIDER = makeUnit(2, ['fury'], {
+    id: cardId('A-061'),
+    name: 'Raider',
+    cost: cost(1),
+    abilities: { statics: [{ affects: { who: 'self' }, grant: { playTo: ['occupiedEnemy'] } }] },
+  });
+
+  const P_REGISTRY = CardRegistry.from([
+    LEGEND,
+    CHAMPION,
+    PLAIN,
+    SNEAK,
+    RAIDER,
+    RUNE,
+    ...BATTLEFIELDS,
+  ] as CardDefinition[]);
+
+  function permGame(seed: string): GameState {
+    const list: DeckList = {
+      legend: LEGEND.id,
+      champion: CHAMPION.id,
+      main: [
+        ...Array.from({ length: 6 }, () => PLAIN.id),
+        ...Array.from({ length: 5 }, () => SNEAK.id),
+        ...Array.from({ length: 5 }, () => RAIDER.id),
+      ],
+      runes: Array.from({ length: 8 }, () => RUNE.id),
+      battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
+    };
+    let state = createGame({ decks: [list, list], registry: P_REGISTRY, seed }).state;
+    while (state.phase === 'mulligan') {
+      state = reduce(state, { type: 'mulligan', cards: [] }).state;
+    }
+    while (state.phase !== 'main' && !isOver(state)) {
+      state = reduce(state, { type: 'resolvePhase' }).state;
+    }
+    return state;
+  }
+
+  it('355.2.a: the default is the Base and Battlefields you Control', () => {
+    const state = permGame('perm-default');
+    const player = state.activePlayer;
+    // Nothing is Controlled at the start, so a plain Unit has only its Base.
+    expect(validUnitLocations(state, player, PLAIN)).toEqual([playerLocation(player, 'base')]);
+  });
+
+  it('170.11.c: "open" needs unoccupied *and* uncontrolled', () => {
+    let state = permGame('perm-open');
+    const player = state.activePlayer;
+    expect(validUnitLocations(state, player, SNEAK)).toHaveLength(1 + state.battlefields.length);
+
+    // A Unit standing there makes it occupied, so it stops being open — even
+    // though nobody Controls it yet.
+    const [occupied, unit] = onBoard(state, PLAIN.id);
+    state = moveEntity(occupied, unit, battlefieldLocation(0));
+    expect(validUnitLocations(state, player, SNEAK)).toHaveLength(state.battlefields.length);
+  });
+
+  it('170.11.a: "occupied enemy" is the mirror — a Unit present and Controlled', () => {
+    let state = permGame('perm-occupied');
+    const player = state.activePlayer;
+    // Open Battlefields do not qualify for this permission.
+    expect(validUnitLocations(state, player, RAIDER)).toEqual([playerLocation(player, 'base')]);
+
+    const them = player === 0 ? 1 : 0;
+    const card = state.players[them]!.zones.mainDeck.find(
+      (candidate) => state.entities[candidate]!.card === PLAIN.id,
+    )!;
+    state = moveEntity(state, card, battlefieldLocation(0));
+    state = {
+      ...state,
+      battlefields: state.battlefields.map((battlefield, index) =>
+        index === 0 ? { ...battlefield, controller: them as PlayerId } : battlefield,
+      ),
+    };
+    expect(validUnitLocations(state, player, RAIDER)).toHaveLength(2);
+  });
+
+  it('a permission never takes a Location away', () => {
+    // The Base is always valid, whatever a card grants.
+    const state = permGame('perm-union');
+    const player = state.activePlayer;
+    expect(validUnitLocations(state, player, RAIDER)).toContainEqual(playerLocation(player, 'base'));
   });
 });

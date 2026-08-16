@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 134 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 140 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -854,6 +854,42 @@ last line only when that line does not otherwise parse — which is what keeps
 "give a unit +2 Might this turn" intact while still reading "TANK +1 Might",
 "Might +0" and "When I conquer, buff me.+1 Might".
 
+### Where a Unit may be played
+
+Rule 355.2. 355.2.a's default is the controller's Base or a Battlefield they
+Control; **355.2.b lets a card widen that**, and 170.11 defines the two states
+cards name — `open` is unoccupied *and* uncontrolled (170.11.c), `occupiedEnemy`
+is one an opponent Controls with a Unit present (170.11.a).
+
+It is a `StaticGrant`, so it is the same scope-plus-grant shape as Might and
+keywords, and read from the same two places `entersReady` is: the card's own
+`self` static from hand, because "you may play **me**" has to be answerable
+before the card is anywhere, and the Board for the wider "friendly units may be
+played to open battlefields". Three things follow:
+
+- **It is a permission, so grants union and none can subtract.** The Base stays
+  valid whatever a card says, and two permissions add two kinds of Location.
+- **`validUnitLocations` takes the card, optionally.** Callers asking the plain
+  355.2.a question pass nothing; `legalActions` and the reducer pass the card
+  being played, and those two must agree or the reducer would refuse an action
+  `legalActions` offered.
+- **`here` is not honoured on one of these**, exactly as in `entersReady`: the
+  entering Unit has no Location yet, so the scope cannot be judged rather than
+  being guessed at.
+
+### Flattened reminder text
+
+Reminder text is parenthesised and stripped before parsing, but the export
+sometimes publishes it *without* the parentheses — and then the glossary wording
+for a keyword arrives where the keyword would be. 815.1.b and 826.3 are the
+sentences "I must be assigned combat damage first/last", so those read as Tank
+and Backline; a line that only restates a rule (702.3's one-buff cap, on a token
+reference card) is understood and grants nothing.
+
+`RULES_RESTATEMENTS` is a closed list of exact sentences on purpose. A *near*
+restatement — "no more than **two** buffs" — is how a real ability gets silently
+dropped, so anything not on the list stays unparsed.
+
 ### Tokens
 
 Rules 179-187, data in `cards/token.ts`, engine in `engine/token.ts`.
@@ -1215,7 +1251,7 @@ edits by how far they move it, and swapping the objective swaps what the tool is
 for without touching the search.
 
 **The default is `CONSISTENCY`, and the reason is not taste.** A *simulated*
-objective is not trustworthy yet: 334 of the 468 cards with rules text still
+objective is not trustworthy yet: 328 of the 468 cards with rules text still
 play as vanilla, so a simulator cannot see what most cards do. Optimizing
 against it would cut the card whose text the engine ignores and keep the vanilla
 body with better stats — confidently wrong advice. Consistency depends on cost
@@ -1368,7 +1404,7 @@ deck builds and validates from it with no issues, and the engine plays complete
 games with it — 300 games, all decided, heuristic 58.7% ± 5.5 against random.
 
 101 of those cards carry an ability and 15 a keyword. The keyword figure is low
-against the 134 that parse because keywords ride the same all-or-nothing rule:
+against the 140 that parse because keywords ride the same all-or-nothing rule:
 a card whose other clause is unreadable keeps neither. 13 create Tokens, 12
 carry Effect Text a Gear lends its Top-Most Card, 6 carry Accelerate, 5 return a
 card to hand and 3 grant a keyword.
@@ -1437,14 +1473,14 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 134 of the 468 cards that have text**, and the shape of what is
+**Coverage is 140 of the 468 cards that have text**, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 134 |
-| Blocked | 334 |
+| Fully parsed | 140 |
+| Blocked | 328 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 3 or 4 times, everything else once or
@@ -1489,7 +1525,8 @@ investments. See [Additional Costs](#additional-costs-rule-3562).
 values 105 → 110.** **Multi-sentence rules text took it 110 → 112**, and
 **Equip with the Effect Text 112 → 124** — the largest single step since tokens,
 and the one whose engine half (Attach) was already built — **Weaponmaster with
-`[A]` 124 → 130**, and **Deflect 130 → 134**.
+`[A]` 124 → 130**, **Deflect 130 → 134**, and **play-location permissions with
+the reminder text the export flattens 134 → 140**.
 
 #### How the ranking was measured wrong, and what fixed it
 
@@ -1545,6 +1582,7 @@ What each round actually delivered, for calibrating the next projection:
 | Equip, Quick-Draw and the Effect Text | +11 projected, **+12** delivered |
 | Weaponmaster (821) with `[A]` | +6 projected, **+6** delivered |
 | Deflect (809) | +3 projected, **+4** delivered |
+| Play permissions (355.2.b) and flattened reminders | +5 projected, **+6** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic
