@@ -568,10 +568,29 @@ const CLAUSES: readonly ClauseRule[] = [
     },
   },
   {
-    pattern: /^add (fury|calm|mind|body|chaos|order)$/i,
+    // "Add [1] [R]" — 429.5's format admits several resources in one Add, and
+    // Energy and Power are different actions (414 against 416), so one clause
+    // produces both effects rather than one of them.
+    pattern: /^add (?:(\d+) )?((?:(?:fury|calm|mind|body|chaos|order)\s*)+)$/i,
     build: (m) => {
-      const domain = (m[1] ?? '').toLowerCase() as Domain;
-      return { effects: [{ kind: 'addPower', domain, count: 1 }], target: NO_TARGET };
+      const energy = m[1] === undefined ? 0 : count(m[1]);
+      if (energy === undefined) {
+        return undefined;
+      }
+      const domains = (m[2] ?? '')
+        .trim()
+        .split(/\s+/)
+        .map((word) => word.toLowerCase() as Domain);
+      const effects: Effect[] = energy > 0 ? [{ kind: 'addEnergy', count: energy }] : [];
+      // "Add [R][R]" is two pips of the same Domain, which `addPower` counts.
+      for (const domain of new Set(domains)) {
+        effects.push({
+          kind: 'addPower',
+          domain,
+          count: domains.filter((entry) => entry === domain).length,
+        });
+      }
+      return { effects, target: NO_TARGET };
     },
   },
   // Self-targeting: "me" is the card the text is printed on, so these need no

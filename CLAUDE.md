@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 140 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 141 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -1251,7 +1251,7 @@ edits by how far they move it, and swapping the objective swaps what the tool is
 for without touching the search.
 
 **The default is `CONSISTENCY`, and the reason is not taste.** A *simulated*
-objective is not trustworthy yet: 328 of the 468 cards with rules text still
+objective is not trustworthy yet: 327 of the 468 cards with rules text still
 play as vanilla, so a simulator cannot see what most cards do. Optimizing
 against it would cut the card whose text the engine ignores and keep the vanilla
 body with better stats — confidently wrong advice. Consistency depends on cost
@@ -1404,7 +1404,7 @@ deck builds and validates from it with no issues, and the engine plays complete
 games with it — 300 games, all decided, heuristic 58.7% ± 5.5 against random.
 
 101 of those cards carry an ability and 15 a keyword. The keyword figure is low
-against the 140 that parse because keywords ride the same all-or-nothing rule:
+against the 141 that parse because keywords ride the same all-or-nothing rule:
 a card whose other clause is unreadable keeps neither. 13 create Tokens, 12
 carry Effect Text a Gear lends its Top-Most Card, 6 carry Accelerate, 5 return a
 card to hand and 3 grant a keyword.
@@ -1473,14 +1473,14 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 140 of the 468 cards that have text**, and the shape of what is
+**Coverage is 141 of the 468 cards that have text**, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 140 |
-| Blocked | 328 |
+| Fully parsed | 141 |
+| Blocked | 327 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 3 or 4 times, everything else once or
@@ -1526,7 +1526,8 @@ values 105 → 110.** **Multi-sentence rules text took it 110 → 112**, and
 **Equip with the Effect Text 112 → 124** — the largest single step since tokens,
 and the one whose engine half (Attach) was already built — **Weaponmaster with
 `[A]` 124 → 130**, **Deflect 130 → 134**, and **play-location permissions with
-the reminder text the export flattens 134 → 140**.
+the reminder text the export flattens 134 → 140**, and **rule 429.5's
+multi-resource Add 140 → 141**.
 
 #### How the ranking was measured wrong, and what fixed it
 
@@ -1634,6 +1635,13 @@ What the corpus is blocked on now, in the order measurement puts them:
 5. **Conditional and modal effects** — "if this kills it", "unless its
    controller…", "choose one •…". +2 and +0. The effect model has no outcome
    conditions and no modes.
+
+**The tail is now literally flat.** Past HIDDEN (21 clauses), VISION (5) and
+REPEAT (4), *every remaining unparsed shape appears on exactly one card* — 355
+shapes, 355 cards. Building every mechanic in the table above reaches **170 of
+468**, measured, and there is no further mechanic to find: the rest is one card
+per unit of work whichever route is taken, a parser rule or an authored entry.
+Hidden is the last mechanic with any leverage left, and it buys 4.
 
 **This is where the curve flattens.** The rounds after Additional Costs
 delivered +11, +6, +5, +5, +2, +12, +6 and +4; everything above is +4 or less,

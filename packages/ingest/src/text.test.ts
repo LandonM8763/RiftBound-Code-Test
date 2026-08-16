@@ -1265,3 +1265,34 @@ describe('play-location permissions (355.2.b)', () => {
     ).toEqual({ affects: { who: 'self' }, grant: { playTo: ['occupiedEnemy'] } });
   });
 });
+
+describe('Add (rule 429)', () => {
+  it('429.5: reads Energy and Power out of one Add', () => {
+    // "Add [1][R]" is one Add of two resources, and Energy and Power are
+    // different actions (414 against 416), so it produces both effects.
+    expect(parseCardText('ADD 1 Fury.').effect?.effects).toEqual([
+      { kind: 'addEnergy', count: 1 },
+      { kind: 'addPower', domain: 'fury', count: 1 },
+    ]);
+  });
+
+  it('counts repeated pips of the same Domain', () => {
+    expect(parseCardText('ADD Calm Calm.').effect?.effects).toEqual([
+      { kind: 'addPower', domain: 'calm', count: 2 },
+    ]);
+  });
+
+  it('leaves the two plain forms alone', () => {
+    expect(parseCardText('ADD 2.').effect?.effects).toEqual([{ kind: 'addEnergy', count: 2 }]);
+    expect(parseCardText('ADD mind.').effect?.effects).toEqual([
+      { kind: 'addPower', domain: 'mind', count: 1 },
+    ]);
+  });
+
+  it('still refuses a restricted Add', () => {
+    // "Use only to play spells" is a restriction the Rune Pool cannot carry,
+    // and reading the Add without it would make the resource more useful than
+    // printed.
+    expect(parseCardText('Exhaust: REACTION - ADD 2. Use only to play spells.').unparsed).toHaveLength(1);
+  });
+});
