@@ -149,6 +149,22 @@ export type GameEvent =
       readonly player: PlayerId;
       readonly cards: readonly EntityId[];
     }
+  /**
+   * Rule 421: a card was Hidden facedown at a Battlefield.
+   *
+   * The card is deliberately *not* named. 107.3.f makes the Facedown Zone
+   * public and its contents Private, so the event every player sees is that
+   * something went down there — naming the entity in a shared event log would
+   * leak what `view.ts` is careful to redact.
+   */
+  | { readonly type: 'cardHidden'; readonly player: PlayerId; readonly battlefield: number }
+  /** 107.3.d / 421.4: a facedown card was removed and revealed. */
+  | {
+      readonly type: 'facedownRevealed';
+      readonly player: PlayerId;
+      readonly card: EntityId;
+      readonly battlefield: number;
+    }
   /** Rules 180-184: Tokens were Created on the Board. `token` keys rule 187. */
   | {
       readonly type: 'tokensCreated';

@@ -59,6 +59,20 @@ export interface PlayerView {
   readonly runeDeckCount: number;
   /** Rune Pools are public: rule 166.3 gives them no hidden component. */
   readonly pool: RunePool;
+  /**
+   * The Facedown Zones (107.3), which are Public zones holding Private cards.
+   *
+   * So both halves are exposed, deliberately: `battlefield` says *where* a card
+   * is hidden, which every player can see, and `card` is `null` for everyone but
+   * its controller (128.4). An agent needs the first to reason about a threat it
+   * cannot identify — which is the whole point of the mechanic.
+   */
+  readonly facedown: readonly FacedownView[];
+}
+
+/** A card in a Facedown Zone: its Battlefield is public, its face is not. */
+export interface FacedownView extends EntityView {
+  readonly battlefield: number | null;
 }
 
 export interface BattlefieldView {
@@ -140,6 +154,14 @@ export function observe(state: GameState, viewer: PlayerId): GameView {
       mainDeckCount: player.zones.mainDeck.length,
       runeDeckCount: player.zones.runeDeck.length,
       pool: player.pool,
+      // 107.3.f: a Facedown Zone is a *public* zone whose contents are
+      // Private, and 128.4 gives that Privacy to the card's controller rather
+      // than its owner. So every player sees that something is hidden and at
+      // which Battlefield, and only its controller sees which card it is.
+      facedown: player.zones.facedown.map((id) => ({
+        ...reveal(id, own),
+        battlefield: getEntity(state, id).hiddenAt ?? null,
+      })),
     };
   });
 

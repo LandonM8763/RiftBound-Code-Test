@@ -81,6 +81,37 @@ export function checkInvariants(state: GameState): void {
     if (entity.id >= state.nextEntityId) {
       throw new InvariantError(`Entity ${entity.id} is at or beyond nextEntityId`);
     }
+
+    // 107.3: the two facedown fields are set exactly while the card is in a
+    // Facedown Zone. Either alone means a Hide or a reveal was half-performed.
+    const facedown =
+      entity.location.kind === 'player' && entity.location.zone === 'facedown';
+    if (facedown !== (entity.hiddenAt !== undefined)) {
+      throw new InvariantError(
+        `Entity ${entity.id} is ${facedown ? '' : 'not '}in a Facedown Zone but ` +
+          `${entity.hiddenAt === undefined ? 'names no' : 'names a'} battlefield`,
+      );
+    }
+    if (facedown && entity.hiddenOnTurn === undefined) {
+      throw new InvariantError(`Facedown entity ${entity.id} records no turn (811.1.b)`);
+    }
+  }
+
+  // 107.3.b: a Facedown Zone holds at most one card.
+  const occupied = new Set<number>();
+  for (const seat of state.players) {
+    for (const id of seat.zones.facedown) {
+      const at = state.entities[id]?.hiddenAt;
+      if (at === undefined) {
+        continue;
+      }
+      if (occupied.has(at)) {
+        throw new InvariantError(
+          `Battlefield ${at} has more than one facedown card; rule 107.3.b allows one`,
+        );
+      }
+      occupied.add(at);
+    }
   }
 
   const entityCount = Object.keys(state.entities).length;

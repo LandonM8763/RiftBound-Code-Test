@@ -376,10 +376,10 @@ describe('keywords (rules 800-828)', () => {
   });
 
   it('refuses a keyword the engine does not model, with a stated reason', () => {
-    for (const keyword of ['HIDDEN', 'VISION', 'REPEAT 2']) {
+    for (const keyword of ['VISION', 'REPEAT 2']) {
       expect(parseCardText(keyword).unparsed).toHaveLength(1);
     }
-    expect(Object.keys(UNMODELLED_KEYWORDS)).toContain('hidden');
+    expect(Object.keys(UNMODELLED_KEYWORDS)).toContain('vision');
   });
 
   it('805: Accelerate is no longer among them, because it now desugars', () => {
@@ -1184,6 +1184,7 @@ describe('Weaponmaster (821)', () => {
     expect(Object.keys(UNMODELLED_KEYWORDS)).not.toContain('equip');
     expect(Object.keys(UNMODELLED_KEYWORDS)).not.toContain('quick-draw');
     expect(Object.keys(UNMODELLED_KEYWORDS)).not.toContain('deflect');
+    expect(Object.keys(UNMODELLED_KEYWORDS)).not.toContain('hidden');
   });
 });
 

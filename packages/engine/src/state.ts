@@ -61,6 +61,20 @@ export const PLAYER_ZONES = [
    * a card in any other way.
    */
   'banishment',
+  /**
+   * The Facedown Zones (rule 107.3), flattened into one list per player.
+   *
+   * 107.3.e says a Facedown Zone is **not a Location**, which is what makes
+   * this a player zone rather than a third `Location` variant: a facedown card
+   * is not *at* the Battlefield, it is in a sub-zone associated with one. The
+   * association is `Entity.hiddenAt`, exactly as `attachedTo` links a Gear to
+   * its Top-Most Card without moving it anywhere new.
+   *
+   * 107.3.f makes the zone Public and the cards in it Private, so `view.ts`
+   * shows every player that a card is hidden there and shows only its
+   * controller which card it is.
+   */
+  'facedown',
 ] as const;
 
 export type PlayerZone = (typeof PLAYER_ZONES)[number];
@@ -137,6 +151,24 @@ export interface Entity {
    * equal.
    */
   readonly attachedTo?: EntityId | undefined;
+  /**
+   * The Battlefield whose Facedown Zone this card occupies (107.3.a).
+   *
+   * Set exactly while the card is in the `facedown` zone. Not a `Location`,
+   * because 107.3.e says a Facedown Zone is not one — the card is associated
+   * with the Battlefield, not present at it, so it is not among its `units`
+   * and no rule that reads a Battlefield's occupants can see it.
+   */
+  readonly hiddenAt?: number | undefined;
+  /**
+   * The turn on which this card was Hidden (811.1.b).
+   *
+   * 811.1.b makes a hidden card playable "beginning on the next turn", so the
+   * turn it went down has to be remembered rather than inferred. Stored rather
+   * than a boolean flag flipped at end of turn, because the flip would be one
+   * more thing for the Ending Phase to remember and one more way to drift.
+   */
+  readonly hiddenOnTurn?: number | undefined;
   /**
    * Buff counters on a Unit (rules 701-705).
    *

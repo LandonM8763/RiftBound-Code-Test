@@ -50,6 +50,14 @@ export type Action =
   /** Pass Priority (rule 312.2.d). Resolves the Chain once everyone passes. */
   | { readonly type: 'pass' }
   /**
+   * Rule 421: Hide a card facedown at a Battlefield you Control.
+   *
+   * A Discretionary Action of its own, not a kind of play — 811.1.c.1 says so
+   * explicitly, and 811.1.c.2 adds that it opens no Chain. `battlefield` is the
+   * index whose Facedown Zone the card goes into.
+   */
+  | { readonly type: 'hide'; readonly card: EntityId; readonly battlefield: number }
+  /**
    * Rule 377.3.a: declare activation of an Activated Ability. `source` is the
    * Game Object the ability is printed on, `index` its position in that card's
    * activated abilities.

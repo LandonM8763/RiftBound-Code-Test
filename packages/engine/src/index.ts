@@ -58,7 +58,22 @@ export type { ReduceResult } from './reduce.js';
 export { currentLegalActions, legalActions } from './legal.js';
 
 export { knownCardCount, observe, opponentsOf, pointsOf } from './view.js';
-export type { BattlefieldView, EntityView, GameView, PlayerView, ShowdownView } from './view.js';
+export type {
+  BattlefieldView,
+  EntityView,
+  FacedownView,
+  GameView,
+  PlayerView,
+  ShowdownView,
+} from './view.js';
+export {
+  HIDE_COST,
+  facedownAt,
+  hasHidden,
+  hideDestinations,
+  hideableCards,
+  playableFromFacedown,
+} from './hidden.js';
 
 export {
   abilityFor,

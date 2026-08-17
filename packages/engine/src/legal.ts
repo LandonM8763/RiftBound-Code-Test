@@ -4,7 +4,14 @@ import { effectOf, needsTargetChoice, type CardEffect, type TargetSpec } from '@
 import { abilityFor, activatableAbilities } from './abilities.js';
 import { legalDestinations, legalTargets } from './effects.js';
 import { standardMoves } from './move.js';
-import { affordable, playableFromHand, validUnitLocations } from './play.js';
+import {
+  HIDE_COST,
+  allowedFromFacedown,
+  hideDestinations,
+  hideableCards,
+  playableFromFacedown,
+} from './hidden.js';
+import { affordable, canPay, playableFromHand, validUnitLocations } from './play.js';
 import type { EntityId, GameState, Location, PlayerId } from './state.js';
 import { entityCard, getPlayer, isClosed, isOver, isShowdown } from './state.js';
 
@@ -142,6 +149,45 @@ export function legalActions(state: GameState, player: PlayerId): readonly Actio
         } else {
           actions.push({ type: 'playCard', card: entity.id, ...choices });
         }
+      }
+    }
+  }
+
+  // 811.1.b: Hide, and playing a card back from facedown. Two separate
+  // permissions the same keyword grants, and neither is a kind of play —
+  // 811.1.c.1 says Hide is its own Discretionary Action.
+  if (player === state.activePlayer && !closed && !showdown) {
+    const pool = getPlayer(state, player).pool;
+    if (canPay(pool, HIDE_COST)) {
+      for (const card of hideableCards(state, player)) {
+        for (const battlefield of hideDestinations(state, player)) {
+          actions.push({ type: 'hide', card, battlefield });
+        }
+      }
+    }
+  }
+  // 811.6 gives a facedown card Reaction, so this is offered in every state,
+  // and 811.1.b plays it "ignoring its base cost" — there is nothing to afford.
+  for (const card of playableFromFacedown(state, player)) {
+    const definition = entityCard(state, card);
+    const effect = effectOf(definition);
+    const at = state.entities[card]?.hiddenAt;
+    const targets = needsTargetChoice(effect?.target)
+      ? legalTargets(state, player, effect?.target as TargetSpec).filter(
+          // 811.1.d.2: choices are restricted to the Battlefield it was hidden at.
+          (target) => at === undefined || allowedFromFacedown(state, at, target),
+        )
+      : [undefined];
+    // 355.8: no legal choice means the card cannot be played at all, which
+    // 811.1.d makes a real possibility here rather than a theoretical one.
+    for (const target of targets) {
+      for (const destination of choicesOfDestination(state, player, effect)) {
+        actions.push({
+          type: 'playCard',
+          card,
+          ...(target === undefined ? {} : { target }),
+          ...(destination === undefined ? {} : { destination }),
+        });
       }
     }
   }

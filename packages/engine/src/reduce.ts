@@ -1,4 +1,5 @@
 import {
+  FREE,
   effectOf,
   isMandatory,
   needsTargetChoice,
@@ -42,6 +43,17 @@ import { totalCost } from './costs.js';
 import { canPay, payFrom, timingAllows, validUnitLocations } from './play.js';
 import { canPayAdditional, payAdditional as performPayment } from './additional.js';
 import { moveAttachments } from './attach.js';
+import {
+  HIDE_COST,
+  allowedFromFacedown,
+  expireFacedown,
+  facedownEntersAt,
+  hasHidden,
+  hide,
+  hideDestinations,
+  playableFromFacedown,
+  unhide,
+} from './hidden.js';
 import { entersReady } from './statics.js';
 import { sendToNonBoardZone } from './token.js';
 import { Rng } from './rng.js';
@@ -59,6 +71,7 @@ import {
   EMPTY_POOL,
   addEnergyTo,
   addPowerTo,
+  battlefieldLocation,
   entityCard,
   getEntity,
   getPlayer,
@@ -114,6 +127,8 @@ export function reduce(state: GameState, action: Action): ReduceResult {
       return moveUnits(state, action.units, action.to);
     case 'mulligan':
       return mulligan(state, action.cards);
+    case 'hide':
+      return hideCard(state, action.card, action.battlefield);
     case 'activateAbility':
       return activateAbility(
         state,
@@ -154,6 +169,73 @@ function addEnergy(state: GameState, rune: EntityId): ReduceResult {
     state: next,
     events: [{ type: 'resourcesAdded', player, rune, energy: 1, power: null }],
   };
+}
+
+/**
+ * 107.3.d: a facedown card whose controller has lost Control of its Battlefield
+ * is removed during the next Cleanup.
+ *
+ * Called at both Cleanup sites rather than folded into `cleanupControl`,
+ * because that function lives below this one and returns no events — and 421.4
+ * makes the removal a *reveal*, which is exactly the thing worth reporting.
+ * "Removed" is read as the trash, following 107.3.b.2, the other rule that
+ * empties a Facedown Zone.
+ */
+function cleanupFacedown(state: GameState, events: GameEvent[]): GameState {
+  return expireFacedown(state, (current, card) => {
+    const entity = getEntity(current, card);
+    events.push({
+      type: 'facedownRevealed',
+      player: entity.controller,
+      card,
+      battlefield: getEntity(state, card).hiddenAt ?? -1,
+    });
+    return moveEntity(current, card, playerLocation(entity.owner, 'trash'));
+  });
+}
+
+/**
+ * Hide a card facedown at a Battlefield (rules 421, 811.1.b).
+ *
+ * A Discretionary Action of its own rather than a play: 811.1.c.1 says Hide is
+ * not a subset of Play, and 811.1.c.2 that it opens no Chain — so nothing goes
+ * on the Chain, nobody responds, and Priority does not move.
+ */
+function hideCard(state: GameState, card: EntityId, battlefield: number): ReduceResult {
+  const player = requirePriority(state);
+  const entity = getEntity(state, card);
+
+  // 811.1.b: "while this card is in your hand or in your Champion Zone".
+  const zone = entity.location;
+  const inHand =
+    zone.kind === 'player' &&
+    zone.player === player &&
+    (zone.zone === 'hand' || zone.zone === 'championZone');
+  if (entity.controller !== player || !inHand) {
+    throw new IllegalActionError(`Entity ${card} is not in ${player}'s hand or Champion Zone`);
+  }
+  if (!hasHidden(state, card)) {
+    throw new IllegalActionError(`${entityCard(state, card).name} does not have Hidden`);
+  }
+  // 811.1.b: "on your turn during an Open State".
+  if (state.activePlayer !== player || isClosed(state) || isShowdown(state)) {
+    throw new IllegalActionError('Hiding needs your own turn and an Open State');
+  }
+  // 107.3.c and 107.3.b: a Battlefield you Control, whose Facedown Zone is empty.
+  if (!hideDestinations(state, player).includes(battlefield)) {
+    throw new IllegalActionError(`Battlefield ${battlefield} cannot take a hidden card`);
+  }
+  if (!canPay(getPlayer(state, player).pool, HIDE_COST)) {
+    throw new IllegalActionError('Cannot pay the cost to hide');
+  }
+
+  let next = withPlayer(state, player, (current) => ({
+    ...current,
+    pool: payFrom(current.pool, HIDE_COST),
+  }));
+  next = hide(next, card, battlefield);
+
+  return { state: next, events: [{ type: 'cardHidden', player, battlefield }] };
 }
 
 /** A Basic Rune's `Recycle this: Add [C]` (rule 164.2.b). */
@@ -201,13 +283,29 @@ function playCard(
   const player = requirePriority(state);
   const entity = getEntity(state, card);
 
-  if (entity.controller !== player || !sameLocation(entity.location, playerLocation(player, 'hand'))) {
+  // 811.1.b: a card played from facedown comes out of the Facedown Zone rather
+  // than the hand, and 811.1.d restricts what it may choose once it is out.
+  const fromFacedown =
+    entity.controller === player &&
+    sameLocation(entity.location, playerLocation(player, 'facedown'))
+      ? entity.hiddenAt
+      : undefined;
+  if (fromFacedown !== undefined && !playableFromFacedown(state, player).includes(card)) {
+    // 811.1.b: "beginning on the next turn" — the turn it went down is not one.
+    throw new IllegalActionError(`Entity ${card} was hidden this turn and cannot be played yet`);
+  }
+
+  if (
+    fromFacedown === undefined &&
+    (entity.controller !== player || !sameLocation(entity.location, playerLocation(player, 'hand')))
+  ) {
     throw new IllegalActionError(`Entity ${card} is not in ${player}'s hand`);
   }
 
   const definition = entityCard(state, card);
   const timing = { closed: isClosed(state), showdown: isShowdown(state) };
-  if (!timingAllows(definition, timing)) {
+  // 811.6: a card played from facedown has Reaction, so timing never refuses it.
+  if (fromFacedown === undefined && !timingAllows(definition, timing)) {
     throw new IllegalActionError(
       `${definition.name} cannot be played in a ${timing.showdown ? 'Showdown' : 'Neutral'} ` +
         `${timing.closed ? 'Closed' : 'Open'} state`,
@@ -235,7 +333,21 @@ function playCard(
 
   // 809.1.c: the chosen Game Object is part of what the card costs, because a
   // Deflect taxes a Spell for choosing the Unit it is printed on.
-  const cost = totalCost(state, player, definition, { paidAdditionalCost: payAdditional }, target);
+  //
+  // 811.1.b plays a facedown card "ignoring its base cost", so the Base Cost is
+  // zero and rule 356's layers run over that — which keeps a Deflect increase
+  // (356.3) applying, exactly as 356.1.b.3 says an ignored Base Cost is not a
+  // floor.
+  const cost =
+    fromFacedown === undefined
+      ? totalCost(state, player, definition, { paidAdditionalCost: payAdditional }, target)
+      : totalCost(
+          state,
+          player,
+          { ...definition, cost: FREE } as CardDefinition,
+          { paidAdditionalCost: payAdditional },
+          target,
+        );
   if (cost === undefined) {
     throw new IllegalActionError(`${definition.name} is not a playable card`);
   }
@@ -251,12 +363,30 @@ function playCard(
   if (effect === undefined && target !== undefined) {
     throw new IllegalActionError(`${definition.name} does not target`);
   }
+  // 811.1.d.2: what a card played from facedown chooses must be at the
+  // Battlefield it was hidden at.
+  if (
+    fromFacedown !== undefined &&
+    target !== undefined &&
+    !allowedFromFacedown(state, fromFacedown, target)
+  ) {
+    throw new IllegalActionError(
+      `${definition.name} was played from facedown and may only choose at that battlefield`,
+    );
+  }
 
   // Step 4: pay (rule 357.1).
   let next = withPlayer(state, player, (current) => ({
     ...current,
     pool: payFrom(current.pool, cost),
   }));
+
+  // 421.4: a facedown card leaving its zone is revealed, which here is simply
+  // dropping the association — the identity was only concealed while it was in
+  // the Facedown Zone, and `moveEntity` below takes it out.
+  if (fromFacedown !== undefined) {
+    next = unhide(next, card);
+  }
 
   const events: GameEvent[] = [];
 
@@ -332,7 +462,7 @@ function playCard(
   const ready = entersReady(next, player, definition, { paidAdditionalCost: payAdditional });
 
   // 359.2: a Permanent leaves the Chain and becomes a Game Object at once.
-  const entersAt = resolvePermanentLocation(next, player, definition, location);
+  const entersAt = resolvePermanentLocation(next, player, definition, location, fromFacedown);
   next = moveEntity(next, card, entersAt);
   next = withEntity(next, card, (current) => ({
     ...current,
@@ -806,7 +936,17 @@ function resolvePermanentLocation(
   player: PlayerId,
   definition: CardDefinition,
   location: Location | undefined,
+  /** 811.1.d.1: the Battlefield a facedown Permanent must enter at. */
+  fromFacedown?: number | undefined,
 ): Location {
+  if (fromFacedown !== undefined) {
+    const forced = facedownEntersAt(definition, fromFacedown);
+    if (forced !== undefined) {
+      // 811.1.d.1.a is explicit that this overrides the rule keeping Gear at a
+      // Base, so it is applied before that rule rather than after it.
+      return battlefieldLocation(forced);
+    }
+  }
   if (definition.type !== 'unit') {
     // 359.2.d: non-Unit Gear always enters at the player's Base.
     return playerLocation(player, 'base');
@@ -1061,6 +1201,7 @@ function afterMove(
   // 453: a Move is followed by a Cleanup.
   const before = next.battlefields;
   next = cleanupControl(next);
+  next = cleanupFacedown(next, events);
   next.battlefields.forEach((battlefield, index) => {
     const previous = before[index];
     if (previous?.controller !== null && previous?.controller !== undefined && battlefield.controller === null) {
@@ -1240,7 +1381,7 @@ function closeShowdown(state: GameState, events: GameEvent[]): ReduceResult {
   const claimant = controllers.size === 1 ? [...controllers][0] : undefined;
   if (claimant === undefined || battlefield.controller === claimant) {
     // Nobody establishes Control; the Contested status lifts in the Cleanup.
-    return { state: cleanupControl(next), events };
+    return { state: cleanupFacedown(cleanupControl(next), events), events };
   }
 
   next = withBattlefield(next, index, (current) => ({

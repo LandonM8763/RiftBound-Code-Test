@@ -159,6 +159,8 @@ const MODELLED_KEYWORDS: readonly {
     build: () => ({ kind: 'backline' }),
   },
   { pattern: /^ganking$/i, build: () => ({ kind: 'ganking' }) },
+  // 811.4: multiple instances are redundant, so it carries no value.
+  { pattern: /^hidden$/i, build: () => ({ kind: 'hidden' }) },
 ];
 
 /**

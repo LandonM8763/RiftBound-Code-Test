@@ -56,7 +56,17 @@ export type Keyword =
    * 810.1.c.1-3: it only *adds* a destination. It is not an extra Move, and it
    * has no activation cost of its own.
    */
-  | { readonly kind: 'ganking' };
+  | { readonly kind: 'ganking' }
+  /**
+   * Hidden (811.1.b): permission to take the Hide Discretionary Action (421),
+   * and then to play the card from facedown for no Base Cost.
+   *
+   * A rule of the engine rather than a desugar, because it is the only keyword
+   * that adds an *action* — 811.1.c.1 is explicit that Hide is not a subset of
+   * Play, so there is no existing action for it to expand into. 811.4 makes a
+   * second instance redundant, which is why it carries no value.
+   */
+  | { readonly kind: 'hidden' };
 
 export type KeywordKind = Keyword['kind'];
 
@@ -117,10 +127,9 @@ export const UNMODELLED_KEYWORDS: Readonly<Record<string, string>> = Object.free
   // `[A]` on Spells and Abilities an opponent controls that choose this Game
   // Object — the one modifier that depends on a *choice* rather than on the
   // board, which is why `totalCost` takes the chosen target.
-  // 811.1.c: a prerequisite for the Hide Discretionary Action, which needs
-  // facedown cards — a hidden-information mechanic the state model has no
-  // representation for.
-  hidden: 'Hidden (811) needs facedown cards and the Hide action',
+  // Hidden (811) is not here either. It is a rule of the engine rather than a
+  // desugar: 811.1.c.1 makes Hide a Discretionary Action of its own, not a
+  // subset of Play, so there was nothing for it to expand into.
   // Equip (818) and Quick-Draw (819) are *not* here. Attach exists now, and
   // both desugar into it: 818.1.c.2 makes Equip "[Cost]: Attach this gear to a
   // unit you control" — an Activated Ability — and 819.1.d makes Quick-Draw

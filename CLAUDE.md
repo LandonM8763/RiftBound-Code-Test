@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 141 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 145 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -488,6 +488,7 @@ builds the batch on top of it. Keep that split — a win rate computed inside
 | `view.ts` | Per-player observable view; redacts hidden zones |
 | `token.ts` | Tokens (179-187): Creating them, and 186.1's rule that one leaving the Board stops existing |
 | `attach.ts` | Attachment (434-435, 716-719): the link, and `activeAbilities`, which is the one honest answer to what a Game Object can do |
+| `hidden.ts` | Hidden (811) and Hide (421): the Facedown Zone, and 107.3.e's rule that it is not a Location |
 | `invariants.ts` | `checkInvariants(state)`, run after every action when fuzzing |
 | `setup.ts` | `createGame` — entity creation (Units, Runes and a Game Object per Battlefield, 170), shuffles, opening hands, opens in the Mulligan |
 
@@ -853,6 +854,59 @@ printed *below* Equip is the Effect Text. 137.1's Might Bonus is peeled off the
 last line only when that line does not otherwise parse — which is what keeps
 "give a unit +2 Might this turn" intact while still reading "TANK +1 Might",
 "Might +0" and "When I conquer, buff me.+1 Might".
+
+### Hidden and the Facedown Zone
+
+Rules 811 and 421, with the engine in `engine/hidden.ts`. The only keyword that
+adds an **action** rather than expanding into one that exists — 811.1.c.1 says
+Hide is not a subset of Play — which is why it is a rule of the engine rather
+than a desugar at ingest.
+
+**Rule 107.3.e is the whole design: a Facedown Zone is not a Location.** A
+facedown card is not *present at* the Battlefield, it is associated with one. So
+the card lives in its controller's `facedown` player zone and `Entity.hiddenAt`
+names the Battlefield — the same shape as `attachedTo`, and for the same reason.
+Nothing that reads a Battlefield's occupants can see it, which is what keeps a
+facedown card out of Combat, out of `units`, and out of every sweep that asks
+who is somewhere. Adding a third `Location` variant would have put it in all of
+them.
+
+| Rule | What it says | Where |
+|---|---|---|
+| 811.1.b | Your turn, Open State, from hand or Champion Zone, pay `[A]` | `hideCard` in `reduce.ts` |
+| 107.3.b | One card per Facedown Zone | `hideDestinations`, and an invariant |
+| 107.3.c | Only at a Battlefield you Control | `hideDestinations` |
+| 811.1.b | Playable "beginning on the next turn" | `hiddenOnTurn`, against `state.turn` |
+| 811.1.b | Played "ignoring its base cost" | `totalCost` over a `FREE` base |
+| 811.6 | Reaction while facedown | `timingAllows` is skipped |
+| 811.1.d.1 | A Permanent enters at *that* Battlefield | `facedownEntersAt` |
+| 811.1.d.2 | Choices restricted to that Battlefield | `allowedFromFacedown` |
+| 107.3.d | Lose Control, removed at the next Cleanup | `cleanupFacedown` |
+| 107.3.f, 128.4 | Zone public, card Private to its controller | `view.ts` |
+
+Four things are load-bearing:
+
+- **The base cost is ignored, not the total.** 811.1.b plays a facedown card
+  "ignoring its base cost", so `totalCost` runs rule 356's layers over a `FREE`
+  base rather than skipping them. 356.1.b.3 is explicit that an ignored Base
+  Cost is not a floor, so a Deflect increase (356.3) still applies — the card is
+  free to play but not free to point at a Deflecting Unit.
+- **The view exposes *where*, and redacts *what*.** 107.3.f makes the Facedown
+  Zone a Public zone holding Private cards, and 128.4 gives that privacy to the
+  card's **controller** rather than its owner. So every player sees that
+  something is hidden and at which Battlefield, and only its controller sees
+  which card. An agent needs the first half to reason about a threat it cannot
+  identify, which is the entire point of the mechanic.
+- **811.1.d.2's escape hatch is not modelled.** A hidden card's choices are
+  restricted to its Battlefield "unless the ability explicitly restricts
+  targeting in a way that makes this impossible" — deciding that needs to reason
+  about a target spec's *satisfiability* rather than evaluate it. The
+  restriction is enforced without the escape, so such a card is played more
+  narrowly than printed. That is the safe direction: it can never make an
+  illegal play legal.
+- **Hidden is a permission, not a restriction.** 811.3 keeps the ordinary play
+  from hand available at its printed cost and timing, so nothing about this
+  takes an option away.
 
 ### Where a Unit may be played
 
@@ -1251,7 +1305,7 @@ edits by how far they move it, and swapping the objective swaps what the tool is
 for without touching the search.
 
 **The default is `CONSISTENCY`, and the reason is not taste.** A *simulated*
-objective is not trustworthy yet: 327 of the 468 cards with rules text still
+objective is not trustworthy yet: 323 of the 468 cards with rules text still
 play as vanilla, so a simulator cannot see what most cards do. Optimizing
 against it would cut the card whose text the engine ignores and keep the vanilla
 body with better stats — confidently wrong advice. Consistency depends on cost
@@ -1404,7 +1458,7 @@ deck builds and validates from it with no issues, and the engine plays complete
 games with it — 300 games, all decided, heuristic 58.7% ± 5.5 against random.
 
 101 of those cards carry an ability and 15 a keyword. The keyword figure is low
-against the 141 that parse because keywords ride the same all-or-nothing rule:
+against the 145 that parse because keywords ride the same all-or-nothing rule:
 a card whose other clause is unreadable keeps neither. 13 create Tokens, 12
 carry Effect Text a Gear lends its Top-Most Card, 6 carry Accelerate, 5 return a
 card to hand and 3 grant a keyword.
@@ -1473,14 +1527,14 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 141 of the 468 cards that have text**, and the shape of what is
+**Coverage is 145 of the 468 cards that have text**, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 141 |
-| Blocked | 327 |
+| Fully parsed | 145 |
+| Blocked | 323 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 3 or 4 times, everything else once or
@@ -1527,7 +1581,7 @@ values 105 → 110.** **Multi-sentence rules text took it 110 → 112**, and
 and the one whose engine half (Attach) was already built — **Weaponmaster with
 `[A]` 124 → 130**, **Deflect 130 → 134**, and **play-location permissions with
 the reminder text the export flattens 134 → 140**, and **rule 429.5's
-multi-resource Add 140 → 141**.
+multi-resource Add 140 → 141**, and **Hidden with the Facedown Zone 141 → 145**.
 
 #### How the ranking was measured wrong, and what fixed it
 
@@ -1558,7 +1612,7 @@ Re-measured by counterfactual from the **124** baseline, one mechanic at a time:
 | Mechanic | Alone |
 |---|---|
 | ~~Weaponmaster (821)~~ — now built | **+6 projected, +6 delivered** |
-| **Hidden (811) and the Hide action (421)** | +4 |
+| ~~Hidden (811) and the Hide action (421)~~ — now built | **+4 projected, +4 delivered** |
 | ~~Deflect (809)~~ — now built | **+3 projected, +4 delivered** |
 | Durations and delayed effects ("the next spell you play…") | +3 |
 | Vision (817) / Predict (436) | +2 |
@@ -1584,6 +1638,7 @@ What each round actually delivered, for calibrating the next projection:
 | Weaponmaster (821) with `[A]` | +6 projected, **+6** delivered |
 | Deflect (809) | +3 projected, **+4** delivered |
 | Play permissions (355.2.b) and flattened reminders | +5 projected, **+6** delivered |
+| Hidden (811) and the Hide action (421) | +4 projected, **+4** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic
@@ -1600,10 +1655,10 @@ because the rewrite replaces a line the real parser now reads with a stand-in
 that loses it. Delete a rewrite when its mechanic lands; leaving it in makes the
 next re-measurement quietly wrong.
 
-**The keyword tail is now nearly spent.** Equip, Quick-Draw, Weaponmaster and
-Deflect are all built; what remains is Hidden +4, Vision +2 and Repeat +1 — and
-each wants a *different* deep mechanic: facedown cards, Predict (436), and
-executing a Chain item's instructions a second time.
+**The keyword tail is spent.** Equip, Quick-Draw, Weaponmaster, Deflect and
+Hidden are all built; what remains is Vision +2 and Repeat +1, and each wants a
+*different* deep mechanic — Predict (436), and executing a Chain item's
+instructions a second time.
 
 Additional Costs and state predicates were the two best single investments and
 **do not overlap**: together they measured +14 and delivered +10. The shortfall
@@ -1618,30 +1673,26 @@ round of this to do.
 
 What the corpus is blocked on now, in the order measurement puts them:
 
-1. **Hidden (811) and the Hide action (421)** — +4, and the most expensive:
-   facedown cards are a hidden-information mechanic the state model has no
-   representation for, and it reaches `view.ts`. 21 clauses print a bare
-   `HIDDEN`.
-2. **Durations and delayed effects** — "the next spell you play this turn costs
+1. **Durations and delayed effects** — "the next spell you play this turn costs
    5 less", "opponents can't play cards this turn". +3, but three cards wanting
    three different mechanics.
-3. **The rest of statics beyond a scope plus a grant** — "While I'm attacking
+2. **The rest of statics beyond a scope plus a grant** — "While I'm attacking
    or defending alone" needs a combat-role predicate that `Condition`
    deliberately cannot express, because a condition that reads Might back would
    recurse through `mightOf`. +2.
-4. **Non-standard ability costs** — "Spend my buff:", "Recycle 1 from your
+3. **Non-standard ability costs** — "Spend my buff:", "Recycle 1 from your
    trash:", "you may exhaust me to …". +2. `ActivatedAbility.cost` is Energy,
    Power and the exhaust; 16 cards want more.
-5. **Conditional and modal effects** — "if this kills it", "unless its
+4. **Conditional and modal effects** — "if this kills it", "unless its
    controller…", "choose one •…". +2 and +0. The effect model has no outcome
    conditions and no modes.
 
-**The tail is now literally flat.** Past HIDDEN (21 clauses), VISION (5) and
-REPEAT (4), *every remaining unparsed shape appears on exactly one card* — 355
-shapes, 355 cards. Building every mechanic in the table above reaches **170 of
-468**, measured, and there is no further mechanic to find: the rest is one card
-per unit of work whichever route is taken, a parser rule or an authored entry.
-Hidden is the last mechanic with any leverage left, and it buys 4.
+**The tail is now literally flat.** Past VISION (5 clauses) and REPEAT (4),
+*every remaining unparsed shape appears on exactly one card* — 355 shapes, 355
+cards. Building every mechanic in the table above reaches **170 of 468**,
+measured, and there is no further mechanic to find: the rest is one card per
+unit of work whichever route is taken, a parser rule or an authored entry.
+Hidden was the last mechanic with any leverage left, and it bought 4.
 
 **This is where the curve flattens.** The rounds after Additional Costs
 delivered +11, +6, +5, +5, +2, +12, +6 and +4; everything above is +4 or less,
