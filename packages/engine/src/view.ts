@@ -1,4 +1,4 @@
-import type { CardId } from '@riftbound/cards';
+import type { AbilityRef, CardId, Keyword } from '@riftbound/cards';
 
 import type {
   BattlefieldState,
@@ -37,6 +37,34 @@ export interface EntityView {
    * reimplement `mightOf` against a card registry and get it subtly wrong.
    */
   readonly might: number | null;
+  /**
+   * Rule 702: Buff counters, which are physical markers on the Unit and so
+   * public. Exposed separately from `might` because they are spendable
+   * (702.2.b) — an agent needs to know a Buff is there, not only that Might is
+   * one higher.
+   */
+  readonly buffs: number;
+  /** 801.3.a: keywords granted this turn. Indistinguishable from printed ones. */
+  readonly grantedKeywords: readonly Keyword[];
+  /** 718: the Top-Most Card this one is Attached to, if any. Visible at the table. */
+  readonly attachedTo?: EntityId | undefined;
+}
+
+/**
+ * One item on the Chain (rule 327).
+ *
+ * Rule 328 makes the Chain public, so everything about an item is exposed
+ * except the identity of a card the viewer may not see — which for a Chain item
+ * is nothing, since a played card is revealed as it goes on.
+ */
+export interface ChainItemView {
+  readonly entity: EntityView;
+  readonly controller: PlayerId;
+  /** Rule 400: still working through the steps of playing, awaiting 402.2. */
+  readonly pending: boolean;
+  readonly target: EntityId | null;
+  /** 377.3.a.1: which ability, when this item is one rather than a card. */
+  readonly ability: AbilityRef | null;
 }
 
 export interface PlayerView {
@@ -75,10 +103,14 @@ export interface PlayerView {
 /** A card in a Facedown Zone: its Battlefield is public, its face is not. */
 export interface FacedownView extends EntityView {
   readonly battlefield: number | null;
+  /** 811.1.b: the turn it was Hidden, which decides when it becomes playable. */
+  readonly hiddenOnTurn: number | null;
 }
 
 export interface BattlefieldView {
   readonly card: CardId;
+  /** 170: the Battlefield's own Game Object, which carries its abilities. */
+  readonly entity: EntityId;
   readonly controller: PlayerId | null;
   readonly units: readonly EntityView[];
   /** Rule 190.3.a: who applied Contested status, if anyone. Public. */
@@ -111,7 +143,20 @@ export interface GameView {
   readonly players: readonly PlayerView[];
   readonly battlefields: readonly BattlefieldView[];
   /** The Chain, bottom to top. Its contents are public (rule 328). */
-  readonly chain: readonly EntityView[];
+  readonly chain: readonly ChainItemView[];
+  /** Rule 115.1.b.1, and 485.7's extra Rune for the player going second. */
+  readonly firstPlayer: PlayerId;
+  /**
+   * Public bookkeeping a determinizing search agent needs to rebuild a state
+   * it can search on, and which no rule makes secret: how far through an
+   * interruptible phase the turn is, how many players have passed in a row,
+   * how many Mulligans have been taken (117), and 383.3.e's per-turn trigger
+   * tally. All of it happens face-up at a table.
+   */
+  readonly phaseStep: number;
+  readonly passes: number;
+  readonly mulligansTaken: number;
+  readonly triggersUsed: Readonly<Record<string, number>>;
   /** Rule 331: a Chain existing means the turn is in a Closed State. */
   readonly closed: boolean;
   readonly priority: PlayerId | null;
@@ -140,6 +185,9 @@ export function observe(state: GameState, viewer: PlayerId): GameView {
         card?.type === 'unit'
           ? Math.max(0, card.might + entity.mightBonus + entity.buffs)
           : null,
+      buffs: entity.buffs,
+      grantedKeywords: entity.grantedKeywords,
+      ...(entity.attachedTo === undefined ? {} : { attachedTo: entity.attachedTo }),
     };
   };
 
@@ -167,6 +215,9 @@ export function observe(state: GameState, viewer: PlayerId): GameView {
       facedown: player.zones.facedown.map((id) => ({
         ...reveal(id, own),
         battlefield: getEntity(state, id).hiddenAt ?? null,
+        // 811.1.b's "beginning on the next turn": which turn it went down is
+        // as public as the fact that it did.
+        hiddenOnTurn: getEntity(state, id).hiddenOnTurn ?? null,
       })),
     };
   });
@@ -174,6 +225,7 @@ export function observe(state: GameState, viewer: PlayerId): GameView {
   const battlefields: BattlefieldView[] = state.battlefields.map(
     (battlefield: BattlefieldState) => ({
       card: battlefield.card,
+      entity: battlefield.entity,
       controller: battlefield.controller,
       units: revealAll(battlefield.units),
       contestedBy: battlefield.contestedBy,
@@ -191,9 +243,21 @@ export function observe(state: GameState, viewer: PlayerId): GameView {
     outcome: state.outcome,
     players,
     battlefields,
-    chain: state.chain.map((item) => reveal(item.entity, true)),
+    // 328: the Chain is public, so every item is exposed in full.
+    chain: state.chain.map((item) => ({
+      entity: reveal(item.entity, true),
+      controller: item.controller,
+      pending: item.pending,
+      target: item.target,
+      ability: item.ability,
+    })),
     closed: isClosed(state),
     priority: state.priority,
+    firstPlayer: state.firstPlayer,
+    phaseStep: state.phaseStep,
+    passes: state.passes,
+    mulligansTaken: state.mulligansTaken,
+    triggersUsed: state.triggersUsed,
     showdown:
       showdown === null
         ? null

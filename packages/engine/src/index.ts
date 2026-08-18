@@ -57,9 +57,12 @@ export type { ReduceResult } from './reduce.js';
 
 export { currentLegalActions, legalActions } from './legal.js';
 
+export { determinize } from './determinize.js';
+export type { Knowledge } from './determinize.js';
 export { knownCardCount, observe, opponentsOf, pointsOf } from './view.js';
 export type {
   BattlefieldView,
+  ChainItemView,
   EntityView,
   FacedownView,
   GameView,

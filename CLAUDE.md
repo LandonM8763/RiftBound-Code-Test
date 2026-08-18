@@ -60,10 +60,12 @@ What is built:
   With Combat in, the engine can play a complete game of Riftbound: contest a
   Battlefield, fight over it, take Control, and score to 8.
 - **`@riftbound/ai`** — the `Agent` interface, a seeded random legal agent, a
-  **heuristic agent**, and a single-game runner that keeps agents honest. The
-  heuristic wins **~85% against random over 120 alternating-seat games**; the
-  random-vs-random control measures ~50%, which is what says the harness is not
-  just reporting first-player advantage.
+  **heuristic agent**, a **determinizing search agent**, and a single-game
+  runner that keeps agents honest. The heuristic wins **~85% against random over
+  120 alternating-seat games**, and the search agent wins **90.8% [84.3%, 94.8%]
+  against the heuristic** over 120 games with real card data. Both controls —
+  random-vs-random and search-vs-search — measure ~50%, which is what says the
+  harness is not just reporting first-player advantage.
 - **`@riftbound/analysis`** — the analytic statistics: a hypergeometric core
   (including the multivariate case), cost curve, draw probabilities by turn,
   Domain/Power consistency, and per-card castability. No engine, no agent, no
@@ -489,6 +491,7 @@ builds the batch on top of it. Keep that split — a win rate computed inside
 | `token.ts` | Tokens (179-187): Creating them, and 186.1's rule that one leaving the Board stops existing |
 | `attach.ts` | Attachment (434-435, 716-719): the link, and `activeAbilities`, which is the one honest answer to what a Game Object can do |
 | `hidden.ts` | Hidden (811) and Hide (421): the Facedown Zone, and 107.3.e's rule that it is not a Location |
+| `determinize.ts` | Rebuilding a searchable `GameState` from a `GameView` (128): public copied, Private sampled |
 | `invariants.ts` | `checkInvariants(state)`, run after every action when fuzzing |
 | `setup.ts` | `createGame` — entity creation (Units, Runes and a Game Object per Battlefield, 170), shuffles, opening hands, opens in the Mulligan |
 
@@ -1337,7 +1340,9 @@ baselines:
    illegal states and engine crashes long before it is a useful opponent.
 2. **Heuristic agent** — BUILT. `HeuristicAgent` scores the position from a
    `GameView` and adds a per-action bonus for what the action achieves.
-3. **Search agent** — MCTS or similar with determinization over hidden information.
+3. **Search agent** — BUILT. `SearchAgent` rebuilds a plausible `GameState`
+   from its view with `determinize`, plays each candidate action out in several
+   sampled worlds, and averages. See [The search agent](#the-search-agent).
 
 A new agent must beat the previous tier convincingly over a large sample, or it is
 not an improvement. Agents implement a common interface and must never access state
@@ -1355,6 +1360,46 @@ Tune them by playing tiers against each other, not by intuition. Ties are broken
 with the agent's own seeded RNG, never by list order: `legalActions` enumerates
 in a fixed order, so taking the first would make the agent replay one rut and
 hide bugs on the paths it never walks.
+
+### The search agent
+
+`ai/search.ts`, with `engine/determinize.ts` underneath it. Measured at **90.8%
+[84.3%, 94.8%] against the heuristic** over 120 games of real card data; the
+search-vs-search control measures ~50%, which is what says that is the agent
+rather than the seat.
+
+**Determinization is what makes search possible at all under hidden
+information.** An agent gets a `GameView`, and a view cannot be played forward —
+so the agent builds its own state from it. Everything public is copied across
+exactly; the opponent's hand and both decks are *sampled* from what the viewer
+legitimately knows. That is why `GameView` had to be widened: it was rich enough
+to *evaluate* a position and not rich enough to *rebuild* one, so Buffs, granted
+keywords, what is Equipped to what, the Chain's controllers and targets, and the
+turn's own bookkeeping are all exposed now. None of it is secret — 328 makes the
+Chain public and a Buff counter sits face-up on the table.
+
+Five things are load-bearing:
+
+- **Entity ids are preserved.** The agent's whole output is an `Action`, and an
+  action names entities — so an action chosen in a determinized world has to
+  mean the same thing in the real one. Sampling fresh ids for hidden cards would
+  produce actions the real engine rejects.
+- **Worlds, not depth.** Under hidden information a single tree is a tree over
+  one guess at the opponent's hand, so the budget goes on averaging several
+  determinizations rather than on deeper selection in one. That is Monte Carlo
+  over determinizations rather than UCT, and it is a measured choice: rollouts
+  here are dominated by `reduce`.
+- **The rollout policy is random, not the heuristic.** A rollout that shares the
+  evaluation's biases reinforces them.
+- **Both tiers share `scorePosition`.** So "the search agent is stronger" is a
+  claim about *lookahead*, not about a second, differently-tuned evaluation.
+- **A bad world is a bad sample, not a bad action.** The whole evaluation is
+  guarded and falls back to the heuristic tier, because a search that throws is
+  strictly worse than no search. The test for that caught a real escape: the
+  guard originally covered `determinize` but not the rollout.
+
+181 puts Token definitions in every game rather than in a deck, so `determinize`
+seeds them too — a rollout that Creates one would otherwise fail to read it.
 
 The head-to-head loop lives in `heuristic.test.ts`, not in `ai/` — `playGame`
 runs one game, and batch simulation belongs to the planned `sim` package. It

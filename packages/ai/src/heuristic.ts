@@ -3,7 +3,13 @@
  *
  * Rule numbers cite the official Riftbound Core Rules, RUP4 of 2026-07-16.
  */
-import { Rng, type Action, type BattlefieldView, type GameView } from '@riftbound/engine';
+import {
+  Rng,
+  type Action,
+  type BattlefieldView,
+  type GameView,
+  type PlayerId,
+} from '@riftbound/engine';
 
 import type { Agent } from './agent.js';
 
@@ -107,39 +113,7 @@ export class HeuristicAgent implements Agent {
 
   /** Positional value of `view` from the viewer's seat. Exposed for tests. */
   evaluate(view: GameView): number {
-    const w = this.#weights;
-    let score = 0;
-
-    for (const player of view.players) {
-      const sign = player.id === view.viewer ? 1 : -1;
-      score +=
-        sign *
-        (player.points * w.point +
-          player.hand.length * w.card +
-          player.runes.length * w.rune +
-          player.mainDeckCount * w.deck);
-    }
-
-    for (const battlefield of view.battlefields) {
-      if (battlefield.controller !== null) {
-        score += (battlefield.controller === view.viewer ? 1 : -1) * w.control;
-      }
-      for (const unit of battlefield.units) {
-        const sign = unit.controller === view.viewer ? 1 : -1;
-        score += sign * (w.presence + (unit.might ?? 0) * w.might);
-      }
-    }
-
-    // Units in Base are Might that is not doing anything yet, so they count for
-    // less than the same Might standing on a Battlefield.
-    for (const player of view.players) {
-      const sign = player.id === view.viewer ? 1 : -1;
-      for (const unit of player.base) {
-        score += sign * (unit.might ?? 0) * w.might * 0.5;
-      }
-    }
-
-    return score;
+    return scorePosition(view, view.viewer, this.#weights);
   }
 
   /**
@@ -263,6 +237,57 @@ export class HeuristicAgent implements Agent {
 }
 
 /** Convenience for the common case of a seeded agent. */
+/**
+ * Positional value of `view` from `seat`'s point of view.
+ *
+ * A free function rather than a method, because the search tier scores its
+ * rolled-out positions with the same evaluation this tier uses. Sharing it is
+ * the point: it makes "the search agent is stronger" a claim about *lookahead*
+ * rather than about a second, differently-tuned scoring function.
+ *
+ * `seat` is separate from `view.viewer` so a search can score a position from
+ * the seat it is playing even when the rollout hands it a different view.
+ */
+export function scorePosition(
+  view: GameView,
+  seat: PlayerId,
+  overrides?: Partial<HeuristicWeights> | undefined,
+): number {
+  const w: HeuristicWeights = { ...DEFAULT_WEIGHTS, ...overrides };
+  let score = 0;
+
+  for (const player of view.players) {
+    const sign = player.id === seat ? 1 : -1;
+    score +=
+      sign *
+      (player.points * w.point +
+        player.hand.length * w.card +
+        player.runes.length * w.rune +
+        player.mainDeckCount * w.deck);
+  }
+
+  for (const battlefield of view.battlefields) {
+    if (battlefield.controller !== null) {
+      score += (battlefield.controller === seat ? 1 : -1) * w.control;
+    }
+    for (const unit of battlefield.units) {
+      const sign = unit.controller === seat ? 1 : -1;
+      score += sign * (w.presence + (unit.might ?? 0) * w.might);
+    }
+  }
+
+  // Units in Base are Might that is not doing anything yet, so they count for
+  // less than the same Might standing on a Battlefield.
+  for (const player of view.players) {
+    const sign = player.id === seat ? 1 : -1;
+    for (const unit of player.base) {
+      score += sign * (unit.might ?? 0) * w.might * 0.5;
+    }
+  }
+
+  return score;
+}
+
 export function heuristicAgent(seed: number | string, name?: string): HeuristicAgent {
   return new HeuristicAgent({ seed, ...(name === undefined ? {} : { name }) });
 }
