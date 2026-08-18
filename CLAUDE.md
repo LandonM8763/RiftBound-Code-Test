@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 145 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 148 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -908,6 +908,39 @@ Four things are load-bearing:
   from hand available at its printed cost and timing, so nothing about this
   takes an option away.
 
+### Stun
+
+Rule 423, with `Entity.stunned` in `state.ts` and the effect in `effects.ts`.
+
+**The asymmetry is the whole mechanic, and it is easy to get backwards.**
+423.1.b stops a Stunned Unit *dealing* combat damage; 423.1.c leaves the damage
+needed to *kill* it at its full Might. So `sumMight` reads the status and
+`lethalRemaining` and `hasLethalDamage` deliberately do not — the same split
+Assault and Shield already live on, where one number answers two questions.
+
+Three other things are load-bearing:
+
+- **423.1.a.1 makes the trigger fire on the *change*, not the instruction.**
+  Stunning an already-Stunned Unit is legal and does nothing, and the
+  rulebook's own Eclipse Herald example says it must not trigger. So
+  `executeEffect` returns early on an already-Stunned target, before raising
+  the event. Eclipse Herald is a real card in the corpus and now ingests.
+- **It expires with the "this turn" effects.** 423.1.a.2 puts Stunned in the
+  same end-of-turn Cleanup as `mightBonus` and `grantedKeywords`, so it clears
+  in that sweep rather than one of its own.
+- **A `stunned` count is safe inside a static's grant**, unlike `mighty`.
+  Being Stunned is stored on the entity, so reading it cannot recurse back
+  through `mightOf` the way counting Mighty Units would.
+
+Building this surfaced a bug that had nothing to do with Stun: **the Chain was
+rebuilt from the pre-resolution copy**, so every Triggered Ability a resolving
+effect queued (383.3.c) was created, reported in the event log, and then thrown
+away. A Deathknell from a Kill Instruction and "when you buff" from a Buff were
+both doing it. `resolveTop` now splices the resolved item out of `next.chain`
+by its index instead of slicing `state.chain`, which keeps whatever resolution
+appended. The fuzz harness's count of triggers finalized with a chosen target
+went from 377 to 655 across the same 300 games.
+
 ### Where a Unit may be played
 
 Rule 355.2. 355.2.a's default is the controller's Base or a Battlefield they
@@ -1305,7 +1338,7 @@ edits by how far they move it, and swapping the objective swaps what the tool is
 for without touching the search.
 
 **The default is `CONSISTENCY`, and the reason is not taste.** A *simulated*
-objective is not trustworthy yet: 323 of the 468 cards with rules text still
+objective is not trustworthy yet: 320 of the 468 cards with rules text still
 play as vanilla, so a simulator cannot see what most cards do. Optimizing
 against it would cut the card whose text the engine ignores and keep the vanilla
 body with better stats — confidently wrong advice. Consistency depends on cost
@@ -1458,7 +1491,7 @@ deck builds and validates from it with no issues, and the engine plays complete
 games with it — 300 games, all decided, heuristic 58.7% ± 5.5 against random.
 
 101 of those cards carry an ability and 15 a keyword. The keyword figure is low
-against the 145 that parse because keywords ride the same all-or-nothing rule:
+against the 148 that parse because keywords ride the same all-or-nothing rule:
 a card whose other clause is unreadable keeps neither. 13 create Tokens, 12
 carry Effect Text a Gear lends its Top-Most Card, 6 carry Accelerate, 5 return a
 card to hand and 3 grant a keyword.
@@ -1527,14 +1560,14 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 145 of the 468 cards that have text**, and the shape of what is
+**Coverage is 148 of the 468 cards that have text**, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 145 |
-| Blocked | 323 |
+| Fully parsed | 148 |
+| Blocked | 320 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 3 or 4 times, everything else once or
@@ -1581,7 +1614,8 @@ values 105 → 110.** **Multi-sentence rules text took it 110 → 112**, and
 and the one whose engine half (Attach) was already built — **Weaponmaster with
 `[A]` 124 → 130**, **Deflect 130 → 134**, and **play-location permissions with
 the reminder text the export flattens 134 → 140**, and **rule 429.5's
-multi-resource Add 140 → 141**, and **Hidden with the Facedown Zone 141 → 145**.
+multi-resource Add 140 → 141**, **Hidden with the Facedown Zone 141 → 145**, and
+**Stun (423) 145 → 148**.
 
 #### How the ranking was measured wrong, and what fixed it
 
@@ -1639,6 +1673,7 @@ What each round actually delivered, for calibrating the next projection:
 | Deflect (809) | +3 projected, **+4** delivered |
 | Play permissions (355.2.b) and flattened reminders | +5 projected, **+6** delivered |
 | Hidden (811) and the Hide action (421) | +4 projected, **+4** delivered |
+| Stun (423) | +3 projected, **+3** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic
@@ -1668,7 +1703,7 @@ quantity, so the cost cannot be proven payable before the card is played.
 
 **The trigger tail is now genuinely spent.** The 8 cards a wider condition would
 still buy want 8 *distinct* wordings, and most need a mechanic that does not
-exist — Stun, Hidden, and an event for choosing a target. There is no third
+exist — an event for choosing a target among them. There is no third
 round of this to do.
 
 What the corpus is blocked on now, in the order measurement puts them:

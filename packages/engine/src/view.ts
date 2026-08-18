@@ -24,6 +24,8 @@ export interface EntityView {
   readonly card: CardId | null;
   readonly controller: PlayerId;
   readonly exhausted: boolean;
+  /** 423.1.a: Stunned, which suppresses this Unit's combat damage (423.1.b). */
+  readonly stunned: boolean;
   readonly damage: number;
   /**
    * Effective Might, modifiers included (rule 143.2.b), or `null` when this is
@@ -129,6 +131,10 @@ export function observe(state: GameState, viewer: PlayerId): GameView {
       card: visible ? entity.card : null,
       controller: entity.controller,
       exhausted: entity.exhausted,
+      // 423.1.a: Stunned is a public status — rule 274 lists it beside
+      // Exhausted among the statuses presented on the Board — and it decides
+      // whether a Unit deals damage, so an agent cannot fight without it.
+      stunned: entity.stunned,
       damage: entity.damage,
       might:
         card?.type === 'unit'

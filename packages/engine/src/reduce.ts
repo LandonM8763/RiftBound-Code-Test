@@ -885,6 +885,7 @@ function payAdditionalCost(
         mightBonus: 0,
         grantedKeywords: [],
         buffs: 0,
+        stunned: false,
       }));
     },
     (current, who, cards) => {
@@ -1067,13 +1068,23 @@ function pass(state: GameState): ReduceResult {
     }
     next = sendToNonBoardZone(next, top.entity, playerLocation(top.controller, 'trash'));
   }
-  const chain = state.chain.slice(0, -1);
+  // Rebuild from `next.chain`, not from `state.chain`. 383.3.c puts a
+  // Triggered Ability on the Chain *as the item that woke it resolves* — a
+  // Deathknell from a Kill Instruction, "when you buff" from a Buff, "when you
+  // stun" from a Stun — and those land after the resolving item. Slicing the
+  // pre-resolution copy discarded every one of them: the ability fired, the
+  // event was reported, and nothing ever resolved.
+  //
+  // The resolved item is at the index it occupied before resolution, and
+  // `queueTriggers` only ever appends, so removing that one index keeps
+  // everything queued during resolution.
+  const resolvedAt = state.chain.length - 1;
+  const chain = [...next.chain.slice(0, resolvedAt), ...next.chain.slice(resolvedAt + 1)];
   const nextTop = chain[chain.length - 1];
 
-  // Read the Showdown back off `next`, not off `state`. The item that just
-  // resolved may have changed it — a Move can convert a Non-Combat Showdown
-  // into a Combat one (316.8.b.1.a) — and rebuilding from the pre-resolution
-  // copy silently threw that away.
+  // Read the Showdown back off `next`, not off `state`, for the same reason.
+  // The item that just resolved may have changed it — a Move can convert a
+  // Non-Combat Showdown into a Combat one (316.8.b.1.a).
   const ongoing = next.showdown;
   if (nextTop === undefined && state.showdown !== null && ongoing !== null) {
     // 346: when the last Chain item resolves during a Showdown, Focus passes
@@ -1562,6 +1573,7 @@ function resolveCombat(
       mightBonus: 0,
       grantedKeywords: [],
       buffs: 0,
+      stunned: false,
     }));
   }
   if (killed.length > 0) {
@@ -1944,12 +1956,15 @@ function ending(state: GameState): ReduceResult {
       next = withEntity(next, entity.id, (current) => ({ ...current, damage: 0 }));
     }
     // 317.2.c: all "this turn" effects expire simultaneously — the Might a
-    // card granted and the keywords it granted go together.
-    if (entity.mightBonus !== 0 || entity.grantedKeywords.length > 0) {
+    // card granted and the keywords it granted go together. 423.1.a.2 puts the
+    // Stunned status in the same Cleanup, so it clears alongside them rather
+    // than in a sweep of its own.
+    if (entity.mightBonus !== 0 || entity.grantedKeywords.length > 0 || entity.stunned) {
       next = withEntity(next, entity.id, (current) => ({
         ...current,
         mightBonus: 0,
         grantedKeywords: [],
+        stunned: false,
       }));
     }
   }

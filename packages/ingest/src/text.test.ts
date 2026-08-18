@@ -97,8 +97,8 @@ describe('effect clauses', () => {
   });
 
   it('refuses a clause outside the grammar', () => {
-    expect(parseEffects('Stun a unit')).toBeUndefined();
     expect(parseEffects('Counter a spell')).toBeUndefined();
+    expect(parseEffects('Banish a unit')).toBeUndefined();
   });
 });
 
@@ -683,12 +683,12 @@ describe('the all-or-nothing rule', () => {
   it('drops a modelled keyword too when another clause fails', () => {
     // All-or-nothing applies to keywords as well: a card that keeps its Tank
     // but loses the ability printed under it is still the wrong card.
-    const parsed = parseCardText('TANK\nStun a unit.');
-    expect(parsed.unparsed).toEqual(['Stun a unit.']);
+    const parsed = parseCardText('TANK\nCounter a spell.');
+    expect(parsed.unparsed).toEqual(['Counter a spell.']);
   });
 
   it('reports every clause it could not read, not just the first', () => {
-    const parsed = parseCardText('Stun a unit.\nCounter a spell.');
+    const parsed = parseCardText('Banish a unit.\nCounter a spell.');
     expect(parsed.unparsed).toHaveLength(2);
   });
 

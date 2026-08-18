@@ -438,6 +438,7 @@ describe('"I enter ready" (rule 363 replacing 359.2.c)', () => {
           mightBonus: 0,
           grantedKeywords: [],
           buffs: 0,
+          stunned: false,
         },
       },
       players: state.players.map((seat) =>

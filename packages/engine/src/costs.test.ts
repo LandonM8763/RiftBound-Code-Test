@@ -351,6 +351,7 @@ function mint(
         mightBonus: 0,
         grantedKeywords: [],
         buffs: 0,
+        stunned: false,
       },
     },
     players: state.players.map((seat) =>
@@ -391,6 +392,7 @@ function withCard(
         mightBonus: 0,
         grantedKeywords: [],
         buffs: 0,
+        stunned: false,
       },
     },
     players: state.players.map((seat) =>
@@ -531,6 +533,7 @@ describe('ability cost modification in play', () => {
           mightBonus: 0,
           grantedKeywords: [],
           buffs: 0,
+          stunned: false,
         },
       },
       players: state.players.map((seat) =>

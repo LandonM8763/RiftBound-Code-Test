@@ -82,6 +82,14 @@ export type TriggerEvent =
   | 'winCombat'
   /** A Buff was placed (702). */
   | 'buffed'
+  /**
+   * A Unit became Stunned (423).
+   *
+   * 423.1.a.1 is why this is raised on the *change* rather than on the
+   * instruction: stunning an already-Stunned Unit is legal, does nothing, and
+   * the rulebook's own Eclipse Herald example says it must not trigger.
+   */
+  | 'stun'
   /** One or more cards were discarded (422). */
   | 'discard'
   /** An Activated Ability was used (377.3). */

@@ -137,6 +137,16 @@ export type Effect =
   /** Rule 414: mark the target exhausted. */
   | { readonly kind: 'exhaust' }
   /**
+   * Rule 423: render the target Unit Stunned.
+   *
+   * 423.1.b is all it does — the Unit contributes no Might to combat damage —
+   * and 423.1.c is what it pointedly does not: killing it still takes damage
+   * equal to its full Might. 423.1.a.1 makes stunning an already-Stunned Unit
+   * legal but inert, and specifically *not* an event, which is why the reducer
+   * raises the trigger only when the status actually changes.
+   */
+  | { readonly kind: 'stun' }
+  /**
    * Rules 701-705: place a Buff counter on the target Unit.
    *
    * Each Buff is +1 Might (703) and persists until the Unit leaves play (705).

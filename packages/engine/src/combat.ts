@@ -64,10 +64,23 @@ export function mightOf(state: GameState, unit: EntityId, role?: CombatRole): nu
 }
 
 export function sumMight(state: GameState, units: readonly EntityId[], role?: CombatRole): number {
-  return units.reduce((total, unit) => total + mightOf(state, unit, role), 0);
+  return units.reduce(
+    // 423.1.b: "A Stunned Unit does not contribute its might to damage in the
+    // combat damage step." Only here — 423.1.c keeps its full Might as the
+    // damage needed to kill it, which is why `lethalRemaining` below reads
+    // `mightOf` directly and this does not.
+    (total, unit) => total + (getEntity(state, unit).stunned ? 0 : mightOf(state, unit, role)),
+    0,
+  );
 }
 
-/** Damage still needed to kill a Unit (rules 142.4.b, 143.2.a). */
+/**
+ * Damage still needed to kill a Unit (rules 142.4.b, 143.2.a).
+ *
+ * 423.1.c is explicit that a Stunned Unit "must still have damage applied to it
+ * equal to, or greater than, its full might value to be killed", so being
+ * Stunned deliberately changes nothing here.
+ */
 export function lethalRemaining(state: GameState, unit: EntityId, role?: CombatRole): number {
   return Math.max(1, mightOf(state, unit, role) - getEntity(state, unit).damage);
 }

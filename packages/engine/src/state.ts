@@ -116,6 +116,18 @@ export interface Entity {
   readonly location: Location;
   /** Exhausted cards are turned sideways; Awaken readies them. */
   readonly exhausted: boolean;
+  /**
+   * Rule 423.1.a: Stunned is a binary state a Unit is in or is not.
+   *
+   * 423.1.b is the whole of what it does — a Stunned Unit "does not contribute
+   * its might to damage in the combat damage step" — and 423.1.c is what it
+   * deliberately does *not* do: the Unit still needs damage equal to its full
+   * Might to die. So `sumMight` reads this and `lethalRemaining` does not,
+   * which is the same split Assault and Shield already live on.
+   *
+   * 423.1.a.2 clears it in the end-of-turn Cleanup, beside `mightBonus`.
+   */
+  readonly stunned: boolean;
   /** Damage marked on a Unit. A Unit is destroyed once this reaches its Might. */
   readonly damage: number;
   /**

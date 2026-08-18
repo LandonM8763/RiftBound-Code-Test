@@ -37,6 +37,14 @@ export type Count =
       /** "each **other** battlefield" — the source does not count itself. */
       readonly excludeSelf?: boolean | undefined;
       /**
+       * "Stunned enemy units here" (423.1.a) — a binary status on the Unit.
+       *
+       * Unlike `mighty`, this is safe inside a `StaticGrant`: being Stunned is
+       * stored on the entity rather than computed from statics, so reading it
+       * cannot recurse back through `mightOf`.
+       */
+      readonly stunned?: boolean | undefined;
+      /**
        * "MIGHTY" (rules 706-709): a description, not a keyword — 708 makes a
        * Unit Mighty exactly while its Might is 5 or greater.
        *

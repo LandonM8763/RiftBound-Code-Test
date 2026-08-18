@@ -728,6 +728,7 @@ describe('static abilities (rules 363-365)', () => {
           mightBonus: 0,
           grantedKeywords: [],
           buffs: 0,
+          stunned: false,
         },
       },
       battlefields: state.battlefields.map((battlefield, index) =>

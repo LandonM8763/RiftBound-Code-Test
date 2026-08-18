@@ -177,6 +177,7 @@ describe('returning a Permanent to hand', () => {
     state = withEntity(state, victim, (e) => ({
       ...e,
       buffs: 1,
+      stunned: false,
       damage: 1,
       mightBonus: 2,
       grantedKeywords: [{ kind: 'tank' }],
@@ -192,6 +193,7 @@ describe('returning a Permanent to hand', () => {
 
     expect(settled.entities[victim]).toMatchObject({
       buffs: 0,
+      stunned: false,
       damage: 0,
       mightBonus: 0,
       grantedKeywords: [],

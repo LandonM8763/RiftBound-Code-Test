@@ -139,6 +139,7 @@ function withUnit(
         mightBonus: 0,
         grantedKeywords: [],
         buffs: 0,
+        stunned: false,
       },
     },
     players: state.players.map((seat) =>
@@ -255,6 +256,7 @@ describe('kill (rule 428)', () => {
       damage: 2,
       mightBonus: 3,
       buffs: 1,
+      stunned: false,
     }));
 
     const { state: after } = run(state, [{ kind: 'kill' }], unit);
@@ -294,6 +296,7 @@ describe('recall (rules 454-458)', () => {
       damage: 2,
       exhausted: true,
       buffs: 1,
+      stunned: false,
     }));
 
     const { state: after } = run(state, [{ kind: 'recall' }], unit);
@@ -749,6 +752,7 @@ describe('self-targeting', () => {
             mightBonus: 0,
             grantedKeywords: [],
             buffs: 0,
+            stunned: false,
           },
         },
         players: state.players.map((seat) =>

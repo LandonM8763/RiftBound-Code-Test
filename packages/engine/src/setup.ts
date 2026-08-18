@@ -130,6 +130,7 @@ export function createGame(options: CreateGameOptions): ReduceResult {
       mightBonus: 0,
       grantedKeywords: [],
       buffs: 0,
+      stunned: false,
     };
     return id;
   };
@@ -181,6 +182,7 @@ export function createGame(options: CreateGameOptions): ReduceResult {
         mightBonus: 0,
         grantedKeywords: [],
         buffs: 0,
+        stunned: false,
       };
       return { ...battlefield, entity: id };
     },

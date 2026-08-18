@@ -225,6 +225,17 @@ const COUNTS: readonly {
     build: () => ({ kind: 'controlled', who: 'you', what: 'unit', here: true, buffed: true }),
   },
   {
+    // 423.1.a: "stunned enemy units here".
+    pattern: /^stunned (friendly|enemy|your) units?(?: (here))?$/i,
+    build: (m) => ({
+      kind: 'controlled',
+      who: (m[1] ?? '').toLowerCase() === 'enemy' ? 'opponent' : 'you',
+      what: 'unit',
+      stunned: true,
+      ...(m[2] === undefined ? {} : { here: true }),
+    }),
+  },
+  {
     pattern: /^(friendly|enemy|your) ([A-Za-z'-]+?)s?(?: (here))?$/i,
     build: (m) => {
       const who = (m[1] ?? '').toLowerCase() === 'enemy' ? 'opponent' : 'you';
@@ -528,6 +539,21 @@ const CLAUSES: readonly ClauseRule[] = [
     },
   },
   {
+    // Rule 423. Same shape as `kill` above, because the wording is the same and
+    // only the verb differs.
+    pattern: /^stun an? (friendly |enemy )?unit(?: at a battlefield)?$/i,
+    build: (m) => {
+      const scope = (m[1] ?? '').trim().toLowerCase();
+      const base: TargetSpec =
+        scope === 'friendly' ? UNIT_FRIENDLY : scope === 'enemy' ? UNIT_ENEMY : UNIT_ANY;
+      const atBattlefield = /at a battlefield$/i.test(m[0]);
+      return {
+        effects: [{ kind: 'stun' }],
+        target: atBattlefield ? { ...base, atBattlefield: true } : base,
+      };
+    },
+  },
+  {
     pattern: /^ready an? (friendly |enemy )?unit$/i,
     build: (m) => {
       const scope = (m[1] ?? '').trim().toLowerCase();
@@ -757,6 +783,17 @@ const CONDITIONS: readonly {
   // Combat (466.3).
   { pattern: /^i win (?:a )?combat$/i, build: () => ({ event: 'winCombat', subject: 'self' }) },
   { pattern: /^you win (?:a )?combat$/i, build: () => ({ event: 'winCombat', subject: 'you' }) },
+
+  // Stun (423). 423.1.a.1 is what makes "when you stun" meaningful — the
+  // engine raises the event only when the status actually changes.
+  {
+    pattern: /^you stun an? (friendly|enemy) unit$/i,
+    build: (m) => ({
+      event: 'stun',
+      subject: (m[1] ?? '').toLowerCase() === 'enemy' ? 'enemy' : 'friendly',
+    }),
+  },
+  { pattern: /^you stun an? unit$/i, build: () => ({ event: 'stun', subject: 'any' }) },
 
   // Buffs (702) and discards (422).
   { pattern: /^you buff me$/i, build: () => ({ event: 'buffed', subject: 'self' }) },

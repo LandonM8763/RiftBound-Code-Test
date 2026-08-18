@@ -315,6 +315,7 @@ function withBoardCard(
         mightBonus: 0,
         grantedKeywords: [],
         buffs: 0,
+        stunned: false,
       },
     },
     players: state.players.map((seat) =>

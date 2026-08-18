@@ -366,6 +366,25 @@ function applyEffect(
       return withEntity(state, target, (current) => ({ ...current, exhausted: true }));
     }
 
+    // 423: Stun the target. 423.1.a.1 makes stunning an already-Stunned Unit
+    // legal but inert — and pointedly *not* an event, which is the rulebook's
+    // own Eclipse Herald example, so the trigger is raised on the change.
+    case 'stun': {
+      if (target === undefined || !onBoard(state, target)) {
+        return state;
+      }
+      if (getEntity(state, target).stunned) {
+        return state;
+      }
+      events.push({ type: 'stunned', unit: target });
+      const next = withEntity(state, target, (current) => ({ ...current, stunned: true }));
+      return context.raise(
+        next,
+        { event: 'stun', actor: controller, objects: [target] },
+        events,
+      );
+    }
+
     // 702.3.a: a Unit that already has a Buff does not get a second one.
     case 'buff': {
       if (target === undefined || !onBoard(state, target)) {
@@ -641,6 +660,7 @@ function clearCounters(state: GameState, entity: EntityId): GameState {
   return withEntity(state, entity, (current) => ({
     ...current,
     buffs: 0,
+    stunned: false,
     damage: 0,
     mightBonus: 0,
     // A keyword granted "this turn" is as much a thing the Board was doing to

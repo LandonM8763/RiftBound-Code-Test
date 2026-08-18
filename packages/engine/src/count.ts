@@ -131,6 +131,11 @@ function countControlled(
     if (count.buffed === true && getEntity(state, entity).buffs < 1) {
       continue;
     }
+    // 423.1.a: Stunned is a stored binary status, so like a Buff it reads
+    // nothing derived and a static's grant may ask about it.
+    if (count.stunned === true && !getEntity(state, entity).stunned) {
+      continue;
+    }
     // 708: Mighty is Might >= 5, and Might is what statics compute — which is
     // why this needs a `might` function handed in rather than imported.
     if (count.mighty === true) {
