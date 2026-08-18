@@ -1448,9 +1448,14 @@ Until real code establishes precedent, follow these:
   Final Point restriction, and the "more points than any opponent" clause.
 - **Fuzz continuously.** Run random-agent games in CI; any crash, illegal state, or
   non-terminating game is a bug. This catches more than hand-written tests.
-- **Golden-game regression tests.** Store seed + action sequence + expected final
-  state. These catch unintended rule changes precisely because the engine is
-  deterministic.
+- **Golden-game regression tests.** `engine/golden.test.ts` replays four fixed
+  seeds through whole games and pins a readable digest — turns, points, winner,
+  zone sizes — rather than a hash, so a break says *what* changed. A change
+  there is a result, not a failure: check the rule change was intended, then
+  re-record. The same file asserts the four engine-wide properties nothing else
+  covers end to end: `reduce` never mutates its input, the same seed and actions
+  replay identically, every action `legalActions` offers is accepted by `reduce`,
+  and no view names a card the viewer may not see.
 - **No presentation logic in the engine.** No string formatting for display, no
   colors, no layout. The engine emits structured events; consumers render them.
 - **Card data is generated, not hand-edited.** Ingest from a source, normalize, and
