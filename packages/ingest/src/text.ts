@@ -20,6 +20,7 @@ import {
   tokenMight,
   readsMight,
   DOMAINS,
+  FREE,
   type AttachedText,
   type CardAbilities,
   type CardType,
@@ -298,6 +299,61 @@ function parseResourceCost(phrase: string): Cost | undefined {
     power.push(domain);
   }
   return { energy, power };
+}
+
+/**
+ * Non-resource parts of an Activated Ability's cost (356.7, 377.1).
+ *
+ * Only payments the engine can both *check* and *perform*, exactly as with an
+ * Additional Cost: 416.3 and 422.3 both require such a cost to be completable
+ * before it counts as paid, so one the model cannot prove is refused rather
+ * than read as free.
+ */
+const ABILITY_PAYMENTS: readonly {
+  readonly pattern: RegExp;
+  readonly build: (match: RegExpMatchArray) => CostPayment | undefined;
+}[] = [
+  {
+    // 416.6: "Recycle 1 from your trash", "Recycle a unit from your trash".
+    pattern: /^recycle (\d+|a|an)(?: ([A-Za-z]+))? (?:cards? )?from (?:your|my) trash$/i,
+    build: (m) => {
+      const raw = (m[1] ?? '').toLowerCase();
+      const n = raw === 'a' || raw === 'an' ? 1 : count(raw);
+      if (n === undefined) {
+        return undefined;
+      }
+      const noun = (m[2] ?? '').toLowerCase();
+      const cardType = CARD_TYPES.find((type) => type === noun);
+      // A noun that is not a card type is a tag or a description the trash
+      // sweep cannot check, so it is refused rather than ignored.
+      if (noun !== '' && cardType === undefined) {
+        return undefined;
+      }
+      return { kind: 'recycle', count: n, ...(cardType === undefined ? {} : { cardType }) };
+    },
+  },
+  // 428: the source itself, so there is no choice to make.
+  { pattern: /^kill this$/i, build: () => ({ kind: 'killSelf' }) },
+  {
+    pattern: /^discard (\d+|a) cards?$/i,
+    build: (m) => {
+      const raw = (m[1] ?? '').toLowerCase();
+      const n = raw === 'a' ? 1 : count(raw);
+      return n === undefined ? undefined : { kind: 'discard', count: n };
+    },
+  },
+  { pattern: /^spend (?:my|a) buff$/i, build: () => ({ kind: 'spendBuff' }) },
+];
+
+/** Read one non-resource cost part, or `undefined` if it is not one. */
+function parseAbilityPayment(part: string): CostPayment | undefined {
+  for (const rule of ABILITY_PAYMENTS) {
+    const match = part.match(rule.pattern);
+    if (match !== null) {
+      return rule.build(match);
+    }
+  }
+  return undefined;
 }
 
 /** Read a "for each …" / "the number of …" phrase, or refuse it. */
@@ -1476,8 +1532,40 @@ function parseLine(line: string): {
   const colon = splitOnColon(line);
   if (colon !== undefined) {
     const [lead, body] = colon;
-    const costMatch = lead.match(/^(?:(\d+)\s*,\s*)?exhaust$/i) ?? lead.match(/^(\d+)$/);
-    if (costMatch === null) {
+    // 377.1 puts the cost before the colon. It is an ordinary `Cost` — Energy
+    // and Power (414, 416) — plus 414's exhaust symbol, so the exhaust is
+    // peeled off and the rest goes through the same resource reader an Equip
+    // cost uses. Anything left that is neither a number nor a Domain refuses
+    // the ability: "Discard 1, Exhaust" is a real cost this model cannot state,
+    // and reading it as the exhaust alone would make it free.
+    // The lead is a comma-separated list, and each part is either resources or
+    // a non-resource payment (356.7). The exhaust symbol can be a part of its
+    // own or glued onto a resource run — "1 order exhaust" prints no comma.
+    let exhaustSelf = false;
+    const payments: CostPayment[] = [];
+    const resourceWords: string[] = [];
+    for (const raw of lead.split(',')) {
+      let part = raw.trim();
+      if (part === '') {
+        continue;
+      }
+      if (/(?:^|\s)exhaust$/i.test(part)) {
+        exhaustSelf = true;
+        part = part.replace(/(?:^|\s)exhaust$/i, '').trim();
+        if (part === '') {
+          continue;
+        }
+      }
+      const payment = parseAbilityPayment(part);
+      if (payment !== undefined) {
+        payments.push(payment);
+        continue;
+      }
+      resourceWords.push(part);
+    }
+    const abilityCost =
+      resourceWords.length === 0 ? FREE : parseResourceCost(resourceWords.join(' '));
+    if (abilityCost === undefined) {
       return undefined;
     }
     // 377.1 puts the effect after the colon, but an Add ability prints its own
@@ -1487,11 +1575,11 @@ function parseLine(line: string): {
     if (effect === undefined) {
       return undefined;
     }
-    const energy = count(costMatch[1] ?? '0') ?? 0;
     return {
       activated: {
-        cost: { energy, power: [] },
-        exhaustSelf: /exhaust/i.test(lead),
+        cost: abilityCost,
+        exhaustSelf,
+        ...(payments.length === 0 ? {} : { payments }),
         effect,
       },
     };

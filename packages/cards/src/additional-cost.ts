@@ -17,6 +17,7 @@
  *   because choosing to pay changes it. That makes it a play-time choice like a
  *   target, not something asked mid-resolution.
  */
+import type { CardType } from './card.js';
 import type { Cost } from './cost.js';
 
 /**
@@ -39,7 +40,30 @@ export type CostPayment =
    */
   | { readonly kind: 'exhaustLegend' }
   /** "kill a friendly unit", "kill a friendly gear" (428). */
-  | { readonly kind: 'kill'; readonly what: 'unit' | 'gear' };
+  | { readonly kind: 'kill'; readonly what: 'unit' | 'gear' }
+  /**
+   * "Kill this" (428) — the source itself, so there is no choice to make.
+   *
+   * Separate from `kill` for the same reason `exhaustLegend` is separate from
+   * exhausting a Unit: naming a specific Game Object is what makes a cost
+   * expressible without a choice point.
+   */
+  | { readonly kind: 'killSelf' }
+  /**
+   * "Recycle 3 from your trash" (416.6) — to the bottom of the Main Deck.
+   *
+   * 416.3 makes it payable only if it can be completed in full, which is the
+   * rulebook's own Vi Destructive example: with an empty trash the ability
+   * cannot be activated at all.
+   *
+   * `cardType` narrows to "recycle **a unit** from your trash", which is how
+   * Assembly Rig prints it; omitted, any card qualifies.
+   */
+  | {
+      readonly kind: 'recycle';
+      readonly count: number;
+      readonly cardType?: CardType | undefined;
+    };
 
 export interface AdditionalCost {
   /**

@@ -165,6 +165,12 @@ export type GameEvent =
       readonly card: EntityId;
       readonly battlefield: number;
     }
+  /** Rule 416: cards went to the bottom of their owner's Main Deck. */
+  | {
+      readonly type: 'cardsRecycled';
+      readonly player: PlayerId;
+      readonly cards: readonly EntityId[];
+    }
   /** Rule 423: a Unit became Stunned. Not raised for an already-Stunned one. */
   | { readonly type: 'stunned'; readonly unit: EntityId }
   /** Rules 180-184: Tokens were Created on the Board. `token` keys rule 187. */

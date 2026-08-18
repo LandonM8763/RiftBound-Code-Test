@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 148 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 152 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -908,6 +908,41 @@ Four things are load-bearing:
   from hand available at its printed cost and timing, so nothing about this
   takes an option away.
 
+### Non-resource ability costs
+
+Rule 356.7 and 377.1, with the payments in `cards/additional-cost.ts` and the
+engine in `additional.ts`.
+
+**An ability's cost and an Additional Cost are the same thing**, so they share
+`CostPayment` rather than each having a vocabulary: both are an action
+performed to pay rather than a number subtracted, and both are gated by the
+same rule — 416.3 and 422.3 each say such a cost must be *completable* before
+it counts as paid. So an ability whose payment cannot be performed is simply
+not offered, which is the rulebook's own worked example: Vi Destructive with an
+empty trash "can't activate the ability, because they can't pay its cost".
+
+Two payments were added for it. `recycle` is 416.6's "Recycle N from your
+trash", and 416.1 sends the cards to the **bottom of their owner's** Main Deck
+— 416.1.c is explicit that each player Recycles to their own deck regardless of
+who was instructed, which matters the moment an effect puts an opponent's card
+in a trash. `killSelf` is "Kill this", separate from `kill` for the same reason
+`exhaustLegend` is separate from exhausting a Unit: naming a specific Game
+Object is what makes a cost expressible with no choice point.
+
+**416.5's random ordering is not modelled**, and the reason is that it is
+unobservable: two or more cards Recycled together go to the bottom "in a random
+order", but the deck is shuffled on a Burn Out (431.2.b) and drawn from the top,
+so a fixed order among a few cards at the bottom cannot be distinguished until
+then. Doing it properly would put the RNG on the payment signature for no
+reachable difference.
+
+The cost *lead* is now read by the same `parseResourceCost` an Equip cost uses,
+which is what let Power into an ability's cost — `ActivatedAbility.cost` was
+always a full `Cost`, and only the parser's regex was Energy-only. That change
+measured +0 cards on its own and was kept anyway, because it deletes a special
+case rather than adding one. That is the distinction from the Recycle *effect*
+primitive, which measured +0 and was removed: it added surface area.
+
 ### Stun
 
 Rule 423, with `Entity.stunned` in `state.ts` and the effect in `effects.ts`.
@@ -1338,7 +1373,7 @@ edits by how far they move it, and swapping the objective swaps what the tool is
 for without touching the search.
 
 **The default is `CONSISTENCY`, and the reason is not taste.** A *simulated*
-objective is not trustworthy yet: 320 of the 468 cards with rules text still
+objective is not trustworthy yet: 316 of the 468 cards with rules text still
 play as vanilla, so a simulator cannot see what most cards do. Optimizing
 against it would cut the card whose text the engine ignores and keep the vanilla
 body with better stats — confidently wrong advice. Consistency depends on cost
@@ -1496,7 +1531,7 @@ deck builds and validates from it with no issues, and the engine plays complete
 games with it — 300 games, all decided, heuristic 58.7% ± 5.5 against random.
 
 101 of those cards carry an ability and 15 a keyword. The keyword figure is low
-against the 148 that parse because keywords ride the same all-or-nothing rule:
+against the 152 that parse because keywords ride the same all-or-nothing rule:
 a card whose other clause is unreadable keeps neither. 13 create Tokens, 12
 carry Effect Text a Gear lends its Top-Most Card, 6 carry Accelerate, 5 return a
 card to hand and 3 grant a keyword.
@@ -1565,14 +1600,14 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 148 of the 468 cards that have text**, and the shape of what is
+**Coverage is 152 of the 468 cards that have text**, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 148 |
-| Blocked | 320 |
+| Fully parsed | 152 |
+| Blocked | 316 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 3 or 4 times, everything else once or
@@ -1620,7 +1655,7 @@ and the one whose engine half (Attach) was already built — **Weaponmaster with
 `[A]` 124 → 130**, **Deflect 130 → 134**, and **play-location permissions with
 the reminder text the export flattens 134 → 140**, and **rule 429.5's
 multi-resource Add 140 → 141**, **Hidden with the Facedown Zone 141 → 145**, and
-**Stun (423) 145 → 148**.
+**Stun (423) 145 → 148**, and **non-resource ability costs 148 → 152**.
 
 #### How the ranking was measured wrong, and what fixed it
 
@@ -1655,7 +1690,7 @@ Re-measured by counterfactual from the **124** baseline, one mechanic at a time:
 | ~~Deflect (809)~~ — now built | **+3 projected, +4 delivered** |
 | Durations and delayed effects ("the next spell you play…") | +3 |
 | Vision (817) / Predict (436) | +2 |
-| Non-standard ability costs | +2 |
+| ~~Non-standard ability costs~~ — now built | **+4 projected, +4 delivered** |
 | Statics beyond scope-plus-grant | +2 |
 | Effect-outcome predicates ("if this kills it") | +2 |
 | Repeat (820) | +1 |
@@ -1679,6 +1714,7 @@ What each round actually delivered, for calibrating the next projection:
 | Play permissions (355.2.b) and flattened reminders | +5 projected, **+6** delivered |
 | Hidden (811) and the Hide action (421) | +4 projected, **+4** delivered |
 | Stun (423) | +3 projected, **+3** delivered |
+| Non-resource ability costs (356.7, 416.6) | +4 projected, **+4** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic
@@ -1720,9 +1756,9 @@ What the corpus is blocked on now, in the order measurement puts them:
    or defending alone" needs a combat-role predicate that `Condition`
    deliberately cannot express, because a condition that reads Might back would
    recurse through `mightOf`. +2.
-3. **Non-standard ability costs** — "Spend my buff:", "Recycle 1 from your
-   trash:", "you may exhaust me to …". +2. `ActivatedAbility.cost` is Energy,
-   Power and the exhaust; 16 cards want more.
+3. **Non-standard ability costs beyond the four modelled.** "You may exhaust
+   me to …" and "Banish this:" are what is left; Recycle, Kill this, Discard
+   and Spend a buff are built.
 4. **Conditional and modal effects** — "if this kills it", "unless its
    controller…", "choose one •…". +2 and +0. The effect model has no outcome
    conditions and no modes.

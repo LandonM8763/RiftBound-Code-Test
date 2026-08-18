@@ -25,6 +25,7 @@ import {
   type TriggerEvent,
 } from '@riftbound/cards';
 
+import { canPayAdditional } from './additional.js';
 import { activeAbilities, attachedTextOf } from './attach.js';
 import { abilityCost } from './costs.js';
 import { dependencyMet } from './dependency.js';
@@ -149,6 +150,16 @@ export function activatableAbilities(
         }
         const cost = abilityCost(state, player, ability.cost);
         if (!canPay(getPlayer(state, player).pool, cost)) {
+          return;
+        }
+        // 356.7 / 416.3: a non-resource part of the cost must be completable,
+        // or the ability cannot be activated at all — the rulebook's own Vi
+        // Destructive example, where an empty trash makes it unusable.
+        if (
+          (ability.payments ?? []).some(
+            (payment) => !canPayAdditional(state, player, payment, source),
+          )
+        ) {
           return;
         }
         found.push({

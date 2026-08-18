@@ -12,6 +12,7 @@ import { CardRegistry, cardId, cost, type CardDefinition } from '@riftbound/card
 import { makeBattlefield, makeLegend, makeRune, makeSpell, makeUnit } from '@riftbound/cards/testing';
 import { describe, expect, it } from 'vitest';
 
+import { activatableAbilities } from './abilities.js';
 import { hasLethalDamage, lethalRemaining, mightOf, sumMight } from './combat.js';
 import { checkInvariants } from './invariants.js';
 import { moveEntity, withEntity } from './mutate.js';
@@ -289,6 +290,137 @@ describe('triggers raised during resolution reach the Chain (383.3.c)', () => {
     // The Spell has gone, and the trigger it woke is what is left standing.
     expect(state.chain).toHaveLength(1);
     expect(state.chain[0]!.entity).toBe(herald);
+    checkInvariants(state);
+  });
+});
+
+/**
+ * Non-resource ability costs (356.7, 416, 428).
+ *
+ * 416.3's payability gate is the load-bearing half, and the rulebook states it
+ * as a worked example: Vi Destructive "can't activate the ability, because
+ * they can't pay its cost" with an empty trash.
+ */
+describe('non-resource ability costs', () => {
+  /** "Recycle 1 from your trash: Give me +1 Might this turn." — Vi Destructive. */
+  const RECYCLER = makeUnit(2, ['fury'], {
+    id: cardId('S-030'),
+    name: 'Recycler',
+    cost: cost(1),
+    abilities: {
+      activated: [
+        {
+          cost: cost(0),
+          exhaustSelf: false,
+          payments: [{ kind: 'recycle', count: 1 }],
+          effect: { target: { kind: 'self' }, effects: [{ kind: 'giveMight', amount: 1 }] },
+        },
+      ],
+    },
+  });
+
+  /** "Kill this: Draw 1." */
+  const SACRIFICE = makeUnit(1, ['fury'], {
+    id: cardId('S-031'),
+    name: 'Sacrifice',
+    cost: cost(1),
+    abilities: {
+      activated: [
+        {
+          cost: cost(0),
+          exhaustSelf: false,
+          payments: [{ kind: 'killSelf' }],
+          effect: { target: { kind: 'none' }, effects: [{ kind: 'draw', count: 1 }] },
+        },
+      ],
+    },
+  });
+
+  const COST_REGISTRY = CardRegistry.from([
+    LEGEND,
+    CHAMPION,
+    BRUTE,
+    RECYCLER,
+    SACRIFICE,
+    RUNE,
+    ...BATTLEFIELDS,
+  ] as CardDefinition[]);
+
+  function costGame(seed: string): GameState {
+    const list: DeckList = {
+      legend: LEGEND.id,
+      champion: CHAMPION.id,
+      main: [
+        ...Array.from({ length: 8 }, () => BRUTE.id),
+        ...Array.from({ length: 4 }, () => RECYCLER.id),
+        ...Array.from({ length: 4 }, () => SACRIFICE.id),
+      ],
+      runes: Array.from({ length: 8 }, () => RUNE.id),
+      battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
+    };
+    let state = createGame({ decks: [list, list], registry: COST_REGISTRY, seed }).state;
+    while (state.phase === 'mulligan') {
+      state = reduce(state, { type: 'mulligan', cards: [] }).state;
+    }
+    while (state.phase !== 'main' && !isOver(state)) {
+      state = reduce(state, { type: 'resolvePhase' }).state;
+    }
+    return state;
+  }
+
+  function place(state: GameState, id: CardDefinition['id']): [GameState, EntityId] {
+    const player = state.activePlayer;
+    const card = state.players[player]!.zones.mainDeck.find(
+      (candidate) => state.entities[candidate]!.card === id,
+    )!;
+    return [moveEntity(state, card, playerLocation(player, 'base')), card];
+  }
+
+  it('416.3: an empty trash makes the ability unusable', () => {
+    // The rulebook's own Vi Destructive example.
+    const [state, unit] = place(costGame('cost-empty'), RECYCLER.id);
+    expect(state.players[state.activePlayer]!.zones.trash).toHaveLength(0);
+    expect(
+      activatableAbilities(state, state.activePlayer).filter((a) => a.source === unit),
+    ).toHaveLength(0);
+  });
+
+  it('416.1: paying puts the card on the bottom of its owner`s Main Deck', () => {
+    let state = costGame('cost-recycle');
+    const player = state.activePlayer;
+    const [placed, unit] = place(state, RECYCLER.id);
+    // One card in the trash, so the cost is payable exactly once.
+    const spare = placed.players[player]!.zones.mainDeck.find(
+      (candidate) => placed.entities[candidate]!.card === BRUTE.id,
+    )!;
+    state = moveEntity(placed, spare, playerLocation(player, 'trash'));
+
+    const offered = activatableAbilities(state, player).filter((a) => a.source === unit);
+    expect(offered).toHaveLength(1);
+
+    const deckBefore = state.players[player]!.zones.mainDeck.length;
+    state = reduce(state, { type: 'activateAbility', source: unit, index: 0 }).state;
+
+    expect(state.players[player]!.zones.trash).toHaveLength(0);
+    expect(state.players[player]!.zones.mainDeck).toHaveLength(deckBefore + 1);
+    // 416.1: the bottom, not the top — it must not be the next card drawn.
+    expect(state.players[player]!.zones.mainDeck.at(-1)).toBe(spare);
+    // And the cost is spent: with the trash empty it cannot be paid again.
+    expect(activatableAbilities(state, player).filter((a) => a.source === unit)).toHaveLength(0);
+    checkInvariants(state);
+  });
+
+  it('428: "Kill this" sends the source to the trash as the cost', () => {
+    let state = costGame('cost-kill');
+    const player = state.activePlayer;
+    const [placed, unit] = place(state, SACRIFICE.id);
+    state = placed;
+
+    expect(activatableAbilities(state, player).filter((a) => a.source === unit)).toHaveLength(1);
+    state = reduce(state, { type: 'activateAbility', source: unit, index: 0 }).state;
+
+    expect(state.players[player]!.zones.trash).toContain(unit);
+    expect(state.players[player]!.zones.base).not.toContain(unit);
     checkInvariants(state);
   });
 });

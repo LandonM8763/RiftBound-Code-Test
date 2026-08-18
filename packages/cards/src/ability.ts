@@ -7,7 +7,7 @@
  */
 import type { CardType } from './card.js';
 import type { Cost } from './cost.js';
-import type { AdditionalCost } from './additional-cost.js';
+import type { AdditionalCost, CostPayment } from './additional-cost.js';
 import type { CostModifier } from './cost-modifier.js';
 import type { CardEffect } from './effect.js';
 import type { StaticAbility } from './static.js';
@@ -49,6 +49,16 @@ export interface ActivatedAbility {
    * itself rather than out of the Rune Pool.
    */
   readonly exhaustSelf?: boolean | undefined;
+  /**
+   * Non-resource parts of the cost (356.7) — "Recycle 3 from your trash, [1],
+   * [E]: Draw 1", "Kill this: …".
+   *
+   * The same `CostPayment` an Additional Cost uses, because they are the same
+   * thing: an action performed to pay rather than a number subtracted. 416.3
+   * and 422.3 both say such a cost must be *completable* to be paid, so an
+   * ability carrying one an activation cannot perform is simply not offered.
+   */
+  readonly payments?: readonly CostPayment[] | undefined;
   /** A Dependent Keyword gating this ability (801.1). */
   readonly dependsOn?: AbilityDependency | undefined;
   readonly effect: CardEffect;

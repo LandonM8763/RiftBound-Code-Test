@@ -1297,3 +1297,76 @@ describe('Add (rule 429)', () => {
     expect(parseCardText('Exhaust: REACTION - ADD 2. Use only to play spells.').unparsed).toHaveLength(1);
   });
 });
+
+/**
+ * Non-resource ability costs (356.7, 377.1, 416.6).
+ *
+ * The rulebook's own worked examples for 416.3 and 416.5 are Vi Destructive
+ * and Garbage Grabber, both of which are real cards in the corpus — so these
+ * wordings are the ones to get right.
+ */
+describe('activated ability costs', () => {
+  const activated = (text: string): unknown => parseCardText(text).abilities?.activated?.[0];
+
+  it('377.1: reads Power in the cost, not only Energy', () => {
+    expect(activated('1 Calm, Exhaust: Draw 1.')).toEqual({
+      cost: { energy: 1, power: ['calm'] },
+      exhaustSelf: true,
+      effect: { target: { kind: 'none' }, effects: [{ kind: 'draw', count: 1 }] },
+    });
+    // Printed with no comma before the exhaust, which is how the export gives
+    // it — the symbol is glued onto the resource run.
+    expect((activated('1 order exhaust: Draw 1.') as { cost: unknown }).cost).toEqual({
+      energy: 1,
+      power: ['order'],
+    });
+  });
+
+  it('416.6: reads "Recycle N from your trash" as a cost payment', () => {
+    expect(activated('Recycle 1 from your trash: Draw 1.')).toEqual({
+      cost: { energy: 0, power: [] },
+      exhaustSelf: false,
+      payments: [{ kind: 'recycle', count: 1 }],
+      effect: { target: { kind: 'none' }, effects: [{ kind: 'draw', count: 1 }] },
+    });
+  });
+
+  it('reads a cost with resources and a payment mixed', () => {
+    // Garbage Grabber, the rulebook's 416.5 example.
+    expect(activated('Recycle 3 from your trash, 1, Exhaust: Draw 1.')).toEqual({
+      cost: { energy: 1, power: [] },
+      exhaustSelf: true,
+      payments: [{ kind: 'recycle', count: 3 }],
+      effect: { target: { kind: 'none' }, effects: [{ kind: 'draw', count: 1 }] },
+    });
+  });
+
+  it('narrows a Recycle to a card type when the card names one', () => {
+    expect(
+      (activated('Recycle a unit from your trash: Draw 1.') as { payments: unknown }).payments,
+    ).toEqual([{ kind: 'recycle', count: 1, cardType: 'unit' }]);
+  });
+
+  it('428: "Kill this" names the source, so it needs no choice', () => {
+    expect((activated('Kill this: Draw 1.') as { payments: unknown }).payments).toEqual([
+      { kind: 'killSelf' },
+    ]);
+  });
+
+  it('refuses a payment the engine cannot prove it can complete', () => {
+    // "Banish this" has no Banish action, and a noun that is not a card type
+    // cannot be checked against the trash. Both refuse rather than read as
+    // free, which would make the ability cheaper than printed.
+    expect(parseCardText('Banish this: Draw 1.').unparsed).toHaveLength(1);
+    expect(parseCardText('Recycle a Poro from your trash: Draw 1.').unparsed).toHaveLength(1);
+  });
+
+  it('leaves the plain forms alone', () => {
+    expect(activated('Exhaust: Draw 1.')).toEqual({
+      cost: { energy: 0, power: [] },
+      exhaustSelf: true,
+      effect: { target: { kind: 'none' }, effects: [{ kind: 'draw', count: 1 }] },
+    });
+    expect((activated('2: Draw 1.') as { cost: unknown }).cost).toEqual({ energy: 2, power: [] });
+  });
+});

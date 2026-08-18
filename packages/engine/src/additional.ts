@@ -18,6 +18,26 @@ import { isMandatory, type AdditionalCost, type CostPayment } from '@riftbound/c
 import { canPay, payFrom } from './play.js';
 import { entityCard, getPlayer, type EntityId, type GameState, type PlayerId } from './state.js';
 
+/** Cards in `player`'s trash a Recycle cost could take (416.6). */
+function recyclable(
+  state: GameState,
+  player: PlayerId,
+  payment: Extract<CostPayment, { kind: 'recycle' }>,
+): readonly EntityId[] {
+  return getPlayer(state, player).zones.trash.filter(
+    (card) => payment.cardType === undefined || entityCard(state, card).type === payment.cardType,
+  );
+}
+
+/** Rule 380: is this Game Object on the Board, where it can be killed? */
+function onBoard(state: GameState, id: EntityId): boolean {
+  const location = state.entities[id]?.location;
+  return (
+    location !== undefined &&
+    (location.kind === 'battlefield' || (location.kind === 'player' && location.zone === 'base'))
+  );
+}
+
 /** Can `player` pay this non-standard cost right now? */
 export function canPayAdditional(
   state: GameState,
@@ -50,6 +70,17 @@ export function canPayAdditional(
 
     case 'kill':
       return killable(state, player, payment.what) !== undefined;
+
+    // 428: the source is a specific Game Object, so this is payable exactly
+    // while it is still on the Board to be killed.
+    case 'killSelf':
+      return playing !== undefined && onBoard(state, playing);
+
+    // 416.3: "the action must be able to be completed for the cost to be
+    // paid" — the rulebook's own Vi Destructive example. A partly paid cost
+    // is not a paid cost, so this is a full-count check.
+    case 'recycle':
+      return recyclable(state, player, payment).length >= payment.count;
 
     default: {
       const exhaustive: never = payment;
@@ -104,6 +135,8 @@ export function payAdditional(
   playing: EntityId,
   kill: (state: GameState, unit: EntityId) => GameState,
   discard: (state: GameState, player: PlayerId, cards: readonly EntityId[]) => GameState,
+  /** 416.1: put these cards on the bottom of their owner's Main Deck. */
+  recycle: (state: GameState, player: PlayerId, cards: readonly EntityId[]) => GameState,
 ): GameState {
   const seat = getPlayer(state, player);
   switch (payment.kind) {
@@ -134,6 +167,21 @@ export function payAdditional(
     case 'kill': {
       const victim = killable(state, player, payment.what);
       return victim === undefined ? state : kill(state, victim);
+    }
+
+    case 'killSelf':
+      return onBoard(state, playing) ? kill(state, playing) : state;
+
+    // 416.1: Recycling puts the cards on the bottom of the corresponding deck,
+    // and 416.1.a sends Main Deck cards to the Main Deck.
+    //
+    // 416.5 orders two or more randomly, which this does *not* do: the deck is
+    // shuffled on a Burn Out and drawn from the top, so a fixed order among a
+    // handful of cards at the bottom is unobservable until then. Doing it
+    // properly would put the RNG on this signature for no reachable difference.
+    case 'recycle': {
+      const chosen = recyclable(state, player, payment).slice(0, payment.count);
+      return chosen.length < payment.count ? state : recycle(state, player, chosen);
     }
 
     default: {

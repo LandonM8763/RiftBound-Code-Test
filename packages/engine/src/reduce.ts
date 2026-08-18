@@ -542,6 +542,12 @@ function activateAbility(
   if (chosen.ability.exhaustSelf === true) {
     next = withEntity(next, source, (current) => ({ ...current, exhausted: true }));
   }
+  // 356.7: the non-resource parts of the cost. After the resources, so a
+  // payment that also spends from the pool draws on what is left — the same
+  // order 357.2 puts an Additional Cost in.
+  for (const payment of chosen.ability.payments ?? []) {
+    next = payAdditionalCost(next, player, payment, source, events);
+  }
 
   next = {
     ...next,
@@ -897,6 +903,19 @@ function payAdditionalCost(
       // 383.2: a Discard is a Discard however it was caused, so "when you
       // discard" watches a cost payment as much as an effect.
       return raiseEvent(next, { event: 'discard', actor: who }, events);
+    },
+    // 416.1: Recycled Main Deck cards go to the bottom of the Main Deck, and
+    // 416.1.c sends each to *its own owner's* deck rather than the recycling
+    // player's — which matters the moment an effect puts an opponent's card in
+    // a trash.
+    (current, who, cards) => {
+      let next = current;
+      for (const card of cards) {
+        const owner = getEntity(next, card).owner;
+        next = moveEntity(next, card, playerLocation(owner, 'mainDeck'), 'bottom');
+      }
+      events.push({ type: 'cardsRecycled', player: who, cards: [...cards] });
+      return next;
     },
   );
 }
