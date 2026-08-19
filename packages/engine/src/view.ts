@@ -9,6 +9,7 @@ import type {
   PlayerId,
   RunePool,
 } from './state.js';
+import { abilityFor } from './abilities.js';
 import { definitionOf, getEntity, getPlayer, isClosed } from './state.js';
 
 /**
@@ -98,6 +99,19 @@ export interface PlayerView {
    * cannot identify — which is the whole point of the mechanic.
    */
   readonly facedown: readonly FacedownView[];
+  /**
+   * The top card of this player's own Main Deck, while they are Predicting.
+   *
+   * 436.1 makes Predicting "the act of **looking at** a single card from the
+   * top of the Main Deck and choosing whether or not to Recycle it" — so the
+   * look is part of the action, and a controller who had to decide blind would
+   * be playing a strictly weaker card than the one printed.
+   *
+   * Revealed only to that player, and only while they control a pending Chain
+   * item whose ability Recycles from the top. `null` at every other moment,
+   * which is what keeps the Main Deck otherwise hidden from everyone.
+   */
+  readonly predicting: EntityView | null;
 }
 
 /** A card in a Facedown Zone: its Battlefield is public, its face is not. */
@@ -164,6 +178,22 @@ export interface GameView {
   readonly showdown: ShowdownView | null;
 }
 
+/**
+ * Is `player` mid-Predict — that is, do they control the pending Chain item,
+ * and does its ability Recycle from the top of a deck?
+ *
+ * Narrow on purpose. The Main Deck is hidden from everyone (128), and this is
+ * the one rule that opens a window into it; anything broader would leak.
+ */
+function isPredicting(state: GameState, player: PlayerId): boolean {
+  const top = state.chain[state.chain.length - 1];
+  if (top === undefined || !top.pending || top.controller !== player || top.ability === null) {
+    return false;
+  }
+  const ability = abilityFor(state, top.entity, top.ability);
+  return ability?.effect.effects.some((effect) => effect.kind === 'recycleTop') === true;
+}
+
 /** What `viewer` is entitled to know about the current state. */
 export function observe(state: GameState, viewer: PlayerId): GameView {
   const reveal = (id: EntityId, visible: boolean): EntityView => {
@@ -212,6 +242,11 @@ export function observe(state: GameState, viewer: PlayerId): GameView {
       // Private, and 128.4 gives that Privacy to the card's controller rather
       // than its owner. So every player sees that something is hidden and at
       // which Battlefield, and only its controller sees which card it is.
+      // 436.1: the look that a Predict is half made of.
+      predicting:
+        own && isPredicting(state, player.id)
+          ? (firstOrNull(player.zones.mainDeck, reveal) ?? null)
+          : null,
       facedown: player.zones.facedown.map((id) => ({
         ...reveal(id, own),
         battlefield: getEntity(state, id).hiddenAt ?? null,

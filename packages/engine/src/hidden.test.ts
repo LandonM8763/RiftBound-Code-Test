@@ -13,6 +13,8 @@ import { CardRegistry, cardId, cost, type CardDefinition } from '@riftbound/card
 import { makeBattlefield, makeLegend, makeRune, makeSpell, makeUnit } from '@riftbound/cards/testing';
 import { describe, expect, it } from 'vitest';
 
+import { executeEffect } from './effects.js';
+import type { GameEvent } from './events.js';
 import { facedownAt, hideDestinations, playableFromFacedown } from './hidden.js';
 import { checkInvariants } from './invariants.js';
 import { legalActions } from './legal.js';
@@ -321,5 +323,194 @@ describe('what each player can see (107.3.f, 128.4)', () => {
     expect(mine[0]!.card).toBe(LURKER.id);
     expect(theirs[0]!.card).toBeNull();
     expect(theirs[0]!.might).toBeNull();
+  });
+});
+
+/**
+ * Predict (436) and Vision (817), plus scoring by effect (467-471).
+ *
+ * Predict lives here because it is the *other* hidden-information rule: it
+ * opens a one-card window into the Main Deck, which is otherwise hidden from
+ * everyone including its owner. 436.1 makes the look part of the action, so a
+ * controller deciding blind would be playing a weaker card than the one printed.
+ */
+describe('Predict (436) and Vision (817)', () => {
+  /** "VISION" — an optional Play Effect that Recycles from the top. */
+  const SEER = makeUnit(2, ['fury'], {
+    id: cardId('H-030'),
+    name: 'Seer',
+    cost: cost(1),
+    abilities: {
+      triggered: [
+        {
+          condition: { event: 'played', subject: 'self' },
+          optional: true,
+          effect: { target: { kind: 'none' }, effects: [{ kind: 'recycleTop', count: 1 }] },
+        },
+      ],
+    },
+  });
+
+  /** "When I hold, you score 1 point." */
+  const HOLDER = makeUnit(2, ['fury'], {
+    id: cardId('H-031'),
+    name: 'Holder',
+    cost: cost(1),
+    abilities: {
+      triggered: [
+        {
+          condition: { event: 'hold', subject: 'you' },
+          effect: { target: { kind: 'none' }, effects: [{ kind: 'score', amount: 1 }] },
+        },
+      ],
+    },
+  });
+
+  const P_REGISTRY = CardRegistry.from([
+    LEGEND,
+    CHAMPION,
+    PLAIN,
+    SEER,
+    HOLDER,
+    RUNE,
+    ...BATTLEFIELDS,
+  ] as CardDefinition[]);
+
+  function predictGame(seed: string): GameState {
+    const list: DeckList = {
+      legend: LEGEND.id,
+      champion: CHAMPION.id,
+      main: [
+        ...Array.from({ length: 8 }, () => PLAIN.id),
+        ...Array.from({ length: 4 }, () => SEER.id),
+        ...Array.from({ length: 4 }, () => HOLDER.id),
+      ],
+      runes: Array.from({ length: 8 }, () => RUNE.id),
+      battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
+    };
+    let state = createGame({ decks: [list, list], registry: P_REGISTRY, seed }).state;
+    while (state.phase === 'mulligan') {
+      state = reduce(state, { type: 'mulligan', cards: [] }).state;
+    }
+    while (state.phase !== 'main' && !isOver(state)) {
+      state = reduce(state, { type: 'resolvePhase' }).state;
+    }
+    return state;
+  }
+
+  /** Play a Seer from hand and stop on the pending Vision trigger. */
+  function pendingVision(seed: string): { state: GameState; player: PlayerId } {
+    let state = predictGame(seed);
+    const player = state.activePlayer;
+    const seer = state.players[player]!.zones.mainDeck.find(
+      (candidate) => state.entities[candidate]!.card === SEER.id,
+    )!;
+    state = moveEntity(state, seer, playerLocation(player, 'hand'));
+    state = {
+      ...state,
+      players: state.players.map((seat) =>
+        seat.id === player ? { ...seat, pool: { ...seat.pool, energy: 5 } } : seat,
+      ),
+    };
+    state = reduce(state, { type: 'playCard', card: seer }).state;
+    return { state, player };
+  }
+
+  it('436.1: the controller sees the top card while deciding, and only then', () => {
+    const { state, player } = pendingVision('predict-look');
+    const other = (player === 0 ? 1 : 0) as PlayerId;
+
+    // The pending trigger is the Predict, so the window is open.
+    expect(state.chain[state.chain.length - 1]!.pending).toBe(true);
+    const top = state.players[player]!.zones.mainDeck[0]!;
+    expect(observe(state, player).players[player]!.predicting?.id).toBe(top);
+    // 128: nobody else may look into a Main Deck, ever.
+    expect(observe(state, other).players[player]!.predicting).toBeNull();
+  });
+
+  it('closes the window once the decision is made', () => {
+    let { state, player } = pendingVision('predict-close');
+    state = reduce(state, { type: 'resolveTrigger', perform: false }).state;
+    expect(observe(state, player).players[player]!.predicting).toBeNull();
+  });
+
+  it('436.1: performing Recycles the top card to the bottom', () => {
+    let { state, player } = pendingVision('predict-recycle');
+    const deck = state.players[player]!.zones.mainDeck;
+    const top = deck[0]!;
+    const size = deck.length;
+
+    state = reduce(state, { type: 'resolveTrigger', perform: true }).state;
+    while (state.chain.length > 0) {
+      state = reduce(state, { type: 'pass' }).state;
+    }
+
+    const after = state.players[player]!.zones.mainDeck;
+    expect(after).toHaveLength(size);
+    expect(after[0]).not.toBe(top);
+    expect(after.at(-1)).toBe(top);
+    checkInvariants(state);
+  });
+
+  it('436.1: declining leaves the deck exactly as it was', () => {
+    let { state, player } = pendingVision('predict-decline');
+    const before = [...state.players[player]!.zones.mainDeck];
+
+    state = reduce(state, { type: 'resolveTrigger', perform: false }).state;
+    while (state.chain.length > 0) {
+      state = reduce(state, { type: 'pass' }).state;
+    }
+    expect(state.players[player]!.zones.mainDeck).toEqual(before);
+  });
+
+  it('436.4.a: an empty deck Predicts nothing and is not a Burn Out', () => {
+    let { state, player } = pendingVision('predict-empty');
+    // Empty the Main Deck without touching anything else.
+    state = {
+      ...state,
+      players: state.players.map((seat) =>
+        seat.id === player ? { ...seat, zones: { ...seat.zones, mainDeck: [] } } : seat,
+      ),
+    };
+    const points = state.players.map((seat) => seat.points);
+
+    state = reduce(state, { type: 'resolveTrigger', perform: true }).state;
+    while (state.chain.length > 0) {
+      state = reduce(state, { type: 'pass' }).state;
+    }
+    // A Burn Out would have handed an opponent a point (431.2.c).
+    expect(state.players.map((seat) => seat.points)).toEqual(points);
+  });
+});
+
+describe('scoring by effect (467-471)', () => {
+  it('471.1.a.1: gains the point with no Final Point restriction', () => {
+    // The restriction is Conquer's alone, so an effect can take a player to the
+    // Victory Score with no extra condition — unlike a Conquer, which would
+    // draw a card instead.
+    const player = 0 as PlayerId;
+    const events: GameEvent[] = [];
+    const state = createGame({
+      decks: [deck(), deck()],
+      registry: REGISTRY,
+      seed: 'score-effect',
+    }).state;
+    const before = state.players[player]!.points;
+
+    const after = executeEffect(
+      state,
+      { controller: player, source: 0 as EntityId, choices: {} },
+      { target: { kind: 'none' }, effects: [{ kind: 'score', amount: 2 }] },
+      events,
+      {
+        drawCards: (current) => current,
+        queueDeaths: (current) => current,
+        afterMove: (current) => current,
+        raise: (current) => current,
+      },
+    );
+
+    expect(after.players[player]!.points).toBe(before + 2);
+    expect(events.some((event) => event.type === 'pointsScored')).toBe(true);
   });
 });

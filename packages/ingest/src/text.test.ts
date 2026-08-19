@@ -376,10 +376,10 @@ describe('keywords (rules 800-828)', () => {
   });
 
   it('refuses a keyword the engine does not model, with a stated reason', () => {
-    for (const keyword of ['VISION', 'REPEAT 2']) {
-      expect(parseCardText(keyword).unparsed).toHaveLength(1);
-    }
-    expect(Object.keys(UNMODELLED_KEYWORDS)).toContain('vision');
+    // Repeat is the last one, and its reason is a measurement rather than a
+    // blocker: 820.1.d is a shape the model has, and it unlocks zero cards.
+    expect(parseCardText('REPEAT 2').unparsed).toHaveLength(1);
+    expect(Object.keys(UNMODELLED_KEYWORDS)).toContain('repeat');
   });
 
   it('805: Accelerate is no longer among them, because it now desugars', () => {
@@ -1368,5 +1368,32 @@ describe('activated ability costs', () => {
       effect: { target: { kind: 'none' }, effects: [{ kind: 'draw', count: 1 }] },
     });
     expect((activated('2: Draw 1.') as { cost: unknown }).cost).toEqual({ energy: 2, power: [] });
+  });
+});
+
+describe('scoring and Predict', () => {
+  it('467-471: reads "you score 1 point"', () => {
+    // 471.1.a.1 keeps it clear of the Final Point restriction, which belongs to
+    // Conquer alone, so this is a plain gain with no extra condition.
+    expect(parseCardText('When I hold, you score 1 point.').abilities?.triggered?.[0]).toEqual({
+      condition: { event: 'hold', subject: 'you', filter: { here: true } },
+      effect: { target: { kind: 'none' }, effects: [{ kind: 'score', amount: 1 }] },
+    });
+  });
+
+  it('817.1.b: Vision desugars into an optional Play Effect that Recycles', () => {
+    const parsed = parseCardText('VISION');
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.triggered?.[0]).toEqual({
+      condition: { event: 'played', subject: 'self' },
+      // 383.3.a's "you may" is 436.1's "or not Recycle it".
+      optional: true,
+      // 436.3.a: an omitted count is 1.
+      effect: { target: { kind: 'none' }, effects: [{ kind: 'recycleTop', count: 1 }] },
+    });
+  });
+
+  it('leaves Repeat as the only refused keyword', () => {
+    expect(Object.keys(UNMODELLED_KEYWORDS)).toEqual(['repeat']);
   });
 });

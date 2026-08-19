@@ -140,8 +140,8 @@ export const UNMODELLED_KEYWORDS: Readonly<Record<string, string>> = Object.free
   // that pays something, because the cost is read off a target chosen at
   // 402.2 rather than settled at step 3. 821.1.c.5 makes an unpayable one a
   // no-op, which is what makes that safe.
-  // 817.1.b: "When this is played, predict" — and Predict (436.1) is a look at
-  // the top card and a *choice*, made during resolution. That needs the same
-  // sub-action protocol as ordering simultaneous triggers.
-  vision: 'Vision (817) needs Predict (436), a choice made during resolution',
+  // Vision (817) is not here either. 817.1.b makes it "When this is played,
+  // predict", and 436.1 makes a Predict a *look* plus an optional Recycle —
+  // which is 383.3.a's "you may" and 402.1's decline, both of which exist. The
+  // look is a view rule (see `isPredicting`), not a sub-action protocol.
 });

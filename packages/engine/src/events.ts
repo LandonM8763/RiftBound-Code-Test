@@ -20,11 +20,17 @@ export type GameEvent =
   | {
       readonly type: 'pointsScored';
       readonly player: PlayerId;
-      readonly battlefield: number;
+      /**
+       * `null` when the points came from a card effect rather than from a
+       * Battlefield. 468.1 makes every Score a point gain, but 469 gives only
+       * two *methods* and both name a Battlefield — "you score 1 point" names
+       * none, so it is neither.
+       */
+      readonly battlefield: number | null;
       readonly amount: number;
       readonly total: number;
-      /** Which of the two Scoring methods this was (rule 469). */
-      readonly method: 'hold' | 'conquer';
+      /** Which of the two Scoring methods this was (rule 469), or neither. */
+      readonly method: 'hold' | 'conquer' | 'effect';
     }
   /** Rule 431: the player ran out of Main Deck and an opponent gained a point. */
   | {

@@ -640,6 +640,15 @@ const CLAUSES: readonly ClauseRule[] = [
     },
   },
   {
+    // 467-471: "you score 1 point". 471.1.a.1 keeps it clear of the Final
+    // Point restriction, which belongs to Conquer alone.
+    pattern: /^(?:you )?scores? (\d+) points?$/i,
+    build: (m) => {
+      const n = count(m[1] ?? '');
+      return n === undefined ? undefined : { effects: [{ kind: 'score', amount: n }], target: NO_TARGET };
+    },
+  },
+  {
     // Rule 429: an Add ability puts resources in the Rune Pool. Only the
     // unqualified forms — a restriction like "Use only to play spells" is a
     // separate sentence and fails the parse, which is what should happen.
@@ -1957,6 +1966,20 @@ export function parseCardText(text: string, card: CardFacts = {}): ParsedText {
           choosesSource: true,
         },
         change: { kind: 'increase', anyPower: count(deflect[1] ?? '1') ?? 1 },
+      });
+      continue;
+    }
+
+    // 817.1.b: Vision is "When this is played, predict", and 436.1 makes a
+    // Predict a look plus an optional Recycle. The "you may" is 383.3.a's, so
+    // the whole keyword is an optional Play Effect that Recycles from the top
+    // — the decline is the "or not Recycle it" half.
+    if (/^vision$/i.test(line)) {
+      triggered.push({
+        condition: { event: 'played', subject: 'self' },
+        optional: true,
+        // 436.3.a: an omitted count is 1.
+        effect: { target: NO_TARGET, effects: [{ kind: 'recycleTop', count: 1 }] },
       });
       continue;
     }

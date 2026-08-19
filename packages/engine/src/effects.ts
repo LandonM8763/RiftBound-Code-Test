@@ -366,6 +366,41 @@ function applyEffect(
       return withEntity(state, target, (current) => ({ ...current, exhausted: true }));
     }
 
+    // 436.1: the Recycle half of a Predict. 416.1 puts the cards on the bottom
+    // of their owner's Main Deck; 436.4.a is explicit that running short is not
+    // a Burn Out, which is why this takes what it can and stops.
+    case 'recycleTop': {
+      let next = state;
+      for (let i = 0; i < Math.max(0, effect.count); i += 1) {
+        const top = getPlayer(next, controller).zones.mainDeck[0];
+        if (top === undefined) {
+          break;
+        }
+        next = moveEntity(next, top, playerLocation(controller, 'mainDeck'), 'bottom');
+      }
+      return next;
+    }
+
+    // 467-471: gain points outright. 471.1.a.1 exempts this from the Final
+    // Point restriction, which is Conquer's alone, so there is no condition to
+    // check — the win is then decided at the next Cleanup by 323.1.
+    case 'score': {
+      const amount = Math.max(0, effect.amount);
+      if (amount === 0) {
+        return state;
+      }
+      const total = getPlayer(state, controller).points + amount;
+      events.push({
+        type: 'pointsScored',
+        player: controller,
+        battlefield: null,
+        amount,
+        total,
+        method: 'effect',
+      });
+      return withPlayer(state, controller, (current) => ({ ...current, points: total }));
+    }
+
     // 423: Stun the target. 423.1.a.1 makes stunning an already-Stunned Unit
     // legal but inert — and pointedly *not* an event, which is the rulebook's
     // own Eclipse Herald example, so the trigger is raised on the change.

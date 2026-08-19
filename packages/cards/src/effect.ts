@@ -158,6 +158,31 @@ export type Effect =
   | { readonly kind: 'spendBuff' }
   /** Rule 422: the controller discards from hand to trash. */
   | { readonly kind: 'discard'; readonly count: number }
+  /**
+   * Recycle the top `count` cards of the controller's own Main Deck (436.1).
+   *
+   * The performing half of Predict, and the only place a Recycle appears as a
+   * card *effect*: 416.6's "Recycle N from your trash" is a cost, and a plain
+   * targeted Recycle measured +0 and was removed. This one earns its place
+   * because Predict is not expressible without it.
+   *
+   * 436.4: Predicting more cards than the deck holds Predicts as many as
+   * possible, and 436.4.a is explicit that it is **not** a Burn Out — which is
+   * what distinguishes this from drawing.
+   */
+  | { readonly kind: 'recycleTop'; readonly count: number }
+  /**
+   * "You score 1 point" (467-471).
+   *
+   * 468.1 makes every Score an instance of gaining points, and 471.1.a.1 says
+   * points from sources that are not Conquer are **not** beholden to the Final
+   * Point restriction (471.1.b) — so this is a plain gain with no extra
+   * condition, unlike the Conquer path in the reducer.
+   *
+   * 470's once-per-Battlefield-per-turn cap does not apply either: that rule is
+   * about Scoring *a Battlefield*, and this names none.
+   */
+  | { readonly kind: 'score'; readonly amount: number }
   /** Rules 728-733: XP is a player resource with no cap (733). */
   | { readonly kind: 'gainXp'; readonly amount: number }
   | { readonly kind: 'spendXp'; readonly amount: number }

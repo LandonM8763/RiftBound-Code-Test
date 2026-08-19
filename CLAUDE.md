@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 152 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 157 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -946,6 +946,33 @@ measured +0 cards on its own and was kept anyway, because it deletes a special
 case rather than adding one. That is the distinction from the Recycle *effect*
 primitive, which measured +0 and was removed: it added surface area.
 
+### Predict, and the second window into hidden information
+
+Rule 436, with Vision (817) desugaring into it and the reveal in `view.ts`.
+
+**436.1 makes a Predict two things: a look and an optional Recycle.** The
+Recycle half is `recycleTop`, the one place a Recycle appears as a card
+*effect* — 416.6's "Recycle N from your trash" is a cost, and a plain targeted
+Recycle measured +0 and was removed. The optional half needed nothing new:
+383.3.a's "you may" and 402.1's decline already exist, so Vision is an
+`optional: true` Play Effect and declining *is* 436.1's "or not Recycle it".
+
+**The look is the part that had to be built, and it is a view rule.** The Main
+Deck is hidden from everyone including its owner (128), and 436.1 opens a
+one-card window into it. `PlayerView.predicting` is that window: the top card
+of a player's own deck, revealed to them alone, and only while they control a
+pending Chain item whose ability Recycles from the top. Anything broader would
+leak the deck; anything narrower would make the controller decide blind, which
+is a strictly weaker card than the one printed.
+
+436.4.a is worth stating because it inverts the usual rule: Predicting with too
+few cards Predicts as many as possible and is explicitly **not** a Burn Out. So
+`recycleTop` takes what it can and stops, where a draw would hand an opponent a
+point (431.2.c).
+
+This left **Repeat as the only keyword still refused**, and its reason has been
+a measurement rather than a blocker since the Accelerate round.
+
 ### Stun
 
 Rule 423, with `Entity.stunned` in `state.ts` and the effect in `effects.ts`.
@@ -1418,7 +1445,7 @@ edits by how far they move it, and swapping the objective swaps what the tool is
 for without touching the search.
 
 **The default is `CONSISTENCY`, and the reason is not taste.** A *simulated*
-objective is not trustworthy yet: 316 of the 468 cards with rules text still
+objective is not trustworthy yet: 311 of the 468 cards with rules text still
 play as vanilla, so a simulator cannot see what most cards do. Optimizing
 against it would cut the card whose text the engine ignores and keep the vanilla
 body with better stats — confidently wrong advice. Consistency depends on cost
@@ -1576,7 +1603,7 @@ deck builds and validates from it with no issues, and the engine plays complete
 games with it — 300 games, all decided, heuristic 58.7% ± 5.5 against random.
 
 101 of those cards carry an ability and 15 a keyword. The keyword figure is low
-against the 152 that parse because keywords ride the same all-or-nothing rule:
+against the 157 that parse because keywords ride the same all-or-nothing rule:
 a card whose other clause is unreadable keeps neither. 13 create Tokens, 12
 carry Effect Text a Gear lends its Top-Most Card, 6 carry Accelerate, 5 return a
 card to hand and 3 grant a keyword.
@@ -1645,14 +1672,14 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 152 of the 468 cards that have text**, and the shape of what is
+**Coverage is 157 of the 468 cards that have text**, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 152 |
-| Blocked | 316 |
+| Fully parsed | 157 |
+| Blocked | 311 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 3 or 4 times, everything else once or
@@ -1700,7 +1727,8 @@ and the one whose engine half (Attach) was already built — **Weaponmaster with
 `[A]` 124 → 130**, **Deflect 130 → 134**, and **play-location permissions with
 the reminder text the export flattens 134 → 140**, and **rule 429.5's
 multi-resource Add 140 → 141**, **Hidden with the Facedown Zone 141 → 145**, and
-**Stun (423) 145 → 148**, and **non-resource ability costs 148 → 152**.
+**Stun (423) 145 → 148**, **non-resource ability costs 148 → 152**, and
+**scoring by effect plus Vision and Predict 152 → 157**.
 
 #### How the ranking was measured wrong, and what fixed it
 
@@ -1734,7 +1762,7 @@ Re-measured by counterfactual from the **124** baseline, one mechanic at a time:
 | ~~Hidden (811) and the Hide action (421)~~ — now built | **+4 projected, +4 delivered** |
 | ~~Deflect (809)~~ — now built | **+3 projected, +4 delivered** |
 | Durations and delayed effects ("the next spell you play…") | +3 |
-| Vision (817) / Predict (436) | +2 |
+| ~~Vision (817) / Predict (436)~~ — now built | **+3 projected, +3 delivered** |
 | ~~Non-standard ability costs~~ — now built | **+4 projected, +4 delivered** |
 | Statics beyond scope-plus-grant | +2 |
 | Effect-outcome predicates ("if this kills it") | +2 |
@@ -1760,6 +1788,8 @@ What each round actually delivered, for calibrating the next projection:
 | Hidden (811) and the Hide action (421) | +4 projected, **+4** delivered |
 | Stun (423) | +3 projected, **+3** delivered |
 | Non-resource ability costs (356.7, 416.6) | +4 projected, **+4** delivered |
+| Scoring by effect (467-471) | +1 projected, **+2** delivered |
+| Vision (817) and Predict (436) | +3 projected, **+3** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic
