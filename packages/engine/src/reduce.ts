@@ -428,6 +428,9 @@ function playCard(
           pending: false,
           target: target ?? null,
           destination: destination ?? null,
+          // 808.1.d.3's note is for a source that leaves the Board before its
+          // ability resolves; a played card is on the Chain and has not.
+          noted: null,
           ability: null,
           // 356.2.b: a Spell resolves off the Chain later, so the declaration
           // has to travel with it — "if you paid the additional cost" is asked
@@ -557,6 +560,7 @@ function activateAbility(
         entity: source,
         controller: player,
         pending: false,
+        noted: null,
         target: target ?? null,
         destination: destination ?? null,
         ability: { kind: 'activated', index, ...(from === undefined ? {} : { from }) },
@@ -694,13 +698,15 @@ function raiseEvent(
       [instance.event]: (seat.turnEvents[instance.event] ?? 0) + 1,
     },
   }));
-  return queueTriggers(counted, triggersFor(counted, instance, options), events);
+  return queueTriggers(counted, triggersFor(counted, instance, options), events, instance);
 }
 
 function queueTriggers(
   state: GameState,
   pending: readonly PendingTrigger[],
   events: GameEvent[],
+  /** The event being queued, for 808.1.d.3's noted location. */
+  instance: TriggerEventInstance,
 ): GameState {
   if (pending.length === 0) {
     return state;
@@ -739,6 +745,9 @@ function queueTriggers(
           target: null,
           destination: null,
           ability: trigger.ability,
+          // 808.1.d.3: note where the source was, so a Deathknell reading "my
+          // battlefield" still has one once the Unit is in the trash.
+          noted: instance.battlefield ?? null,
         },
       ],
       passes: 0,
@@ -932,10 +941,19 @@ function queueDeaths(
   state: GameState,
   units: readonly EntityId[],
   events: GameEvent[],
+  /**
+   * 808.1.d.3's noted location, for the Passive Kill path.
+   *
+   * A Kill Instruction queues before the move (428.1.a.1.b), so the Unit's own
+   * location is still the Board and this is not needed. Death by lethal damage
+   * queues *after* it, where 359.3.e.12 leaves the corpse with no location at
+   * all — so the Battlefield has to be named by the caller that still knows it.
+   */
+  at?: number | undefined,
 ): GameState {
   let next = state;
   for (const unit of units) {
-    const location = next.entities[unit]?.location;
+    const location = at !== undefined ? battlefieldLocation(at) : next.entities[unit]?.location;
     next = raiseEvent(
       next,
       {
@@ -1051,6 +1069,9 @@ function pass(state: GameState): ReduceResult {
           // Game Object the ability is printed on.
           source: top.entity,
           choices: { target: top.target ?? undefined, destination: top.destination ?? undefined },
+          // 808.1.d.3: the Battlefield noted when this trigger was queued, so
+          // "at my battlefield" still names one after the source has died.
+          ...(top.noted === null ? {} : { noted: top.noted }),
         },
         ability.effect,
         events,
@@ -1604,7 +1625,7 @@ function resolveCombat(
     // 428.1.a.1.b puts the Deathknell on the Chain before the Unit leaves the
     // Board, but that rule is about Active Kills. Death by lethal damage is a
     // Passive Kill (428.1.a.2), which 383.2.c handles the ordinary way.
-    next = queueDeaths(next, killed, events);
+    next = queueDeaths(next, killed, events, index);
   }
 
   // 466.1.a.1: heal all Units.
@@ -1910,7 +1931,14 @@ function enterMain(state: GameState, events: GameEvent[]): ReduceResult {
 function emptyPools(state: GameState, events: GameEvent[]): GameState {
   let next = state;
   for (const player of state.players) {
-    if (player.pool.energy === 0 && Object.values(player.pool.power).every((n) => n === 0)) {
+    // 167 empties everything, so the "already empty" shortcut has to ask about
+    // everything too — an `[A]` left in the pool (135.2.e.5.b) is unspent Power
+    // and is lost with the rest.
+    if (
+      player.pool.energy === 0 &&
+      player.pool.anyPower === 0 &&
+      Object.values(player.pool.power).every((n) => n === 0)
+    ) {
       continue;
     }
     next = withPlayer(next, player.id, (current) => ({ ...current, pool: EMPTY_POOL }));

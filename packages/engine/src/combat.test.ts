@@ -31,6 +31,30 @@ const LEGEND = makeLegend(['fury', 'calm'], { id: cardId('C-000') });
 const CHAMPION = makeUnit(3, ['fury'], { id: cardId('C-001'), champion: true });
 const BIG = makeUnit(5, ['fury'], { id: cardId('C-010'), name: 'Big', cost: cost(1) });
 const SMALL = makeUnit(2, ['fury'], { id: cardId('C-011'), name: 'Small', cost: cost(1) });
+/**
+ * "DEATHKNELL - Deal 3 to all units at my battlefield" (808.1.d.3).
+ *
+ * Death by lethal damage is a *Passive* Kill (428.1.a.2), so the trigger is
+ * queued after the corpse has reached the trash — the path where the noted
+ * location has to come from the Combat rather than from the Unit.
+ */
+const CAUSTIC = makeUnit(2, ['fury'], {
+  id: cardId('C-016'),
+  name: 'Caustic',
+  cost: cost(1),
+  abilities: {
+    triggered: [
+      {
+        condition: { event: 'dies', subject: 'self' },
+        effect: {
+          target: { kind: 'all', scope: 'any', here: true },
+          effects: [{ kind: 'dealDamage', amount: 3 }],
+        },
+      },
+    ],
+  },
+});
+
 const FURY_RUNE = makeRune('fury', { id: cardId('C-100') });
 
 // Keyword carriers. Assault and Shield are the same base Might as SMALL so the
@@ -72,6 +96,7 @@ const REGISTRY = CardRegistry.from([
   SHIELDED,
   TANK,
   BACKLINE,
+  CAUSTIC,
   FURY_RUNE,
   ...BATTLEFIELDS,
 ] as CardDefinition[]);
@@ -87,6 +112,7 @@ function deck(): DeckList {
       ...Array.from({ length: 2 }, () => SHIELDED.id),
       ...Array.from({ length: 2 }, () => TANK.id),
       ...Array.from({ length: 2 }, () => BACKLINE.id),
+      ...Array.from({ length: 2 }, () => CAUSTIC.id),
     ],
     runes: Array.from({ length: 8 }, () => FURY_RUNE.id),
     battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
@@ -302,6 +328,21 @@ describe('fighting a Combat end to end', () => {
     expect(state.battlefields[0]?.units).toEqual([setup.mover]);
     expect(state.entities[setup.mover]!.damage).toBe(0);
     expect(state.battlefields[0]?.controller).toBe(playerId(setup.attacker));
+    checkInvariants(state);
+  });
+
+  it('808.1.d.3: a Deathknell on a Unit killed in Combat still knows where it was', () => {
+    // A Passive Kill (428.1.a.2) queues the trigger *after* the corpse has
+    // reached the trash, so the Battlefield has to be noted by the Combat.
+    // 5 Might attacker beats the 2 Might Caustic, which then deals 3 back.
+    const setup = poised(BIG, CAUSTIC);
+    let state = fight(setup);
+
+    for (let i = 0; i < 6 && state.chain.length > 0; i += 1) {
+      state = reduce(state, { type: 'pass' }).state;
+    }
+
+    expect(state.entities[setup.mover]!.damage).toBe(3);
     checkInvariants(state);
   });
 
@@ -554,6 +595,24 @@ describe('static abilities (rules 363-365)', () => {
     },
   });
 
+  /** "Your Mechs have +1 Might" — a scope narrowed to a tag (133.8). */
+  const FOREMAN = makeUnit(2, ['fury'], {
+    id: cardId('C-023'),
+    name: 'Foreman',
+    cost: cost(1),
+    tags: ['Mech'],
+    abilities: {
+      statics: [{ affects: { who: 'friendly', tag: 'mech' }, grant: { might: 1 } }],
+    },
+  });
+
+  const MECH = makeUnit(2, ['fury'], {
+    id: cardId('C-024'),
+    name: 'Mecha',
+    cost: cost(1),
+    tags: ['Mech'],
+  });
+
   const STATIC_REGISTRY = CardRegistry.from([
     LEGEND,
     CHAMPION,
@@ -566,6 +625,8 @@ describe('static abilities (rules 363-365)', () => {
     BANNER,
     WARDEN,
     BERSERKER,
+    FOREMAN,
+    MECH,
     FURY_RUNE,
     ...BATTLEFIELDS,
   ] as CardDefinition[]);
@@ -580,6 +641,8 @@ describe('static abilities (rules 363-365)', () => {
         ...Array.from({ length: 3 }, () => BANNER.id),
         ...Array.from({ length: 3 }, () => WARDEN.id),
         ...Array.from({ length: 3 }, () => BERSERKER.id),
+        ...Array.from({ length: 3 }, () => FOREMAN.id),
+        ...Array.from({ length: 3 }, () => MECH.id),
       ],
       runes: Array.from({ length: 8 }, () => FURY_RUNE.id),
       battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
@@ -602,6 +665,21 @@ describe('static abilities (rules 363-365)', () => {
 
     expect(mightOf(state, ally)).toBe(4); // 2 printed + 2 from the Banner
     expect(mightOf(state, banner)).toBe(1); // "Other": never itself
+  });
+
+  it('133.8: narrows a scope to a tag, matching case-insensitively', () => {
+    let state = staticGame('tagged');
+    const [a, foreman] = place(state, 0, FOREMAN, 0);
+    state = a;
+    const [b, mech] = place(state, 0, MECH, 0);
+    state = b;
+    const [c, untagged] = place(state, 0, SMALL, 0);
+    state = c;
+
+    expect(mightOf(state, mech)).toBe(3); // 2 printed + 1
+    // "Your Mechs" includes the source, unlike "other friendly units".
+    expect(mightOf(state, foreman)).toBe(3);
+    expect(mightOf(state, untagged)).toBe(2);
   });
 
   it('stops the moment the source leaves the Board (365)', () => {

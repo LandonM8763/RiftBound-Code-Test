@@ -72,10 +72,12 @@ export function sendToNonBoardZone(
  * 182 and 183 make the creating effect's controller both the controller and the
  * owner of what it creates, which is why only one player id is taken.
  *
- * 184.1 lets the effect say a token enters ready; without that it enters
- * exhausted, the same as any Unit reaching the Board (359.2.c). The default is
- * therefore exhausted rather than ready — an inverted default here would hand
- * every token an extra Standard Move on the turn it arrives.
+ * 184.1 lets the effect override the entry state "if that state is contrary to
+ * the default for the token's type", so `ready` is a tri-state: `undefined`
+ * takes the type's default and either boolean overrides it. 185.2.d supplies
+ * that default — a Unit enters exhausted (359.2.c), a Gear enters ready
+ * (359.2.d) — which is why "play a Gold gear token **exhausted**" is an
+ * override rather than a restatement.
  */
 export function createTokens(
   state: GameState,
@@ -83,15 +85,19 @@ export function createTokens(
   key: string,
   count: number,
   where: Location,
-  ready: boolean,
+  /** 184.1's override, or `undefined` for 185.2.d's default for the type. */
+  ready: boolean | undefined,
   events: GameEvent[],
 ): { readonly state: GameState; readonly created: readonly EntityId[] } {
   const card = tokenCardId(key);
-  if (TOKEN_DEFINITIONS[card] === undefined) {
+  const definition = TOKEN_DEFINITIONS[card];
+  if (definition === undefined) {
     // Rule 187 defines the tokens that exist; ingest refuses any other name, so
     // reaching here means a card definition was built by hand and is wrong.
     throw new Error(`Unknown token: ${key}`);
   }
+
+  const entersReady = ready ?? definition.type === 'gear';
 
   let next = state;
   const created: EntityId[] = [];
@@ -111,7 +117,7 @@ export function createTokens(
           // Placed at the Base first and moved, so that the zone list and
           // `entity.location` are only ever written by `moveEntity`.
           location: playerLocation(controller, 'base'),
-          exhausted: !ready,
+          exhausted: !entersReady,
           damage: 0,
           mightBonus: 0,
           grantedKeywords: [],

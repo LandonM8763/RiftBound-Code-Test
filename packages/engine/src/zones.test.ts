@@ -105,7 +105,7 @@ function inMainPhase(seed = 'zones', energy = 6): GameState {
   }
   return withPlayer(state, state.activePlayer, (seat) => ({
     ...seat,
-    pool: { energy, power: seat.pool.power },
+    pool: { ...seat.pool, energy },
   }));
 }
 

@@ -24,6 +24,7 @@ import { describe, expect, it } from 'vitest';
 import { mightOf } from './combat.js';
 import { checkInvariants } from './invariants.js';
 import { legalActions } from './legal.js';
+import { canPay } from './play.js';
 import { moveEntity, withPlayer } from './mutate.js';
 import { reduce } from './reduce.js';
 import { createGame, type DeckList } from './setup.js';
@@ -63,6 +64,28 @@ const MUSTER = makeUnit(2, ['fury'], {
   },
 });
 
+/** "When you play me, play a Gold gear token exhausted" — 187.5 with 184.1. */
+const PROSPECTOR = makeUnit(2, ['fury'], {
+  id: cardId('T-014'),
+  name: 'Prospector',
+  cost: cost(1),
+  effect: {
+    target: { kind: 'none' },
+    effects: [{ kind: 'createToken', token: 'gold', count: 1, where: 'base', ready: false }],
+  },
+});
+
+/** The same without the override, so 359.2.d's ready default applies. */
+const MINTER = makeUnit(2, ['fury'], {
+  id: cardId('T-015'),
+  name: 'Minter',
+  cost: cost(1),
+  effect: {
+    target: { kind: 'none' },
+    effects: [{ kind: 'createToken', token: 'gold', count: 1, where: 'base' }],
+  },
+});
+
 /** 187.2: a Sprite carries Temporary, so it kills itself in the Beginning Phase. */
 const SUMMONER = makeUnit(2, ['fury'], {
   id: cardId('T-013'),
@@ -85,6 +108,8 @@ const REGISTRY = CardRegistry.from([
   PLAIN,
   DRUMMER,
   MUSTER,
+  PROSPECTOR,
+  MINTER,
   SUMMONER,
   RUNE,
   ...BATTLEFIELDS,
@@ -99,6 +124,8 @@ function deck(): DeckList {
       ...Array.from({ length: 4 }, () => DRUMMER.id),
       ...Array.from({ length: 4 }, () => MUSTER.id),
       ...Array.from({ length: 4 }, () => SUMMONER.id),
+      ...Array.from({ length: 4 }, () => PROSPECTOR.id),
+      ...Array.from({ length: 4 }, () => MINTER.id),
     ],
     runes: Array.from({ length: 8 }, () => RUNE.id),
     battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
@@ -115,7 +142,7 @@ function inMainPhase(seed = 'token', energy = 6): GameState {
   }
   return withPlayer(state, state.activePlayer, (seat) => ({
     ...seat,
-    pool: { energy, power: seat.pool.power },
+    pool: { ...seat.pool, energy },
   }));
 }
 
@@ -145,6 +172,12 @@ describe('rule 187: the tokens that exist', () => {
     expect(STANDARD_TOKENS['mech']).toMatchObject({ might: 3, tags: ['Mech'] });
     expect(STANDARD_TOKENS['reflection']).toMatchObject({ might: 0, tags: [] });
     expect(STANDARD_TOKENS['tentacle']).toMatchObject({ might: 1, tags: ['Bilgewater'] });
+    // 187.5: a *gear* token, so it has no Might at all.
+    expect(STANDARD_TOKENS['gold']).toMatchObject({ type: 'gear', tags: [] });
+    expect(STANDARD_TOKENS['gold']?.might).toBeUndefined();
+    // 187.7: Deflect is 809.1.c's cost increase rather than a `Keyword`.
+    expect(STANDARD_TOKENS['bird']).toMatchObject({ might: 1, tags: ['Bird'] });
+    expect(STANDARD_TOKENS['bird']?.abilities?.costModifiers).toHaveLength(1);
   });
 
   it('185.3: leaves every token domainless', () => {
@@ -246,6 +279,55 @@ describe('rules 180-184: creating tokens', () => {
     expect(() =>
       createTokens(state, state.activePlayer, 'dragon', 1, playerLocation(state.activePlayer, 'base'), false, []),
     ).toThrow(/Unknown token/);
+  });
+});
+
+describe('the Gold token (187.5)', () => {
+  it('359.2.d: enters ready, because a Gear does', () => {
+    const [state, card] = inHand(inMainPhase('gold-ready'), MINTER.id);
+    const player = state.activePlayer;
+    const played = reduce(state, { type: 'playCard', card }).state;
+
+    const gold = played.players[player]!.zones.base.find(
+      (id) => played.entities[id]!.card === tokenCardId('gold'),
+    );
+    expect(gold).toBeDefined();
+    expect(played.entities[gold!]!.exhausted).toBe(false);
+  });
+
+  it('184.1: "exhausted" overrides that default, which is why cards print it', () => {
+    const [state, card] = inHand(inMainPhase('gold-exhausted'), PROSPECTOR.id);
+    const player = state.activePlayer;
+    const played = reduce(state, { type: 'playCard', card }).state;
+
+    const gold = played.players[player]!.zones.base.find(
+      (id) => played.entities[id]!.card === tokenCardId('gold'),
+    );
+    expect(played.entities[gold!]!.exhausted).toBe(true);
+  });
+
+  it('adds [A] and kills itself, and the [A] pays a Power cost of any Domain', () => {
+    const [state, card] = inHand(inMainPhase('gold-spend'), MINTER.id);
+    const player = state.activePlayer;
+    let next = reduce(state, { type: 'playCard', card }).state;
+    const gold = next.players[player]!.zones.base.find(
+      (id) => next.entities[id]!.card === tokenCardId('gold'),
+    )!;
+
+    next = reduce(next, { type: 'activateAbility', source: gold, index: 0 }).state;
+    while (next.chain.length > 0) {
+      next = reduce(next, { type: 'pass' }).state;
+    }
+
+    expect(next.players[player]!.pool.anyPower).toBe(1);
+    // 186.1: a Token reaching a Non-Board Zone stops existing, so the "Kill
+    // this" cost banishes it rather than filling the trash.
+    expect(next.players[player]!.zones.base).not.toContain(gold);
+    // 135.2.e.5.b: spendable as a Power cost of any Domain.
+    expect(canPay(next.players[player]!.pool, { energy: 0, power: ['calm'], anyPower: 0 })).toBe(
+      true,
+    );
+    checkInvariants(next);
   });
 });
 

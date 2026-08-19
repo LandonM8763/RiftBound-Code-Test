@@ -5,6 +5,7 @@
  * a new primitive means a case here and a variant there — not a new code path
  * per card, which is the whole point of the data-driven design.
  */
+import { tokenCardId } from '@riftbound/cards';
 import type { CardEffect, DestinationSpec, Effect, TargetSpec } from '@riftbound/cards';
 
 import type { TriggerEventInstance } from './abilities.js';
@@ -16,9 +17,11 @@ import { countOf } from './count.js';
 import type { GameEvent } from './events.js';
 import { moveEntity, withEntity, withPlayer } from './mutate.js';
 import { canPay, payFrom } from './play.js';
+import { entersReady } from './statics.js';
 import { createTokens, sendToNonBoardZone } from './token.js';
 import type { EntityId, GameState, Location, PlayerId } from './state.js';
 import {
+  addAnyPowerTo,
   addEnergyTo,
   addPowerTo,
   battlefieldLocation,
@@ -57,6 +60,17 @@ export interface EffectInvocation {
    * condition about a choice, and the choice is not readable off the board.
    */
   readonly paidAdditionalCost?: boolean | undefined;
+  /**
+   * 808.1.d.3: the Battlefield noted when this ability's source left the Board.
+   *
+   * "Deal 4 to all units at my battlefield" printed as a Deathknell resolves
+   * after the Unit has reached the trash, where 359.3.e.12 gives it no
+   * location at all. 808.1.d.3 is the rule that saves it: "before the card is
+   * moved to the Trash, note its location … to process the trigger after it
+   * has been Finalized". So the note rides on the invocation, and is consulted
+   * only when the source is no longer at a Battlefield.
+   */
+  readonly noted?: number | undefined;
 }
 
 /**
@@ -138,8 +152,10 @@ export function legalTargets(
     return found;
   }
 
-  // Neither makes the player choose: `none` affects nobody in particular and
-  // `self` is already determined by which card the text is printed on.
+  // None of these make the player choose: `none` affects nobody in particular,
+  // `self` is already determined by which card the text is printed on, and
+  // 355.5.a says affecting objects "based on criteria" is not choosing — so an
+  // `all` spec is resolved at execution rather than enumerated here.
   if (spec.kind !== 'unit') {
     return [];
   }
@@ -156,9 +172,10 @@ export function legalTargets(
     }
   }
 
+  const wanted = spec.cardType ?? 'unit';
   return candidates
     .filter(({ unit, atBattlefield }) => {
-      if (entityCard(state, unit).type !== 'unit') {
+      if (entityCard(state, unit).type !== wanted) {
         return false;
       }
       if (spec.atBattlefield === true && !atBattlefield) {
@@ -174,6 +191,105 @@ export function legalTargets(
       return true;
     })
     .map(({ unit }) => unit);
+}
+
+/**
+ * Every Game Object an `all` spec covers, at the moment the effect runs.
+ *
+ * Resolved here rather than at play time because 355.5.a makes this not a
+ * choice: the set is whatever matches when the effect executes, so a Unit that
+ * arrived since the card was played is included and one that died is not.
+ */
+export function allTargets(
+  state: GameState,
+  controller: PlayerId,
+  spec: Extract<TargetSpec, { kind: 'all' }>,
+  source?: EntityId | undefined,
+  /** 808.1.d.3's noted Battlefield, used when the source has left the Board. */
+  noted?: number | undefined,
+): EntityId[] {
+  const wanted = spec.cardType ?? 'unit';
+  const found: EntityId[] = [];
+
+  // 355.9's "here": the source's own Battlefield. A source at a Base names
+  // none, so the set is empty rather than the whole Board — the same reading
+  // `StaticScope.here` takes.
+  let here: number | undefined;
+  if (spec.here === true) {
+    const location = source === undefined ? undefined : getEntity(state, source).location;
+    here = location?.kind === 'battlefield' ? location.index : noted;
+    if (here === undefined) {
+      return [];
+    }
+  }
+
+  const consider = (id: EntityId, atBattlefield: boolean): void => {
+    if (entityCard(state, id).type !== wanted) {
+      return;
+    }
+    if (spec.atBattlefield === true && !atBattlefield) {
+      return;
+    }
+    const owner = getEntity(state, id).controller;
+    if (spec.scope === 'friendly' && owner !== controller) {
+      return;
+    }
+    if (spec.scope === 'enemy' && owner === controller) {
+      return;
+    }
+    found.push(id);
+  };
+
+  state.battlefields.forEach((battlefield, index) => {
+    // "all enemy units in combat" — 464 runs a Combat at one Battlefield, so
+    // the set is who is present there.
+    if (spec.inCombat === true && state.showdown?.battlefield !== index) {
+      return;
+    }
+    if (here !== undefined && here !== index) {
+      return;
+    }
+    for (const unit of battlefield.units) {
+      consider(unit, true);
+    }
+  });
+  if (spec.inCombat !== true && here === undefined) {
+    for (const player of state.players) {
+      for (const id of player.zones.base) {
+        consider(id, false);
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * Does this effect act on the chosen object, rather than on the controller?
+ *
+ * Only these are repeated when a spec covers many objects; "deal 2 to all
+ * enemy units and draw 1" deals damage N times and draws once.
+ */
+function consumesTarget(kind: Effect['kind']): boolean {
+  switch (kind) {
+    case 'dealDamage':
+    case 'heal':
+    case 'giveMight':
+    case 'kill':
+    case 'recall':
+    case 'ready':
+    case 'exhaust':
+    case 'stun':
+    case 'buff':
+    case 'spendBuff':
+    case 'move':
+    case 'toHand':
+    case 'grantKeyword':
+    case 'attach':
+    case 'equip':
+      return true;
+    default:
+      return false;
+  }
 }
 
 /** Everything `player` controls that is on the Board (rule 380). */
@@ -238,7 +354,41 @@ export function executeEffect(
 
   let next = state;
   for (const step of effect.effects) {
-    next = applyEffect(next, invocation.controller, invocation.source, step, choices, events, context);
+    // 355.5.a: an `all` spec affects every matching object rather than one
+    // chosen one, so a target-consuming effect runs once per object while the
+    // rest — a draw, a Score — still run once.
+    if (effect.target.kind === 'all' && consumesTarget(step.kind)) {
+      const every = allTargets(
+        next,
+        invocation.controller,
+        effect.target,
+        invocation.source,
+        invocation.noted,
+      );
+      for (const one of every) {
+        next = applyEffect(
+          next,
+          invocation.controller,
+          invocation.source,
+          step,
+          { ...choices, target: one },
+          events,
+          context,
+          invocation.noted,
+        );
+      }
+      continue;
+    }
+    next = applyEffect(
+      next,
+      invocation.controller,
+      invocation.source,
+      step,
+      choices,
+      events,
+      context,
+      invocation.noted,
+    );
   }
   return next;
 }
@@ -251,6 +401,8 @@ function applyEffect(
   choices: EffectChoices,
   events: GameEvent[],
   context: EffectContext,
+  /** 808.1.d.3's noted Battlefield, for a "here" whose source has left the Board. */
+  noted?: number | undefined,
 ): GameState {
   const target = choices.target;
   switch (effect.kind) {
@@ -322,6 +474,20 @@ function applyEffect(
       return withPlayer(state, controller, (current) => ({
         ...current,
         pool: addPowerTo(current.pool, effect.domain, effect.count),
+      }));
+
+    case 'addAnyPower':
+      events.push({
+        type: 'resourcesAdded',
+        player: controller,
+        rune: null,
+        energy: 0,
+        power: null,
+        anyPower: effect.count,
+      });
+      return withPlayer(state, controller, (current) => ({
+        ...current,
+        pool: addAnyPowerTo(current.pool, effect.count),
       }));
 
     // 428: a Kill Instruction. The Unit's own Deathknell goes on the Chain
@@ -632,7 +798,11 @@ function applyEffect(
       const where =
         effect.where === 'base'
           ? playerLocation(controller, 'base')
-          : getEntity(state, source).location;
+          : // 808.1.d.3: a Deathknell's "here" is the Battlefield noted before
+            // the Unit left the Board, since 359.3.e.12 leaves the corpse none.
+            noted !== undefined && getEntity(state, source).location.kind !== 'battlefield'
+            ? battlefieldLocation(noted)
+            : getEntity(state, source).location;
       // 186: a Token can only exist on the Board. A source that has already
       // left it — a resolving Spell sitting on the Chain — has no "here" to
       // speak of, so the Base is the only Board location its controller has.
@@ -640,15 +810,17 @@ function applyEffect(
         where.kind === 'battlefield' || (where.kind === 'player' && where.zone === 'base')
           ? where
           : playerLocation(controller, 'base');
-      return createTokens(
-        state,
-        controller,
-        effect.token,
-        effect.count,
-        location,
-        effect.ready === true,
-        events,
-      ).state;
+      // 184.1's explicit "ready"/"exhausted" is about *this* token, so it wins
+      // over a static that only replaces the type's default — "Your tokens
+      // enter ready" supplies the default when the creating effect says
+      // nothing. The rulebook settles neither order; this is the reading that
+      // keeps a card's own instruction meaning what it says.
+      const definition = state.definitions[tokenCardId(effect.token)];
+      const ready =
+        effect.ready ??
+        (definition !== undefined && entersReady(state, controller, definition) ? true : undefined);
+      return createTokens(state, controller, effect.token, effect.count, location, ready, events)
+        .state;
     }
 
     default: {

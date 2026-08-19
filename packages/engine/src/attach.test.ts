@@ -568,6 +568,7 @@ describe('[A], Power of any Domain (135.2.e.5)', () => {
   const POOL = {
     energy: 2,
     power: { fury: 1, calm: 1, mind: 0, body: 0, chaos: 0, order: 0 },
+    anyPower: 0,
   };
 
   it('135.2.e.5.a: is paid by Power of any Domain', () => {
@@ -589,6 +590,21 @@ describe('[A], Power of any Domain (135.2.e.5)', () => {
 
   it('counts toward the Rune cost of a card (137, 414, 416)', () => {
     expect(totalRuneCost({ energy: 1, power: ['fury'], anyPower: 2 })).toBe(4);
+  });
+
+  it('135.2.e.5.b: an [A] in the pool covers a Domain the player is short of', () => {
+    const wild = { ...POOL, power: { ...POOL.power, calm: 0 }, anyPower: 1 };
+    expect(canPay(wild, { energy: 0, power: ['calm'], anyPower: 0 })).toBe(true);
+    expect(canPay(wild, { energy: 0, power: ['calm', 'mind'], anyPower: 0 })).toBe(false);
+  });
+
+  it('spends the wildcard last, keeping the more flexible pip', () => {
+    const wild = { ...POOL, anyPower: 1 };
+    // Two [A] owed against one Fury, one Calm and one wildcard: the real pips
+    // go first because a wildcard can pay anything and they cannot.
+    const after = payFrom(wild, { energy: 0, power: [], anyPower: 2 });
+    expect(after.power.fury + after.power.calm).toBe(0);
+    expect(after.anyPower).toBe(1);
   });
 });
 

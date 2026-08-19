@@ -192,6 +192,7 @@ export function determinize(view: GameView, knowledge: Knowledge, seed: number |
     place(item.entity, playerLocation(owner, 'chain'), owner);
     (players[owner]!.zones.chain as EntityId[]).push(item.entity.id);
     return {
+      noted: item.noted,
       entity: item.entity.id,
       controller: item.controller,
       pending: item.pending,

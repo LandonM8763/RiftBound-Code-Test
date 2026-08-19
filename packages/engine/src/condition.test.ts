@@ -270,7 +270,7 @@ describe('didThisTurn', () => {
     if (card !== undefined) {
       state = withPlayer(state, player, (seat) => ({
         ...seat,
-        pool: { energy: 5, power: seat.pool.power },
+        pool: { ...seat.pool, energy: 5 },
       }));
       state = reduce(state, { type: 'playCard', card }).state;
       while (state.chain.length > 0) {

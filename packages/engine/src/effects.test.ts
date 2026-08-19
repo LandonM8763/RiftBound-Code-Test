@@ -95,6 +95,42 @@ const BATTERY = makeGear(['fury'], {
   effect: { target: { kind: 'none' }, effects: [{ kind: 'addEnergy', count: 2 }] },
 });
 
+/** "Deal 2 to all enemy units." — 355.5.a, an effect with no chosen target. */
+const BARRAGE = makeSpell(['fury'], {
+  id: cardId('E-032'),
+  name: 'Barrage',
+  cost: cost(1),
+  timing: 'action',
+  effect: {
+    target: { kind: 'all', scope: 'enemy' },
+    effects: [{ kind: 'dealDamage', amount: 2 }],
+  },
+});
+
+/** "Deal 2 to all units at battlefields." */
+const RAIN = makeSpell(['fury'], {
+  id: cardId('E-033'),
+  name: 'Rain',
+  cost: cost(1),
+  timing: 'action',
+  effect: {
+    target: { kind: 'all', scope: 'any', atBattlefield: true },
+    effects: [{ kind: 'dealDamage', amount: 2 }],
+  },
+});
+
+/** "Kill a gear." — 428 kills any Permanent, so only the sweep narrows. */
+const DISARM = makeSpell(['fury'], {
+  id: cardId('E-034'),
+  name: 'Disarm',
+  cost: cost(1),
+  timing: 'action',
+  effect: {
+    target: { kind: 'unit', scope: 'any', cardType: 'gear' },
+    effects: [{ kind: 'kill' }],
+  },
+});
+
 const FURY_RUNE = makeRune('fury', { id: cardId('E-100') });
 const BATTLEFIELDS = Array.from({ length: 3 }, (_, i) =>
   makeBattlefield({ id: cardId(`E-20${i}`) }),
@@ -110,6 +146,9 @@ const REGISTRY = CardRegistry.from([
   SNIPE,
   SCOUT,
   BATTERY,
+  BARRAGE,
+  RAIN,
+  DISARM,
   FURY_RUNE,
   ...BATTLEFIELDS,
 ] as CardDefinition[]);
@@ -127,6 +166,9 @@ function deck(): DeckList {
       SNIPE.id,
       SCOUT.id,
       BATTERY.id,
+      BARRAGE.id,
+      RAIN.id,
+      DISARM.id,
     ],
     runes: Array.from({ length: 8 }, () => FURY_RUNE.id),
     battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
@@ -285,6 +327,92 @@ describe('targeting (rule 355.9)', () => {
     );
 
     expect(plays).toHaveLength(2);
+  });
+});
+
+describe('effects that affect everything (rule 355.5.a)', () => {
+  it('chooses nothing, so it is playable with no target', () => {
+    let state = withEnergy(inMainPhase(), 1);
+    const [a, barrage] = toHand(state, BARRAGE);
+    state = a;
+
+    // 355.5.a: reaching objects "based on criteria" is not choosing, so
+    // `legalActions` offers exactly one play rather than one per Unit.
+    const [b] = onBoard(state, state.activePlayer, PLAIN, 'base');
+    state = b;
+    const plays = currentLegalActions(state).filter(
+      (action) => action.type === 'playCard' && action.card === barrage,
+    );
+
+    expect(plays).toHaveLength(1);
+    expect(plays[0]).not.toHaveProperty('target');
+  });
+
+  it('damages every enemy Unit and no friendly one', () => {
+    let state = withEnergy(inMainPhase(), 1);
+    const me = state.activePlayer;
+    const them = playerId((me + 1) % state.players.length);
+    const [a, barrage] = toHand(state, BARRAGE);
+    state = a;
+    const [b, mine] = onBoard(state, me, PLAIN, 'base');
+    state = b;
+    const [c, theirs] = onBoard(state, them, PLAIN, 'base');
+    state = c;
+    const [d, alsoTheirs] = onBoard(state, them, PLAIN, 0);
+    state = d;
+
+    const after = castSpell(state, barrage);
+
+    expect(after.entities[theirs]!.damage).toBe(2);
+    expect(after.entities[alsoTheirs]!.damage).toBe(2);
+    expect(after.entities[mine]!.damage).toBe(0);
+    checkInvariants(after);
+  });
+
+  it('narrows to Battlefields, leaving Bases alone', () => {
+    let state = withEnergy(inMainPhase(), 1);
+    const me = state.activePlayer;
+    const [a, rain] = toHand(state, RAIN);
+    state = a;
+    const [b, atBase] = onBoard(state, me, PLAIN, 'base');
+    state = b;
+    const [c, atField] = onBoard(state, me, PLAIN, 0);
+    state = c;
+
+    const after = castSpell(state, rain);
+
+    expect(after.entities[atField]!.damage).toBe(2);
+    expect(after.entities[atBase]!.damage).toBe(0);
+  });
+});
+
+describe('Gear as a target (428)', () => {
+  it('offers a Gear and never a Unit', () => {
+    let state = withEnergy(inMainPhase(), 2);
+    const me = state.activePlayer;
+    const [a, unit] = onBoard(state, me, PLAIN, 'base');
+    state = a;
+    const [b, gear] = onBoard(state, me, BATTERY, 'base');
+    state = b;
+
+    const targets = legalTargets(state, me, { kind: 'unit', scope: 'any', cardType: 'gear' });
+
+    expect(targets).toEqual([gear]);
+    expect(targets).not.toContain(unit);
+  });
+
+  it('kills the chosen Gear', () => {
+    let state = withEnergy(inMainPhase(), 1);
+    const me = state.activePlayer;
+    const [a, disarm] = toHand(state, DISARM);
+    state = a;
+    const [b, gear] = onBoard(state, me, BATTERY, 'base');
+    state = b;
+
+    const after = castSpell(state, disarm, gear);
+
+    expect(after.players[me]!.zones.trash).toContain(gear);
+    checkInvariants(after);
   });
 });
 

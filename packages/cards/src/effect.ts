@@ -45,6 +45,44 @@ export type TargetSpec =
       readonly kind: 'unit';
       readonly scope: 'any' | 'friendly' | 'enemy';
       readonly atBattlefield?: boolean | undefined;
+      /**
+       * "Kill a gear", "return a gear to its owner's hand".
+       *
+       * Defaults to `unit`. A Gear is a Permanent like a Unit (428 kills either
+       * one), so the same spec covers both and only the sweep differs; what a
+       * Gear cannot be is *damaged*, and a card that says "deal 3 to a gear"
+       * does not exist to be read wrong.
+       */
+      readonly cardType?: 'unit' | 'gear' | undefined;
+    }
+  /**
+   * **Every** Game Object matching the criteria — "deal 2 to all enemy units",
+   * "kill all gear".
+   *
+   * Rule 355.5.a is why this is a separate variant rather than a flag on
+   * `unit`: choosing is what makes something a Target, and "cards that affect
+   * one or more Game Objects based on criteria" are explicitly *not* choosing.
+   * So this needs no choice at play time, is enumerated at resolution instead,
+   * and 358.1's re-check does not apply to it.
+   *
+   * `inCombat` is the "all enemy units in combat" wording: the Units present at
+   * the Battlefield where a Combat is running (464).
+   */
+  | {
+      readonly kind: 'all';
+      readonly scope: 'any' | 'friendly' | 'enemy';
+      readonly cardType?: 'unit' | 'gear' | undefined;
+      readonly atBattlefield?: boolean | undefined;
+      readonly inCombat?: boolean | undefined;
+      /**
+       * "all units at **my** battlefield" — 355.9's "here", the same
+       * source-relative scope `StaticScope.here` uses.
+       *
+       * A source at a Base names no Battlefield, so the set is empty rather
+       * than the whole Board. Distinct from `atBattlefield`, which is "at *a*
+       * battlefield" and covers all of them.
+       */
+      readonly here?: boolean | undefined;
     }
   /**
    * A card in the controller's own trash — "return a unit from your trash to
@@ -116,6 +154,16 @@ export type Effect =
   /** Rule 429: Add resources to the controller's Rune Pool. */
   | { readonly kind: 'addEnergy'; readonly count: number }
   | { readonly kind: 'addPower'; readonly domain: Domain; readonly count: number }
+  /**
+   * "Add [A]" — Power of any Domain (135.2.e.5).
+   *
+   * Separate from `addPower` rather than a seventh Domain, because 135.2.e.5.b
+   * makes it a wildcard *in the pool*: it "can be spent to pay a Power cost of
+   * any Domain", so the Domain is settled when it is spent rather than when it
+   * arrives. Adding it as some chosen Domain would strand it the moment a later
+   * cost wanted a different one.
+   */
+  | { readonly kind: 'addAnyPower'; readonly count: number }
   /**
    * Rule 428: send the target Permanent from the Board to the trash.
    *
@@ -215,8 +263,13 @@ export type Effect =
    * is deliberately not a `DestinationSpec`: that is a choice the player makes
    * for a `move`, whereas this one is fixed by the card doing the creating.
    *
-   * 184.1 lets the creating effect override the default entry state, which is
-   * what `ready` carries; without it a Unit enters exhausted (359.2.c).
+   * 184.1 lets the creating effect override the default entry state "if that
+   * state is contrary to the default for the token's type", which is exactly
+   * what `ready` carries — and why it is a tri-state rather than a boolean.
+   * Absent, 185.2.d gives the token its type's default: a Unit enters exhausted
+   * (359.2.c) and a Gear enters ready (359.2.d). That is why the corpus prints
+   * "play a Gold gear token **exhausted**": for a Gear, exhausted is the
+   * override.
    */
   | {
       readonly kind: 'createToken';

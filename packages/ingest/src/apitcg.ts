@@ -157,6 +157,27 @@ function domainsOf(raw: string): Domain[] | undefined {
   return domains;
 }
 
+/**
+ * Does this card's parsed model narrow anything to a tag (133.8)?
+ *
+ * A structural walk rather than a list of the places a tag may appear:
+ * `StaticScope`, `Condition` and `Count` each carry one, and a fourth will
+ * arrive without this needing to know about it. The key name is the contract —
+ * every one of them spells it `tag`.
+ */
+function namesTag(value: unknown): boolean {
+  if (Array.isArray(value)) {
+    return value.some((entry) => namesTag(entry));
+  }
+  if (!isRecord(value)) {
+    return false;
+  }
+  if (typeof value['tag'] === 'string' && value['tag'] !== '') {
+    return true;
+  }
+  return Object.values(value).some((entry) => namesTag(entry));
+}
+
 function normalizeCard(
   raw: unknown,
   index: number,
@@ -259,6 +280,22 @@ function normalizeCard(
       'text',
       `Rules text not covered by the effect grammar, so the card plays as vanilla: ` +
         parsed.unparsed.map((clause) => `"${clause}"`).join('; '),
+      'degraded',
+    );
+  }
+
+  // 133.8: a card may narrow a scope or a predicate to a tag — "Your Mechs
+  // have +1 Might", "I enter ready if you control another Dragon". This export
+  // publishes no tag field at all, so every card comes out with an empty tag
+  // list and such a clause reaches nothing. The clause is still read, because
+  // the model is right and the *data* is what is short: a source that carries
+  // tags makes these cards work with no code change. The shortfall is recorded
+  // rather than left silent, which is the same treatment `championTag` gets.
+  if (understood && (namesTag(abilities) || namesTag(cardEffect))) {
+    gap(
+      'tags',
+      'The export publishes no tag field, so this card\'s tag-scoped clause ' +
+        'matches nothing and it plays weaker than printed',
       'degraded',
     );
   }

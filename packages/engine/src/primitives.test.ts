@@ -584,7 +584,7 @@ describe('move (rules 420, 445-453)', () => {
     let next: GameState = {
       ...ready,
       players: ready.players.map((seat) =>
-        seat.id === player ? { ...seat, pool: { energy: 5, power: seat.pool.power } } : seat,
+        seat.id === player ? { ...seat, pool: { ...seat.pool, energy: 5 } } : seat,
       ),
     };
 
@@ -633,7 +633,7 @@ describe('move (rules 420, 445-453)', () => {
     const next: GameState = {
       ...ready,
       players: ready.players.map((seat) =>
-        seat.id === player ? { ...seat, pool: { energy: 5, power: seat.pool.power } } : seat,
+        seat.id === player ? { ...seat, pool: { ...seat.pool, energy: 5 } } : seat,
       ),
     };
 
@@ -725,7 +725,7 @@ describe('self-targeting', () => {
     return {
       ...state,
       players: state.players.map((seat) =>
-        seat.id === player ? { ...seat, pool: { energy: 5, power: seat.pool.power } } : seat,
+        seat.id === player ? { ...seat, pool: { ...seat.pool, energy: 5 } } : seat,
       ),
     };
   }

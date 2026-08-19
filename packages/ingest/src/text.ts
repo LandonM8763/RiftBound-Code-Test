@@ -379,6 +379,12 @@ const UNIT_ANY: TargetSpec = { kind: 'unit', scope: 'any' };
 const UNIT_FRIENDLY: TargetSpec = { kind: 'unit', scope: 'friendly' };
 const UNIT_ENEMY: TargetSpec = { kind: 'unit', scope: 'enemy' };
 
+/** The "friendly "/"enemy " prefix a target phrase may carry, or "any". */
+function unitScope(prefix: string | undefined): 'any' | 'friendly' | 'enemy' {
+  const word = (prefix ?? '').trim().toLowerCase();
+  return word === 'friendly' ? 'friendly' : word === 'enemy' ? 'enemy' : 'any';
+}
+
 const CLAUSES: readonly ClauseRule[] = [
   {
     // "Draw 1 for each of your MIGHTY units" — the printed number is per-thing.
@@ -416,6 +422,62 @@ const CLAUSES: readonly ClauseRule[] = [
       return {
         effects: [{ kind: 'channel', count: n, exhausted: m[2] !== undefined }],
         target: NO_TARGET,
+      };
+    },
+  },
+  {
+    /**
+     * "Deal 2 to all enemy units in combat", "Deal 1 to all units at
+     * battlefields", "Deal 3 to all enemy units here".
+     *
+     * 355.5.a makes this *not* a choice — an effect reaching objects "based on
+     * criteria" chooses nothing — so it is one `all` spec resolved at
+     * execution rather than an enumerated target.
+     *
+     * "at **battlefields**" and "at **a** battlefield" are different
+     * statements and only the plural is read here: the singular names one
+     * Battlefield the player picks, which is a choice `TargetSpec` has no
+     * variant for. Reading it as the plural would hit every Battlefield on the
+     * board instead of the one chosen.
+     */
+    pattern:
+      /^deal (\d+) (?:damage )?to all (friendly |enemy )?units(?: (here|at my battlefield|at battlefields|in combat))?$/i,
+    build: (m) => {
+      const n = count(m[1] ?? '');
+      if (n === undefined) return undefined;
+      const where = (m[3] ?? '').toLowerCase();
+      return {
+        effects: [{ kind: 'dealDamage', amount: n }],
+        target: {
+          kind: 'all',
+          scope: unitScope(m[2]),
+          ...(where === 'here' || where === 'at my battlefield' ? { here: true } : {}),
+          ...(where === 'at battlefields' ? { atBattlefield: true } : {}),
+          ...(where === 'in combat' ? { inCombat: true } : {}),
+        },
+      };
+    },
+  },
+  {
+    /** "Kill all gear", "Buff all friendly units" — the same `all` spec. */
+    pattern: /^(kill|buff) all (friendly |enemy )?(unit|gear)s?(?: (here|at my battlefield|at battlefields))?$/i,
+    build: (m) => {
+      const where = (m[4] ?? '').toLowerCase();
+      const cardType = (m[3] ?? 'unit').toLowerCase() as 'unit' | 'gear';
+      // 702: a Buff is a counter on a Unit, so "buff all gear" would be a
+      // statement about something that cannot hold one.
+      if (m[1]?.toLowerCase() === 'buff' && cardType !== 'unit') {
+        return undefined;
+      }
+      return {
+        effects: [{ kind: m[1]?.toLowerCase() === 'kill' ? 'kill' : 'buff' }],
+        target: {
+          kind: 'all',
+          scope: unitScope(m[2]),
+          ...(cardType === 'unit' ? {} : { cardType }),
+          ...(where === 'here' || where === 'at my battlefield' ? { here: true } : {}),
+          ...(where === 'at battlefields' ? { atBattlefield: true } : {}),
+        },
       };
     },
   },
@@ -464,12 +526,11 @@ const CLAUSES: readonly ClauseRule[] = [
      * documented simplification as the discard and damage-assignment orders.
      */
     pattern:
-      /^play (?:(a|an|one|two|three|four|five|\d+) )?(ready )?(\d+) might ([a-z' ]+?) (unit|gear) tokens?(?: with ([a-z]+))?(?: (here|(?:in|at|into|to) (?:your |their )?base))?$/i,
+      /^play (?:(a|an|one|two|three|four|five|\d+) )?(ready )?(?:(\d+) might )?([a-z' ]+?) (unit|gear) tokens?(?: with ([a-z]+))?(?: (here|(?:in|at|into|to) (?:your |their )?base))?( exhausted)?$/i,
     build: (m) => {
       const n = m[1] === undefined ? 1 : count(m[1] === 'a' || m[1] === 'an' ? '1' : m[1]);
-      const might = count(m[3] ?? '');
       const found = tokenByName(m[4] ?? '');
-      if (n === undefined || might === undefined || found === undefined) {
+      if (n === undefined || found === undefined) {
         return undefined;
       }
       // 185.2.d: a token follows the rules for its type, so the printed type
@@ -477,7 +538,14 @@ const CLAUSES: readonly ClauseRule[] = [
       if (found.spec.type !== (m[5] ?? '').toLowerCase()) {
         return undefined;
       }
-      if (tokenMight(found.spec) !== might) {
+      // 185.2.b gives a token *unit* a Might, and every unit token rule 187
+      // defines is printed with it — so an absent one on a unit is a wording
+      // the table cannot confirm, and a Gear has none to print.
+      const might = m[3] === undefined ? undefined : count(m[3]);
+      if (found.spec.type === 'unit' && (might === undefined || tokenMight(found.spec) !== might)) {
+        return undefined;
+      }
+      if (found.spec.type === 'gear' && might !== undefined) {
         return undefined;
       }
       // A keyword printed alongside is confirmatory — 187.2 already gives the
@@ -488,6 +556,16 @@ const CLAUSES: readonly ClauseRule[] = [
         return undefined;
       }
       const where = m[7] !== undefined && /^here$/i.test(m[7]) ? 'here' : 'base';
+      // 184.1: the effect may name an entry state "contrary to the default for
+      // the token's type", and both directions appear — "a **ready** Sprite"
+      // against 359.2.c, "a Gold gear token **exhausted**" against 359.2.d.
+      // Naming neither leaves 185.2.d's default alone, so `ready` is omitted.
+      const ready = m[2] !== undefined ? true : m[8] !== undefined ? false : undefined;
+      // A card cannot ask for both at once; the two matches are separate groups
+      // so a wording that did would otherwise silently pick one.
+      if (m[2] !== undefined && m[8] !== undefined) {
+        return undefined;
+      }
       return {
         effects: [
           {
@@ -495,8 +573,7 @@ const CLAUSES: readonly ClauseRule[] = [
             token: found.key,
             count: n,
             where,
-            // 184.1: the effect may say it enters ready, against the default.
-            ...(m[2] === undefined ? {} : { ready: true }),
+            ...(ready === undefined ? {} : { ready }),
           },
         ],
         target: NO_TARGET,
@@ -548,18 +625,17 @@ const CLAUSES: readonly ClauseRule[] = [
      */
     pattern: /^return an? (friendly |enemy )?(unit|gear)( at a battlefield)? to (?:its|their) owner'?s? hand$/i,
     build: (m) => {
-      // 355.9.a.1 makes a Unit target a Game Object on the Board. Gear is a
-      // Permanent too, but `TargetSpec` only enumerates Units, so a Gear bounce
-      // has nothing to choose from and is refused rather than silently missing.
-      if ((m[2] ?? '').toLowerCase() !== 'unit') {
-        return undefined;
-      }
-      const scope = (m[1] ?? '').trim().toLowerCase();
-      const base: TargetSpec =
-        scope === 'friendly' ? UNIT_FRIENDLY : scope === 'enemy' ? UNIT_ENEMY : UNIT_ANY;
+      // 355.9.a.1 makes a Unit target a Game Object on the Board, and a Gear is
+      // one too — 412's zone move does not care which. Only the sweep narrows.
+      const cardType = (m[2] ?? 'unit').toLowerCase() as 'unit' | 'gear';
       return {
         effects: [{ kind: 'toHand' }],
-        target: m[3] === undefined ? base : { ...base, atBattlefield: true },
+        target: {
+          kind: 'unit',
+          scope: unitScope(m[1]),
+          ...(cardType === 'unit' ? {} : { cardType }),
+          ...(m[3] === undefined ? {} : { atBattlefield: true }),
+        },
       };
     },
   },
@@ -582,15 +658,20 @@ const CLAUSES: readonly ClauseRule[] = [
     }),
   },
   {
-    pattern: /^kill an? (friendly |enemy )?unit(?: at a battlefield)?$/i,
+    // 428 kills any Permanent, so "kill a gear" is the same clause with a
+    // different noun — the sweep narrows and the effect does not change.
+    pattern: /^kill an? (friendly |enemy )?(unit|gear)(?: at a battlefield)?$/i,
     build: (m) => {
-      const scope = (m[1] ?? '').trim().toLowerCase();
-      const base: TargetSpec =
-        scope === 'friendly' ? UNIT_FRIENDLY : scope === 'enemy' ? UNIT_ENEMY : UNIT_ANY;
+      const cardType = (m[2] ?? 'unit').toLowerCase() as 'unit' | 'gear';
       const atBattlefield = /at a battlefield$/i.test(m[0]);
       return {
         effects: [{ kind: 'kill' }],
-        target: atBattlefield ? { ...base, atBattlefield: true } : base,
+        target: {
+          kind: 'unit',
+          scope: unitScope(m[1]),
+          ...(cardType === 'unit' ? {} : { cardType }),
+          ...(atBattlefield ? { atBattlefield: true } : {}),
+        },
       };
     },
   },
@@ -658,6 +739,23 @@ const CLAUSES: readonly ClauseRule[] = [
       return n === undefined
         ? undefined
         : { effects: [{ kind: 'addEnergy', count: n }], target: NO_TARGET };
+    },
+  },
+  {
+    /**
+     * "ADD Rune" — 135.2.e.5's `[A]`, Power of any Domain.
+     *
+     * The export renders the rainbow symbol as the word "Rune", which is the
+     * same convention Deflect's reminder text uses ("must pay Rune to choose
+     * me"). 135.2.e.5.b makes it a wildcard once in the pool rather than Power
+     * of a Domain chosen on arrival, which is why it is its own effect.
+     */
+    pattern: /^add (?:(\d+) )?runes?$/i,
+    build: (m) => {
+      const n = m[1] === undefined ? 1 : count(m[1]);
+      return n === undefined
+        ? undefined
+        : { effects: [{ kind: 'addAnyPower', count: n }], target: NO_TARGET };
     },
   },
   {
@@ -1235,7 +1333,33 @@ const STATIC_SCOPES: readonly { readonly pattern: RegExp; readonly scope: Static
   { pattern: /^enemy units here$/i, scope: { who: 'enemy', here: true } },
   { pattern: /^enemy units$/i, scope: { who: 'enemy' } },
   { pattern: /^units here$/i, scope: { who: 'any', here: true } },
+  // "Your units here have GANKING" — the same statement as "friendly units",
+  // written from the reader's side rather than the board's.
+  { pattern: /^your units here$/i, scope: { who: 'friendly', here: true } },
+  { pattern: /^your units$/i, scope: { who: 'friendly' } },
+  // 185: "Your tokens enter ready". Listed before the tag rule below so the
+  // noun is never mistaken for a tag.
+  { pattern: /^your tokens$/i, scope: { who: 'friendly', token: true } },
 ];
+
+/**
+ * "Your **Mechs** have +1 Might" — a scope narrowed to a tag (133.8).
+ *
+ * Separate from `STATIC_SCOPES` because it captures rather than matching a
+ * fixed phrase, and it is tried last so every noun the table names wins first.
+ * The plural is stripped: card text says "Mechs" and the tag is "Mech".
+ */
+const TAGGED_SCOPE = /^your ([a-z][a-z' ]*?)s$/i;
+
+function taggedScope(text: string): StaticScope | undefined {
+  const match = text.match(TAGGED_SCOPE);
+  return match === null ? undefined : { who: 'friendly', tag: (match[1] ?? '').trim() };
+}
+
+/** The scope a static's subject phrase names, fixed phrases before tags. */
+function scopeNamed(text: string): StaticScope | undefined {
+  return STATIC_SCOPES.find((entry) => entry.pattern.test(text))?.scope ?? taggedScope(text);
+}
 
 /** The keyword list a static may grant, e.g. "ASSAULT and GANKING". */
 function grantedKeywords(text: string): readonly Keyword[] | undefined {
@@ -1296,7 +1420,7 @@ export function parseStatic(line: string): StaticAbility | undefined {
   // "<scope> enter(s) ready" (359.2.c is what this replaces).
   const ready = text.match(/^(.+?) enters? ready$/i);
   if (ready !== null) {
-    const scope = STATIC_SCOPES.find((entry) => entry.pattern.test((ready[1] ?? '').trim()))?.scope;
+    const scope = scopeNamed((ready[1] ?? '').trim());
     return scope === undefined
       ? undefined
       : { affects: scope, grant: { entersReady: true }, ...(condition ? { condition } : {}) };
@@ -1310,10 +1434,7 @@ export function parseStatic(line: string): StaticAbility | undefined {
   );
   if (playTo !== null) {
     const who = (playTo[1] ?? playTo[2] ?? '').trim();
-    const scope =
-      /^me$/i.test(who)
-        ? ({ who: 'self' } as StaticScope)
-        : STATIC_SCOPES.find((entry) => entry.pattern.test(who))?.scope;
+    const scope = /^me$/i.test(who) ? ({ who: 'self' } as StaticScope) : scopeNamed(who);
     if (scope === undefined) {
       return undefined;
     }
@@ -1331,7 +1452,7 @@ export function parseStatic(line: string): StaticAbility | undefined {
   if (have === null) {
     return undefined;
   }
-  const scope = STATIC_SCOPES.find((entry) => entry.pattern.test((have[1] ?? '').trim()))?.scope;
+  const scope = scopeNamed((have[1] ?? '').trim());
   if (scope === undefined) {
     return undefined;
   }

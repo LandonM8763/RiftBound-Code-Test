@@ -19,7 +19,7 @@ import { checkInvariants } from './invariants.js';
 import { currentLegalActions, legalActions } from './legal.js';
 import { reduce } from './reduce.js';
 import { entersReady } from './statics.js';
-import { moveEntity } from './mutate.js';
+import { moveEntity, withPlayer } from './mutate.js';
 import { createGame, type DeckList } from './setup.js';
 import {
   type EntityId,
@@ -198,6 +198,20 @@ describe('Rune Pools (rules 165-167)', () => {
     const passed = reduce(ending, { type: 'resolvePhase' }).state;
 
     expect(passed.players[player]!.pool.energy).toBe(0);
+  });
+
+  it('167: loses an unspent [A] too, not just Energy and named Power', () => {
+    const state = inMainPhase();
+    const player = state.activePlayer;
+    const withWild = withPlayer(state, player, (seat) => ({
+      ...seat,
+      pool: { ...seat.pool, energy: 0, anyPower: 2 },
+    }));
+
+    const ending = reduce(withWild, { type: 'endTurn' }).state;
+    const passed = reduce(ending, { type: 'resolvePhase' }).state;
+
+    expect(passed.players[player]!.pool.anyPower).toBe(0);
   });
 });
 
@@ -412,7 +426,7 @@ describe('"I enter ready" (rule 363 replacing 359.2.c)', () => {
       ...state,
       players: state.players.map((seat) =>
         seat.id === state.activePlayer
-          ? { ...seat, pool: { energy, power: seat.pool.power } }
+          ? { ...seat, pool: { ...seat.pool, energy } }
           : seat,
       ),
     };

@@ -317,7 +317,7 @@ function inMainPhase(seed = 'costs', energy = 2): GameState {
   return {
     ...state,
     players: state.players.map((seat) =>
-      seat.id === player ? { ...seat, pool: { energy, power: seat.pool.power } } : seat,
+      seat.id === player ? { ...seat, pool: { ...seat.pool, energy } } : seat,
     ),
   };
 }
@@ -540,7 +540,7 @@ describe('ability cost modification in play', () => {
         seat.id === player
           ? {
               ...seat,
-              pool: { energy, power: seat.pool.power },
+              pool: { ...seat.pool, energy },
               zones: { ...seat.zones, base: [...seat.zones.base, entity] },
             }
           : seat,

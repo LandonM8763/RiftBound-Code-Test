@@ -50,6 +50,8 @@ export type GameEvent =
       readonly rune: EntityId | null;
       readonly energy: number;
       readonly power: Domain | null;
+      /** 135.2.e.5.b: Power of any Domain, which has no Domain to name. */
+      readonly anyPower?: number | undefined;
     }
   /** Rule 417: damage was dealt to a Unit. */
   | { readonly type: 'damageDealt'; readonly unit: EntityId; readonly amount: number }

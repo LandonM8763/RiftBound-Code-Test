@@ -210,24 +210,42 @@ export type PowerPool = Readonly<Record<Domain, number>>;
 export interface RunePool {
   readonly energy: number;
   readonly power: PowerPool;
+  /**
+   * Power of any Domain held in the pool — the `[A]` of 135.2.e.5.
+   *
+   * 135.2.e.5.b: once Added, it "can be spent to pay a Power cost of any
+   * Domain", so it is a wildcard pip rather than Power of a *chosen* Domain
+   * fixed at the moment it arrives. That is why it is its own count instead of
+   * `addPowerTo` with a Domain picked for the player: choosing early would
+   * strand it when a later cost wants a different Domain.
+   *
+   * Not to be confused with `Cost.anyPower`, which is the same symbol on the
+   * paying side.
+   */
+  readonly anyPower: number;
 }
 
 export const EMPTY_POWER: PowerPool = Object.freeze(
   Object.fromEntries(DOMAINS.map((domain) => [domain, 0])) as Record<Domain, number>,
 );
 
-export const EMPTY_POOL: RunePool = Object.freeze({ energy: 0, power: EMPTY_POWER });
+export const EMPTY_POOL: RunePool = Object.freeze({ energy: 0, power: EMPTY_POWER, anyPower: 0 });
 
 export function powerIn(pool: RunePool, domain: Domain): number {
   return pool.power[domain];
 }
 
 export function addEnergyTo(pool: RunePool, amount: number): RunePool {
-  return { energy: pool.energy + amount, power: pool.power };
+  return { ...pool, energy: pool.energy + amount };
 }
 
 export function addPowerTo(pool: RunePool, domain: Domain, amount: number): RunePool {
-  return { energy: pool.energy, power: { ...pool.power, [domain]: pool.power[domain] + amount } };
+  return { ...pool, power: { ...pool.power, [domain]: pool.power[domain] + amount } };
+}
+
+/** 135.2.e.5.b: Add `amount` Power of any Domain. */
+export function addAnyPowerTo(pool: RunePool, amount: number): RunePool {
+  return { ...pool, anyPower: pool.anyPower + amount };
 }
 
 export interface PlayerState {
@@ -305,6 +323,16 @@ export interface ChainItem {
    * "if you paid the additional cost" is asked then rather than at play time.
    */
   readonly paidAdditionalCost?: boolean | undefined;
+  /**
+   * 808.1.d.3: the Battlefield this ability's source was at when the trigger
+   * was queued.
+   *
+   * "Before the card is moved to the Trash, note its location … to process the
+   * trigger after it has been Finalized" — without it a Deathknell reading "my
+   * battlefield" would resolve against a corpse, which 359.3.e.12 gives no
+   * location at all. `null` when the event named no Battlefield.
+   */
+  readonly noted: number | null;
 }
 
 /**

@@ -66,6 +66,14 @@ export interface ChainItemView {
   readonly target: EntityId | null;
   /** 377.3.a.1: which ability, when this item is one rather than a card. */
   readonly ability: AbilityRef | null;
+  /**
+   * 808.1.d.3's noted Battlefield.
+   *
+   * Public like the rest of the Chain (328) — where a Unit was when it died is
+   * something the whole table saw — and exposed so `determinize` can rebuild a
+   * Chain that resolves the same way the real one will.
+   */
+  readonly noted: number | null;
 }
 
 export interface PlayerView {
@@ -285,6 +293,7 @@ export function observe(state: GameState, viewer: PlayerId): GameView {
       pending: item.pending,
       target: item.target,
       ability: item.ability,
+      noted: item.noted,
     })),
     closed: isClosed(state),
     priority: state.priority,

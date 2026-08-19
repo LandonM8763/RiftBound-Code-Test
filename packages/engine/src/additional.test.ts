@@ -130,7 +130,7 @@ function inMainPhase(seed = 'additional', energy = 6): GameState {
   }
   return withPlayer(state, state.activePlayer, (seat) => ({
     ...seat,
-    pool: { energy, power: seat.pool.power },
+    pool: { ...seat.pool, energy },
   }));
 }
 
@@ -325,7 +325,7 @@ describe('Accelerate (rule 805)', () => {
     const player = base.activePlayer;
     const state = withPlayer(base, player, (seat) => ({
       ...seat,
-      pool: { energy: 6, power: { ...seat.pool.power, fury: 1 } },
+      pool: { ...seat.pool, energy: 6, power: { ...seat.pool.power, fury: 1 } },
     }));
 
     const paid = reduce(state, { type: 'playCard', card, payAdditional: true }).state;
@@ -342,7 +342,7 @@ describe('Accelerate (rule 805)', () => {
     const player = base.activePlayer;
     const state = withPlayer(base, player, (seat) => ({
       ...seat,
-      pool: { energy: 2, power: { ...seat.pool.power, fury: 1 } },
+      pool: { ...seat.pool, energy: 2, power: { ...seat.pool.power, fury: 1 } },
     }));
 
     const paid = reduce(state, { type: 'playCard', card, payAdditional: true }).state;
@@ -359,7 +359,7 @@ describe('Accelerate (rule 805)', () => {
     const player = base.activePlayer;
     const state = withPlayer(base, player, (seat) => ({
       ...seat,
-      pool: { energy: 2, power: { ...seat.pool.power, fury: 0 } },
+      pool: { ...seat.pool, energy: 2, power: { ...seat.pool.power, fury: 0 } },
     }));
 
     const plays = legalActions(state, player).filter(

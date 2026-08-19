@@ -40,6 +40,28 @@ export interface StaticScope {
   readonly here?: boolean | undefined;
   /** "Other friendly units …" — never the source itself. */
   readonly excludeSelf?: boolean | undefined;
+  /**
+   * "Your **Mechs** have +1 Might" — narrowed to a tag (133.8).
+   *
+   * 133.8.a gives an ordinary tag no rules meaning *of its own*, which is not
+   * the same as being unreferenceable: a card may name one, and this is how.
+   * Matched case-insensitively, like `Condition`'s own tag comparison.
+   *
+   * **The card data available today publishes no tags**, so a static scoped
+   * this way reaches nothing. That is a shortfall of the source rather than of
+   * the model — `apitcg.ts` records a `tags` gap for every card that names one
+   * — and a source that carries tags makes these work with no code change.
+   */
+  readonly tag?: string | undefined;
+  /**
+   * "Your **tokens** enter ready" — narrowed to Tokens (185).
+   *
+   * A separate flag rather than a tag, because 185 makes being a Token a
+   * property of the Game Object rather than something printed in a tag line:
+   * `STANDARD_TOKENS` gives them no tag to match on. It is also the one
+   * narrowing of this kind the data can answer today.
+   */
+  readonly token?: boolean | undefined;
 }
 
 /** What a static does to the objects in its scope. */

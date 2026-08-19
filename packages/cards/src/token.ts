@@ -61,6 +61,28 @@ const TEMPORARY: CardAbilities = {
  * Every entry is domainless, because 185.3.b says Tokens have no domains — the
  * rulebook states it for each one individually as well.
  */
+/**
+ * Rule 187.5's Gold ability: "[Reaction] Kill this, [E]: Add [A]."
+ *
+ * The Reaction tag is deliberately not carried. 429.3 lets a Reaction Add
+ * ability be activated whenever resources are needed, which this engine already
+ * approximates for Basic Runes by making the pool fillable before a play rather
+ * than during the Pay step — the documented simplification in `play.ts`. An
+ * ordinary Activated Ability is *narrower* than printed (381 confines it to the
+ * controller's own turn in an Open State), which is the safe direction: it can
+ * never make an illegal play legal.
+ */
+const GOLD_ABILITY: CardAbilities = {
+  activated: [
+    {
+      cost: FREE,
+      exhaustSelf: true,
+      payments: [{ kind: 'killSelf' }],
+      effect: { target: { kind: 'none' }, effects: [{ kind: 'addAnyPower', count: 1 }] },
+    },
+  ],
+};
+
 export const STANDARD_TOKENS: Readonly<Record<string, TokenSpec>> = {
   // 187.1: a domainless unit token with 1 Might and the Recruit tag.
   recruit: { name: 'Recruit', type: 'unit', might: 1, tags: ['Recruit'] },
@@ -70,8 +92,32 @@ export const STANDARD_TOKENS: Readonly<Record<string, TokenSpec>> = {
   'sand soldier': { name: 'Sand Soldier', type: 'unit', might: 2, tags: ['Shurima'] },
   // 187.4: 3 Might and the Mech tag.
   mech: { name: 'Mech', type: 'unit', might: 3, tags: ['Mech'] },
+  // 187.5: a domainless *gear* token whose whole text is the ability above.
+  // 359.2.d makes it enter ready, which is why cards that want it asleep print
+  // "exhausted" (184.1).
+  gold: { name: 'Gold', type: 'gear', tags: [], abilities: GOLD_ABILITY },
   // 187.6: 0 Might, no tags.
   reflection: { name: 'Reflection', type: 'unit', might: 0, tags: [] },
+  // 187.7: 1 Might, the Bird tag, and Deflect — which 809.1.c makes a cost
+  // increase rather than a `Keyword`, so it lands in `costModifiers`.
+  bird: {
+    name: 'Bird',
+    type: 'unit',
+    might: 1,
+    tags: ['Bird'],
+    abilities: {
+      costModifiers: [
+        {
+          applies: {
+            types: ['unit', 'spell', 'gear', 'ability'],
+            scope: 'opponent',
+            choosesSource: true,
+          },
+          change: { kind: 'increase', anyPower: 1 },
+        },
+      ],
+    },
+  },
   // 187.10: 1 Might and the Bilgewater tag.
   tentacle: { name: 'Tentacle', type: 'unit', might: 1, tags: ['Bilgewater'] },
 };

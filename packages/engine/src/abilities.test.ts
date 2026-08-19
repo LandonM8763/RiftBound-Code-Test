@@ -236,6 +236,41 @@ const BATTLEFIELDS = Array.from({ length: 3 }, (_, i) =>
   makeBattlefield({ id: cardId(`A-20${i}`) }),
 );
 
+/**
+ * "DEATHKNELL - Deal 3 to all units at my battlefield" (808.1.d.3).
+ *
+ * The point of the card: its effect resolves once the Unit is already in the
+ * trash, where 359.3.e.12 leaves it no location at all.
+ */
+const CAUSTIC = makeUnit(2, ['fury'], {
+  id: cardId('A-040'),
+  name: 'Caustic',
+  cost: cost(1),
+  abilities: {
+    triggered: [
+      {
+        condition: { event: 'dies', subject: 'self' },
+        effect: {
+          target: { kind: 'all', scope: 'any', here: true },
+          effects: [{ kind: 'dealDamage', amount: 3 }],
+        },
+      },
+    ],
+  },
+});
+
+/** "Kill a unit at a battlefield." — an Active Kill (428.1.a.1). */
+const EXECUTE = makeSpell(['fury'], {
+  id: cardId('A-041'),
+  name: 'Execute',
+  cost: cost(1),
+  timing: 'action',
+  effect: {
+    target: { kind: 'unit', scope: 'any', atBattlefield: true },
+    effects: [{ kind: 'kill' }],
+  },
+});
+
 const REGISTRY = CardRegistry.from([
   LEGEND,
   CHAMPION,
@@ -258,6 +293,8 @@ const REGISTRY = CardRegistry.from([
   SECOND_WIND,
   LEGIONNAIRE,
   CANTRIP,
+  CAUSTIC,
+  EXECUTE,
   RUNE,
   ...BATTLEFIELDS,
 ] as CardDefinition[]);
@@ -285,7 +322,7 @@ function inMainPhase(seed = 'abilities', energy = 3): GameState {
   return {
     ...state,
     players: state.players.map((seat) =>
-      seat.id === player ? { ...seat, pool: { energy, power: seat.pool.power } } : seat,
+      seat.id === player ? { ...seat, pool: { ...seat.pool, energy } } : seat,
     ),
   };
 }
@@ -606,6 +643,30 @@ describe('death triggers', () => {
     );
     expect(triggers).toHaveLength(1);
     expect(triggers[0]?.ability).toEqual({ kind: 'triggered', index: 0 });
+  });
+
+  it('808.1.d.3: notes the location, so "my battlefield" survives the death', () => {
+    // An Active Kill (428.1.a.1.b) queues the Deathknell before the move, but
+    // the ability *resolves* long after the corpse has reached the trash, where
+    // 359.3.e.12 leaves it no location. 808.1.d.3 is the rule that keeps "all
+    // units at my battlefield" naming one.
+    let state = inMainPhase('noted', 3);
+    const [a, caustic] = withBoardCard(state, CAUSTIC.id);
+    state = moveEntity(a, caustic, battlefieldLocation(0));
+    const [b, bystander] = withBoardCard(state, PLAIN.id);
+    state = moveEntity(b, bystander, battlefieldLocation(0));
+    const [c, elsewhere] = withBoardCard(state, PLAIN.id);
+    state = moveEntity(c, elsewhere, battlefieldLocation(1));
+    const [d, execute] = withHandCard(state, EXECUTE.id);
+    state = d;
+
+    const after = resolveChain(reduce(state, { type: 'playCard', card: execute, target: caustic }).state);
+
+    expect(zoneOf(after, state.activePlayer, 'trash')).toContain(caustic);
+    expect(getEntity(after, bystander).damage).toBe(3);
+    // A different Battlefield is not "my battlefield".
+    expect(getEntity(after, elsewhere).damage).toBe(0);
+    checkInvariants(after);
   });
 
   it('is not offered for a Unit without one', () => {
@@ -1140,7 +1201,7 @@ describe('choices for Triggered Abilities (rule 402)', () => {
     }
     return withPlayer(state, state.activePlayer, (seat) => ({
       ...seat,
-      pool: { energy: 6, power: seat.pool.power },
+      pool: { ...seat.pool, energy: 6 },
     }));
   }
 

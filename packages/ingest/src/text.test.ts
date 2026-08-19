@@ -608,8 +608,11 @@ describe('zone movement', () => {
     ).toHaveLength(1);
   });
 
-  it('refuses a Gear bounce, which has no target to choose from', () => {
-    expect(parseCardText("Return a gear to its owner's hand.").unparsed).toHaveLength(1);
+  it('412: bounces a Gear, narrowing the sweep rather than the effect', () => {
+    const parsed = parseCardText("Return a gear to its owner's hand.");
+    expect(parsed.unparsed).toHaveLength(0);
+    expect(parsed.effect?.target).toEqual({ kind: 'unit', scope: 'any', cardType: 'gear' });
+    expect(parsed.effect?.effects).toEqual([{ kind: 'toHand' }]);
   });
 
   it('416: refuses Recycle as an effect, which measured +0 cards', () => {
@@ -1368,6 +1371,133 @@ describe('activated ability costs', () => {
       effect: { target: { kind: 'none' }, effects: [{ kind: 'draw', count: 1 }] },
     });
     expect((activated('2: Draw 1.') as { cost: unknown }).cost).toEqual({ energy: 2, power: [] });
+  });
+});
+
+describe('effects that affect everything (355.5.a)', () => {
+  it('reads "all enemy units in combat"', () => {
+    const parsed = parseCardText('Deal 2 to all enemy units in combat.');
+    expect(parsed.unparsed).toHaveLength(0);
+    expect(parsed.effect?.target).toEqual({ kind: 'all', scope: 'enemy', inCombat: true });
+    expect(parsed.effect?.effects).toEqual([{ kind: 'dealDamage', amount: 2 }]);
+  });
+
+  it('reads "all units at battlefields" as every Battlefield', () => {
+    expect(parseCardText('Deal 1 to all units at battlefields.').effect?.target).toEqual({
+      kind: 'all',
+      scope: 'any',
+      atBattlefield: true,
+    });
+  });
+
+  it('reads "at my battlefield" as 355.9 here, not as every Battlefield', () => {
+    expect(parseCardText('Deal 4 to all units at my battlefield.').effect?.target).toEqual({
+      kind: 'all',
+      scope: 'any',
+      here: true,
+    });
+  });
+
+  it('refuses "all enemy units at a battlefield", which names a chosen one', () => {
+    // The singular is one Battlefield the player picks — a choice `TargetSpec`
+    // has no variant for. Reading it as the plural would hit every Battlefield
+    // on the board instead of the one chosen.
+    expect(parseCardText('Deal 3 to all enemy units at a battlefield.').unparsed).toHaveLength(1);
+  });
+
+  it('reads "kill all gear"', () => {
+    expect(parseCardText('Kill all gear.').effect?.target).toEqual({
+      kind: 'all',
+      scope: 'any',
+      cardType: 'gear',
+    });
+  });
+
+  it('702: refuses "buff all gear", which cannot hold a Buff', () => {
+    expect(parseCardText('Buff all gear.').unparsed).toHaveLength(1);
+  });
+});
+
+describe('the Gold gear token (187.5)', () => {
+  it('reads a Might-less gear token', () => {
+    const parsed = parseCardText('Play a Gold gear token exhausted.');
+    expect(parsed.unparsed).toHaveLength(0);
+    expect(parsed.effect?.effects).toEqual([
+      { kind: 'createToken', token: 'gold', count: 1, where: 'base', ready: false },
+    ]);
+  });
+
+  it('184.1: omits the entry state when the card names none', () => {
+    expect(parseCardText('Play two Gold gear tokens.').effect?.effects).toEqual([
+      { kind: 'createToken', token: 'gold', count: 2, where: 'base' },
+    ]);
+  });
+
+  it('185.2.b: refuses a Might printed on a gear token', () => {
+    expect(parseCardText('Play a 2 Might Gold gear token.').unparsed).toHaveLength(1);
+  });
+
+  it('refuses a unit token with no Might, which rule 187 always prints', () => {
+    expect(parseCardText('Play a Recruit unit token.').unparsed).toHaveLength(1);
+  });
+
+  it('135.2.e.5: reads "ADD Rune" as Power of any Domain', () => {
+    // The export renders the rainbow `[A]` symbol as the word "Rune".
+    expect(parseCardText('Exhaust: REACTION - ADD Rune').abilities?.activated?.[0]?.effect).toEqual(
+      { target: { kind: 'none' }, effects: [{ kind: 'addAnyPower', count: 1 }] },
+    );
+  });
+});
+
+describe('Gear as a chosen target', () => {
+  it('reads "kill a gear" (428)', () => {
+    const parsed = parseCardText('When you play me, you may kill a gear.');
+    expect(parsed.unparsed).toHaveLength(0);
+    expect(parsed.abilities?.triggered?.[0]?.effect.target).toEqual({
+      kind: 'unit',
+      scope: 'any',
+      cardType: 'gear',
+    });
+  });
+
+  it('leaves a Unit target unnarrowed, so the two never blur', () => {
+    expect(parseCardText('Kill a unit.').effect?.target).toEqual({ kind: 'unit', scope: 'any' });
+  });
+});
+
+describe('static scopes beyond friendly and enemy', () => {
+  it('185: reads "Your tokens enter ready"', () => {
+    const parsed = parseCardText('Your tokens enter ready.');
+    expect(parsed.unparsed).toHaveLength(0);
+    expect(parsed.abilities?.statics?.[0]).toEqual({
+      affects: { who: 'friendly', token: true },
+      grant: { entersReady: true },
+    });
+  });
+
+  it('reads "your units here" as the friendly-here scope', () => {
+    expect(parseCardText('Your units here have GANKING.').abilities?.statics?.[0]?.affects).toEqual({
+      who: 'friendly',
+      here: true,
+    });
+  });
+
+  it('133.8: reads a tag scope, stripping the plural', () => {
+    // The data question is separate and belongs to the adapter: this export
+    // publishes no tags, so `apitcg.ts` records a `tags` gap for such a card.
+    // The clause itself is readable and the engine honours it.
+    const parsed = parseCardText('Your Mechs have +1 Might.');
+    expect(parsed.unparsed).toHaveLength(0);
+    expect(parsed.abilities?.statics?.[0]).toEqual({
+      affects: { who: 'friendly', tag: 'Mech' },
+      grant: { might: 1 },
+    });
+  });
+
+  it('prefers a named scope to a tag, so "your units" is never the Unit tag', () => {
+    expect(parseCardText('Your units have GANKING.').abilities?.statics?.[0]?.affects).toEqual({
+      who: 'friendly',
+    });
   });
 });
 

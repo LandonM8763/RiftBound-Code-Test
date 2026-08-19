@@ -14,6 +14,7 @@
  */
 import {
   hasKeyword,
+  isTokenCard,
   keywordValue,
   staticAbilities,
   isSourceCondition,
@@ -29,6 +30,12 @@ import { conditionMet, type ConditionContext } from './condition.js';
 import { countOf } from './count.js';
 import { dependencyMet } from './dependency.js';
 import { entityCard, getEntity, type EntityId, type GameState, type PlayerId } from './state.js';
+
+/** Case-insensitive tag match (133.8), the same comparison `count.ts` makes. */
+function hasTag(tags: readonly string[], tag: string): boolean {
+  const wanted = tag.toLowerCase();
+  return tags.some((candidate) => candidate.toLowerCase() === wanted);
+}
 
 /** A static in play, with the entity supplying it. */
 export interface ActiveStatic {
@@ -101,6 +108,15 @@ function reaches(
 
   const target = state.entities[unit];
   if (target === undefined) {
+    return false;
+  }
+  // 133.8: "your Mechs", "friendly Poros". A tag has no rules meaning of its
+  // own, but a card may name one, and this is where that is answered.
+  if (scope.tag !== undefined && !hasTag(entityCard(state, unit).tags, scope.tag)) {
+    return false;
+  }
+  // 185: being a Token is a property of the Game Object, not a printed tag.
+  if (scope.token === true && !isTokenCard(entityCard(state, unit))) {
     return false;
   }
   if (scope.who === 'friendly' && target.controller !== controller) {
@@ -280,6 +296,12 @@ export function entersReady(
     // now: whose it is. `here` cannot be answered before it has a Location and
     // is deliberately not honoured rather than guessed.
     if (ability.affects.here === true) {
+      continue;
+    }
+    // "Your tokens enter ready" reaches only Tokens (185). Unlike `here`, this
+    // *is* knowable before the card is on the Board: 185 makes it a property of
+    // the definition, which is exactly what this function is handed.
+    if (ability.affects.token === true && !isTokenCard(card)) {
       continue;
     }
     const who = ability.affects.who;

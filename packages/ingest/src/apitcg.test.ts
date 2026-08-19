@@ -109,6 +109,23 @@ describe('Champion Tags', () => {
     expect(a?.championTag).toBe(b?.championTag);
   });
 
+  it('133.8: records a gap when a card names a tag the export cannot supply', () => {
+    // The clause parses — the model is right and the *data* is short — so the
+    // card keeps its static and the shortfall is recorded rather than silent.
+    const { cards, gaps } = run([
+      raw({ cardType: 'Unit', name: 'Rumble - Scrapper', description: 'Your Mechs have +1 Might.' }),
+    ]);
+    expect(cards[0]?.abilities?.statics?.[0]?.affects).toEqual({ who: 'friendly', tag: 'Mech' });
+    expect(gaps.find((gap) => gap.field === 'tags')).toMatchObject({ severity: 'degraded' });
+  });
+
+  it('records no tags gap for a card that names none', () => {
+    const { gaps } = run([
+      raw({ cardType: 'Unit', name: 'Plain', description: 'Friendly units have +1 Might.' }),
+    ]);
+    expect(gaps.find((gap) => gap.field === 'tags')).toBeUndefined();
+  });
+
   it('records a gap for a Signature card whose tag is unreadable (103.2.d.2)', () => {
     const { cards, gaps } = run([
       raw({ cardType: 'Signature Spell', name: 'Icathian Rain', description: 'ACTION' }),

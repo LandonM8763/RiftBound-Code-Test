@@ -35,26 +35,44 @@ export function canPay(pool: RunePool, cost: Cost): boolean {
   if (pool.energy < cost.energy) {
     return false;
   }
+  // 135.2.e.5.b: `[A]` in the pool pays a Power cost of any Domain, so it
+  // covers a Domain the player is short of before it counts towards `[A]` on
+  // the cost. One shared reserve, drawn on in that order.
+  let wild = pool.anyPower;
   let spare = 0;
   for (const domain of DOMAINS) {
     const held = powerIn(pool, domain);
     const owed = powerOf(cost, domain);
     if (held < owed) {
-      return false;
+      const short = owed - held;
+      if (wild < short) {
+        return false;
+      }
+      wild -= short;
+      continue;
     }
     spare += held - owed;
   }
   // 135.2.e.5.a: `[A]` is paid by Power of any Domain, so what is left over
   // once every named Domain is covered has to stretch across all of it. Asking
   // each Domain separately would let one surplus pip pay two [A].
-  return spare >= anyPowerOf(cost);
+  return spare + wild >= anyPowerOf(cost);
 }
 
 /** Remove a cost's resources from a pool (rule 444.1). Assumes `canPay`. */
 export function payFrom(pool: RunePool, cost: Cost): RunePool {
   const power: Record<Domain, number> = { ...pool.power };
+  let wild = pool.anyPower;
+  // A named Domain is paid from that Domain first and from the pool's `[A]`
+  // only when it runs short (135.2.e.5.b). Spending the wildcard last is the
+  // player-favourable order: a specific pip pays one Domain or an `[A]` cost,
+  // while a wildcard pays anything, so it is worth keeping.
   for (const domain of cost.power) {
-    power[domain] -= 1;
+    if (power[domain] > 0) {
+      power[domain] -= 1;
+    } else {
+      wild -= 1;
+    }
   }
   // Which Domain pays an `[A]` is the player's choice (135.2.e.5.a) and the
   // engine makes it for them, in a fixed Domain order. Nothing downstream can
@@ -71,7 +89,8 @@ export function payFrom(pool: RunePool, cost: Cost): RunePool {
     power[domain] -= spend;
     owed -= spend;
   }
-  return { energy: pool.energy - cost.energy, power };
+  wild -= owed;
+  return { energy: pool.energy - cost.energy, power, anyPower: Math.max(0, wild) };
 }
 
 /**
