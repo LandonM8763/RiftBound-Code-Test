@@ -97,7 +97,7 @@ describe('effect clauses', () => {
   });
 
   it('refuses a clause outside the grammar', () => {
-    expect(parseEffects('Counter a spell')).toBeUndefined();
+    expect(parseEffects('Banish a unit')).toBeUndefined();
     expect(parseEffects('Banish a unit')).toBeUndefined();
   });
 });
@@ -702,12 +702,12 @@ describe('the all-or-nothing rule', () => {
   it('drops a modelled keyword too when another clause fails', () => {
     // All-or-nothing applies to keywords as well: a card that keeps its Tank
     // but loses the ability printed under it is still the wrong card.
-    const parsed = parseCardText('TANK\nCounter a spell.');
-    expect(parsed.unparsed).toEqual(['Counter a spell.']);
+    const parsed = parseCardText('TANK\nBanish a unit.');
+    expect(parsed.unparsed).toEqual(['Banish a unit.']);
   });
 
   it('reports every clause it could not read, not just the first', () => {
-    const parsed = parseCardText('Banish a unit.\nCounter a spell.');
+    const parsed = parseCardText('Banish a unit.\nReveal your hand.');
     expect(parsed.unparsed).toHaveLength(2);
   });
 
@@ -1489,6 +1489,30 @@ describe('the target phrase, shared by every clause that takes one', () => {
         excludeSelf: true,
       });
     }
+  });
+});
+
+describe('Counter (425)', () => {
+  it('425.3: reads the plain form', () => {
+    const parsed = parseCardText('Counter a spell.');
+    expect(parsed.unparsed).toHaveLength(0);
+    expect(parsed.effect).toEqual({
+      target: { kind: 'chainItem', cardType: 'spell' },
+      effects: [{ kind: 'counter' }],
+    });
+  });
+
+  it('356.1.c: reads the cost filters against the printed cost', () => {
+    expect(
+      parseCardText('Counter a spell that costs no more than 4 and no more than 1 Power.').effect
+        ?.target,
+    ).toEqual({ kind: 'chainItem', cardType: 'spell', maxEnergy: 4, maxPower: 1 });
+  });
+
+  it('leaves "a card on the chain" open to an ability too', () => {
+    expect(parseCardText('Counter a card on the chain.').effect?.target).toEqual({
+      kind: 'chainItem',
+    });
   });
 });
 

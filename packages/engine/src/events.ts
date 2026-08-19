@@ -53,6 +53,8 @@ export type GameEvent =
       /** 135.2.e.5.b: Power of any Domain, which has no Domain to name. */
       readonly anyPower?: number | undefined;
     }
+  /** Rule 425: a card or ability on the Chain was Countered. */
+  | { readonly type: 'countered'; readonly entity: EntityId; readonly controller: PlayerId }
   /** Rule 417: damage was dealt to a Unit. */
   | { readonly type: 'damageDealt'; readonly unit: EntityId; readonly amount: number }
   /** Might granted until the end of the turn. */

@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 188 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 190 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -1210,6 +1210,18 @@ Five of them encode a rule that is easy to get backwards:
   be moved. Keeping them apart is what stops "deal 3 to a unit" reaching the
   trash. An empty trash yields no legal target, so 355.8 makes the card
   unplayable with no extra check.
+- **A Counter is a removal from the Chain, and 425.1.b is the half that is not
+  obvious.** 425.1.a clears the item and 425.1.a.1 trashes a cleared *card* —
+  an ability has none to trash, the same asymmetry a resolving ability has
+  (377.3.a.1). But a Countered card "is not considered to have been played",
+  and that falls out of doing it here rather than by resolving the item into
+  nothing: the `played` event was raised when the card went on the Chain, and
+  Countering raises none. 425.1.c refunds nothing, which needs no code at all.
+
+  It is also the one effect that can remove a Chain item *below* the one
+  resolving, which is why `resolveTop` finds its own item by identity rather
+  than by index. Chain items are never mutated in place, so that is sound —
+  and by index it would splice out the wrong item.
 - **A Token is Created, not played.** `createToken` puts it straight on the
   Board (186), so nothing is Contested and no Showdown opens — unlike `move`.
   Its `where` is rule 184.2's restriction and is fixed by the creating card, so
@@ -1780,7 +1792,8 @@ reduced to "deal 6" is a card that plays, looks right, and is wrong.
 
 It covers `Draw N`, `Deal N to a unit [at a battlefield]`, `Give a unit +N
 Might this turn`, `Give a unit <KEYWORD> [N] this turn`, `Draw N for each <count>`, `Kill`, `Ready`, `Buff`, `Heal`, `Discard N`, `Channel N
-rune(s) [exhausted]`, `ADD` resources including `ADD Rune` for `[A]`, `Gain N XP` and
+rune(s) [exhausted]`, `ADD` resources including `ADD Rune` for `[A]`, `Counter
+a spell [that costs no more than N [and no more than M Power]]`, `Gain N XP` and
 `Return <a unit|a gear|me|a <type> from your trash> to <its|my|your> owner's hand`; the self-targeting forms
 (`Ready/Buff/Heal/Exhaust/Recall me`, `Give me +N Might this turn`); the
 criteria forms that choose nothing (`Deal N to all [friendly|enemy] units
@@ -1803,14 +1816,14 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 188 of the 468 cards that have text**, and the shape of what is
+**Coverage is 190 of the 468 cards that have text**, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 188 |
-| Blocked | 280 |
+| Fully parsed | 190 |
+| Blocked | 278 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 4 times, the next 2, and every one of
@@ -1939,8 +1952,16 @@ rows and they are all small:
 | Durations and delayed effects ("the next spell you play…") | +2 |
 | Effect-outcome predicates ("if this kills it", "unless its controller…") | +1 |
 | Statics beyond scope-plus-grant ("while I'm attacking alone") | +1 |
+| A count of targets ("up to 2 friendly units") | +1 |
+| Symmetric effects ("each player kills one of their gear") | +1 |
+| An optional first clause ("you may kill a gear. Draw 1.") | +1 |
+| Conditions about the source at death ("if I died alone") | +1 |
+| A granted tag ("I am a mech") | +1 |
 | Modal effects ("choose one •…") | +0 |
 | Repeat (820) | +0 |
+
+Building **all** of them reaches 197, measured. Nothing left is worth its own
+round; the authored overlay is the cheaper route past here.
 
 **Repeat has now measured +0 from three separate baselines** (55, 124 and 173).
 Its ten printings are each blocked on something else as well, and that is what
@@ -1972,6 +1993,7 @@ What each round actually delivered, for calibrating the next projection:
 | The Gold token (187.5) with `[A]` in the pool | +6 projected, **+6** delivered |
 | Shared target phrase, attack/defend events, trailing `here` | +12 projected, **+11** delivered |
 | Statics granting a desugaring keyword (801.3.a) | +4 projected, **+4** delivered |
+| Counter (425) | +2 projected, **+2** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic
@@ -2019,17 +2041,17 @@ What the corpus is blocked on now, in the order measurement puts them:
    conditions and no modes.
 
 **The tail is now literally flat.** Past `REPEAT 2` (4 cards), *every remaining
-unparsed shape appears on exactly one card* — 315 shapes, 315 cards — and **257
-of the 284 blocked cards are blocked by exactly one clause**. Building every
-mechanic in the table above reaches **188 of 468**,
+unparsed shape appears on exactly one card* — 309 shapes, 309 cards — and **251
+of the 278 blocked cards are blocked by exactly one clause**. Building every
+mechanic in the table above reaches **197 of 468**,
 measured, and there is no further mechanic to find: the rest is one card per
 unit of work whichever route is taken, a parser rule or an authored entry.
 
 **This is where the curve flattens.** The rounds after Additional Costs
-delivered +11, +6, +5, +5, +2, +12, +6, +4, +4, +3, +4, +5, +10, +6 and +11;
-everything left is +2 or less, and the largest of them needs a subsystem rather
-than an extension. Coverage past ~185 means paying subsystem prices for one or
-two cards at a time — which is the
+delivered +11, +6, +5, +5, +2, +12, +6, +4, +4, +3, +4, +5, +10, +6, +11, +4
+and +2; everything left is +2 or less, and the largest of them needs a subsystem
+rather than an extension. Coverage past ~190 means paying subsystem prices for
+one or two cards at a time — which is the
 point at which a hand-authored overlay stops being an admission of defeat and
 starts being cheaper than the mechanic. `ingest/authored.ts` is that seam: it
 supplies an effect model for a named card, refuses itself if the card's printed

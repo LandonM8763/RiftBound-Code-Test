@@ -5,7 +5,7 @@
  * a new primitive means a case here and a variant there — not a new code path
  * per card, which is the whole point of the data-driven design.
  */
-import { tokenCardId } from '@riftbound/cards';
+import { anyPowerOf, isPlayable, needsTargetChoice, tokenCardId, type Cost } from '@riftbound/cards';
 import type { CardEffect, DestinationSpec, Effect, TargetSpec } from '@riftbound/cards';
 
 import type { TriggerEventInstance } from './abilities.js';
@@ -120,6 +120,11 @@ export interface EffectContext {
   ) => GameState;
 }
 
+/** Every Power pip a printed cost demands, `[A]` included (135.2.e). */
+function totalPowerOf(cost: Cost | undefined): number {
+  return cost === undefined ? 0 : cost.power.length + anyPowerOf(cost);
+}
+
 /**
  * Units that satisfy a target spec right now (rule 355.9).
  *
@@ -139,6 +144,36 @@ export function legalTargets(
     return getPlayer(state, controller).zones.trash.filter(
       (card) => spec.cardType === undefined || entityCard(state, card).type === spec.cardType,
     );
+  }
+
+  // 425.3: "a card or ability on the chain". 359.2 takes a Permanent off the
+  // Chain the moment it is Finalized, so what lingers is Spells and abilities —
+  // and an ability is named by its *source*, which may still be on the Board.
+  if (spec.kind === 'chainItem') {
+    const found: EntityId[] = [];
+    for (const item of state.chain) {
+      // A card cannot Counter itself: it is the item resolving, and 425.1
+      // negates "the execution … of a card or ability by a player".
+      if (item.entity === source) {
+        continue;
+      }
+      const card = entityCard(state, item.entity);
+      // An ability has no card of its own (377.3.a.1), so a `cardType` filter
+      // names a played card and only a played card.
+      if (spec.cardType !== undefined && (item.ability !== null || card.type !== spec.cardType)) {
+        continue;
+      }
+      // 356.1.c: "Base Cost" is the printed cost, never the modified one.
+      const printed = isPlayable(card) ? card.cost : undefined;
+      if (spec.maxEnergy !== undefined && (printed?.energy ?? 0) > spec.maxEnergy) {
+        continue;
+      }
+      if (spec.maxPower !== undefined && totalPowerOf(printed) > spec.maxPower) {
+        continue;
+      }
+      found.push(item.entity);
+    }
+    return found;
   }
 
   // 821.1.c: "a Card you control with the Equipment tag" — a Gear on the Board,
@@ -338,7 +373,7 @@ export function isValidTarget(
 ): boolean {
   // A self-targeting card takes no chosen target; supplying one is an error,
   // not a different reading.
-  if (spec.kind !== 'unit' && spec.kind !== 'trashCard' && spec.kind !== 'gear') {
+  if (!needsTargetChoice(spec)) {
     return target === undefined;
   }
   return target !== undefined && legalTargets(state, controller, spec, source).includes(target);
@@ -818,6 +853,33 @@ function applyEffect(
     // Created directly on the Board (186), so nothing is Contested and no
     // Showdown opens. A card that wants the token to arrive fighting says
     // "play … here", which is `where: 'here'` resolved against the source.
+    // 425: negate a Chain item. 425.1.a clears it and 425.1.a.1 sends a cleared
+    // *card* to the trash — an ability has none, so its source stays put, the
+    // same asymmetry an ability resolving normally has (377.3.a.1).
+    //
+    // 425.1.b needs no code and is the point of doing it here rather than by
+    // resolving the item into nothing: the `played` event was raised when the
+    // card went on the Chain and this raises none, so a Countered card was
+    // never played for anything that watches.
+    case 'counter': {
+      if (target === undefined) {
+        return state;
+      }
+      const index = state.chain.findIndex((item) => item.entity === target);
+      if (index < 0) {
+        return state;
+      }
+      const item = state.chain[index] as (typeof state.chain)[number];
+      const next: GameState = {
+        ...state,
+        chain: [...state.chain.slice(0, index), ...state.chain.slice(index + 1)],
+      };
+      events.push({ type: 'countered', entity: target, controller: item.controller });
+      return item.ability === null
+        ? sendToNonBoardZone(next, target, playerLocation(getEntity(next, target).owner, 'trash'))
+        : next;
+    }
+
     case 'createToken': {
       const where =
         effect.where === 'base'

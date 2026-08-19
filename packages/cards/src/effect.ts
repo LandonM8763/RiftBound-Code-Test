@@ -117,6 +117,27 @@ export type TargetSpec =
    */
   | { readonly kind: 'trashCard'; readonly cardType?: CardType | undefined }
   /**
+   * A card or ability on the Chain — 425.3's "Counter [a card or ability on the
+   * chain]".
+   *
+   * Its own variant rather than a `zone` on `unit`, for the same reason
+   * `trashCard` is: what may be done with it is different. A Chain item is not
+   * a Game Object on the Board (359.2 takes a Permanent off the Chain at once,
+   * so only Spells and abilities ever linger), so it cannot be damaged, killed
+   * or moved — only Countered.
+   *
+   * `cardType` narrows to "a **spell** on the chain", which is how the corpus
+   * prints it; omitted, an ability qualifies too. `maxEnergy` and `maxPower`
+   * are the "that costs no more than 4" wordings, read against the printed
+   * cost (356.1.c).
+   */
+  | {
+      readonly kind: 'chainItem';
+      readonly cardType?: CardType | undefined;
+      readonly maxEnergy?: number | undefined;
+      readonly maxPower?: number | undefined;
+    }
+  /**
    * A Gear on the Board its controller owns — 821.1.c's "a Card you control
    * with the Equipment tag".
    *
@@ -341,6 +362,17 @@ export type Effect =
   /** Rule 435: unlink the source from whatever it is Attached to. */
   | { readonly kind: 'detach' }
   /**
+   * Counter the chosen Chain item (425).
+   *
+   * 425.1.a: it "does nothing and is cleared from the chain", and 425.1.a.1
+   * sends a cleared *card* to the trash — an ability has none to send. 425.1.b
+   * is what makes this more than a removal: a Countered card "is not considered
+   * to have been played", so nothing that watches for cards being played sees
+   * it. 425.1.c refunds nothing, which needs no code: the cost was paid when
+   * the item went on the Chain and this touches no pool.
+   */
+  | { readonly kind: 'counter' }
+  /**
    * Rule 821: pay the chosen Equipment's own Equip cost and Attach it to the
    * source. Weaponmaster, and nothing else.
    *
@@ -410,7 +442,10 @@ export function needsTarget(effect: CardEffect | undefined): boolean {
 export function needsTargetChoice(spec: TargetSpec | undefined): boolean {
   return (
     spec !== undefined &&
-    (spec.kind === 'unit' || spec.kind === 'trashCard' || spec.kind === 'gear')
+    (spec.kind === 'unit' ||
+      spec.kind === 'trashCard' ||
+      spec.kind === 'gear' ||
+      spec.kind === 'chainItem')
   );
 }
 

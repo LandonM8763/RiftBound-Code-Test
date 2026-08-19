@@ -1119,11 +1119,15 @@ function pass(state: GameState): ReduceResult {
   // pre-resolution copy discarded every one of them: the ability fired, the
   // event was reported, and nothing ever resolved.
   //
-  // The resolved item is at the index it occupied before resolution, and
-  // `queueTriggers` only ever appends, so removing that one index keeps
-  // everything queued during resolution.
-  const resolvedAt = state.chain.length - 1;
-  const chain = [...next.chain.slice(0, resolvedAt), ...next.chain.slice(resolvedAt + 1)];
+  // Found by *identity*, not by index. `queueTriggers` only appends, so the
+  // index would normally still be right — but a Counter (425) clears an item
+  // from anywhere on the Chain, which shifts everything above it. Chain items
+  // are never mutated in place, so the resolving one is the same object.
+  const resolvedAt = next.chain.indexOf(top);
+  const chain =
+    resolvedAt < 0
+      ? [...next.chain]
+      : [...next.chain.slice(0, resolvedAt), ...next.chain.slice(resolvedAt + 1)];
   const nextTop = chain[chain.length - 1];
 
   // Read the Showdown back off `next`, not off `state`, for the same reason.

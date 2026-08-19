@@ -671,6 +671,36 @@ const CLAUSES: readonly ClauseRule[] = [
     }),
   },
   {
+    /**
+     * "Counter a spell", "Counter a spell that costs no more than 4 and no
+     * more than 1 Power" (425.3).
+     *
+     * The cost filters read the *printed* cost (356.1.c) and are conjuncts, so
+     * a wording naming only one leaves the other unbounded.
+     */
+    pattern:
+      /^counter (?:a|an) (spell|ability|card)(?: on the chain)?(?: that costs no more than (\d+)(?: and no more than (\d+) power)?)?$/i,
+    build: (m) => {
+      const noun = (m[1] ?? '').toLowerCase();
+      const maxEnergy = m[2] === undefined ? undefined : count(m[2]);
+      const maxPower = m[3] === undefined ? undefined : count(m[3]);
+      if ((m[2] !== undefined && maxEnergy === undefined) || (m[3] !== undefined && maxPower === undefined)) {
+        return undefined;
+      }
+      return {
+        effects: [{ kind: 'counter' }],
+        target: {
+          kind: 'chainItem',
+          // "a card on the chain" admits an ability too (425.3), so only the
+          // narrower nouns filter.
+          ...(noun === 'spell' ? { cardType: 'spell' as const } : {}),
+          ...(maxEnergy === undefined ? {} : { maxEnergy }),
+          ...(maxPower === undefined ? {} : { maxPower }),
+        },
+      };
+    },
+  },
+  {
     // 467-471: "you score 1 point". 471.1.a.1 keeps it clear of the Final
     // Point restriction, which belongs to Conquer alone.
     pattern: /^(?:you )?scores? (\d+) points?$/i,

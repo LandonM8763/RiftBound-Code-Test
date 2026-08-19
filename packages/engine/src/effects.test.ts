@@ -95,6 +95,18 @@ const BATTERY = makeGear(['fury'], {
   effect: { target: { kind: 'none' }, effects: [{ kind: 'addEnergy', count: 2 }] },
 });
 
+/** "Counter a spell." — a Reaction, since the Chain has to be up (425). */
+const REBUKE = makeSpell(['calm'], {
+  id: cardId('E-035'),
+  name: 'Rebuke',
+  cost: cost(1),
+  timing: 'reaction',
+  effect: {
+    target: { kind: 'chainItem', cardType: 'spell' },
+    effects: [{ kind: 'counter' }],
+  },
+});
+
 /** "Deal 2 to all enemy units." — 355.5.a, an effect with no chosen target. */
 const BARRAGE = makeSpell(['fury'], {
   id: cardId('E-032'),
@@ -149,6 +161,7 @@ const REGISTRY = CardRegistry.from([
   BARRAGE,
   RAIN,
   DISARM,
+  REBUKE,
   FURY_RUNE,
   ...BATTLEFIELDS,
 ] as CardDefinition[]);
@@ -158,17 +171,17 @@ function deck(): DeckList {
     legend: LEGEND.id,
     champion: CHAMPION.id,
     main: [
-      ...Array.from({ length: 6 }, () => PLAIN.id),
-      BOLT.id,
-      BOLT.id,
-      INSIGHT.id,
-      RALLY.id,
-      SNIPE.id,
-      SCOUT.id,
-      BATTERY.id,
-      BARRAGE.id,
-      RAIN.id,
-      DISARM.id,
+      ...Array.from({ length: 12 }, () => PLAIN.id),
+      ...Array.from({ length: 3 }, () => BOLT.id),
+      ...Array.from({ length: 2 }, () => INSIGHT.id),
+      ...Array.from({ length: 2 }, () => RALLY.id),
+      ...Array.from({ length: 2 }, () => SNIPE.id),
+      ...Array.from({ length: 3 }, () => SCOUT.id),
+      ...Array.from({ length: 3 }, () => BATTERY.id),
+      ...Array.from({ length: 2 }, () => BARRAGE.id),
+      ...Array.from({ length: 2 }, () => RAIN.id),
+      ...Array.from({ length: 2 }, () => DISARM.id),
+      ...Array.from({ length: 2 }, () => REBUKE.id),
     ],
     runes: Array.from({ length: 8 }, () => FURY_RUNE.id),
     battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
@@ -457,6 +470,65 @@ describe('Gear as a target (428)', () => {
 
     expect(after.players[me]!.zones.trash).toContain(gear);
     checkInvariants(after);
+  });
+});
+
+describe('Counter (rule 425)', () => {
+  it('425.1.a: clears the item from the Chain, and 425.1.a.1 trashes the card', () => {
+    let state = withEnergy(inMainPhase('counter'), 4);
+    const me = state.activePlayer;
+    const [a, bolt] = toHand(state, BOLT);
+    state = a;
+    const [b, rebuke] = toHand(state, REBUKE);
+    state = b;
+    const [c, victim] = onBoard(state, me, PLAIN, 'base');
+    state = c;
+
+    // The Bolt lingers on the Chain (359.3), which is what makes it Counterable.
+    state = reduce(state, { type: 'playCard', card: bolt, target: victim }).state;
+    expect(state.chain).toHaveLength(1);
+
+    state = reduce(state, { type: 'playCard', card: rebuke, target: bolt }).state;
+    expect(state.chain).toHaveLength(2);
+
+    // Resolve the Rebuke; the Bolt is cleared rather than resolving.
+    state = reduce(state, { type: 'pass' }).state;
+    state = reduce(state, { type: 'pass' }).state;
+
+    expect(state.chain).toHaveLength(0);
+    expect(state.players[me]!.zones.trash).toContain(bolt);
+    // 425.1.a: it "does nothing", so the damage never lands.
+    expect(state.entities[victim]!.damage).toBe(0);
+    checkInvariants(state);
+  });
+
+  it('offers nothing to Counter while the Chain is empty (355.8)', () => {
+    let state = withEnergy(inMainPhase('counter-empty'), 4);
+    const [a, rebuke] = toHand(state, REBUKE);
+    state = a;
+
+    expect(legalTargets(state, state.activePlayer, { kind: 'chainItem', cardType: 'spell' })).toEqual(
+      [],
+    );
+    expect(
+      currentLegalActions(state).filter(
+        (action) => action.type === 'playCard' && action.card === rebuke,
+      ),
+    ).toEqual([]);
+  });
+
+  it('356.1.c: filters on the printed cost, not the modified one', () => {
+    let state = withEnergy(inMainPhase('counter-cost'), 4);
+    const me = state.activePlayer;
+    const [a, bolt] = toHand(state, BOLT);
+    state = a;
+    const [b, victim] = onBoard(state, me, PLAIN, 'base');
+    state = b;
+    state = reduce(state, { type: 'playCard', card: bolt, target: victim }).state;
+
+    // Bolt costs 1 Energy.
+    expect(legalTargets(state, me, { kind: 'chainItem', maxEnergy: 1 })).toEqual([bolt]);
+    expect(legalTargets(state, me, { kind: 'chainItem', maxEnergy: 0 })).toEqual([]);
   });
 });
 
