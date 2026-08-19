@@ -271,6 +271,28 @@ const EXECUTE = makeSpell(['fury'], {
   },
 });
 
+/**
+ * "Other friendly units have VISION" — 801.3.a granting an ability rather than
+ * a `Keyword`, because 817.1.b makes Vision a Play Effect.
+ */
+const SEER = makeUnit(2, ['fury'], {
+  id: cardId('A-050'),
+  name: 'Seer',
+  cost: cost(1),
+  abilities: {
+    statics: [
+      {
+        affects: { who: 'friendly', excludeSelf: true },
+        grant: {
+          abilities: {
+            triggered: [{ condition: { event: 'played', subject: 'self' }, effect: DRAW_ONE }],
+          },
+        },
+      },
+    ],
+  },
+});
+
 const REGISTRY = CardRegistry.from([
   LEGEND,
   CHAMPION,
@@ -294,6 +316,7 @@ const REGISTRY = CardRegistry.from([
   LEGIONNAIRE,
   CANTRIP,
   CAUSTIC,
+  SEER,
   EXECUTE,
   RUNE,
   ...BATTLEFIELDS,
@@ -679,6 +702,47 @@ describe('death triggers', () => {
         { event: 'dies', actor: state.activePlayer, objects: [unit] },
         { extraSources: [unit] },
       ),
+    ).toEqual([]);
+  });
+});
+
+describe('abilities granted by a static (801.3.a)', () => {
+  it('fires for a Unit in scope, as though printed on it', () => {
+    let state = inMainPhase('granted', 3);
+    const [withSeer] = withBoardCard(state, SEER.id);
+    state = withSeer;
+    const [ready, card] = withHandCard(state, PLAIN.id);
+    state = ready;
+    const player = state.activePlayer;
+    const before = getPlayer(state, player).zones.hand.length;
+
+    const played = resolveChain(reduce(state, { type: 'playCard', card }).state);
+
+    // Played one card, drew one from the granted Play Effect.
+    expect(getPlayer(played, player).zones.hand.length).toBe(before);
+  });
+
+  it('stops the moment the granting Permanent leaves the Board (365)', () => {
+    // Nothing is written onto the Unit, so there is nothing to clean up: the
+    // sweep simply stops finding it.
+    let state = inMainPhase('ungranted', 3);
+    const [withSeer, seer] = withBoardCard(state, SEER.id);
+    state = moveEntity(withSeer, seer, playerLocation(state.activePlayer, 'trash'));
+    const [ready, card] = withHandCard(state, PLAIN.id);
+    state = ready;
+    const player = state.activePlayer;
+    const before = getPlayer(state, player).zones.hand.length;
+
+    const played = resolveChain(reduce(state, { type: 'playCard', card }).state);
+
+    expect(getPlayer(played, player).zones.hand.length).toBe(before - 1);
+  });
+
+  it('never reaches the granting card itself when the scope says "other"', () => {
+    const state = inMainPhase('self-grant', 3);
+    const [withSeer, seer] = withBoardCard(state, SEER.id);
+    expect(
+      triggersFor(withSeer, { event: 'played', actor: withSeer.activePlayer, objects: [seer] }),
     ).toEqual([]);
   });
 });

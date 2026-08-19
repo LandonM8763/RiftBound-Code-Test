@@ -18,7 +18,9 @@ import {
   keywordValue,
   staticAbilities,
   isSourceCondition,
+  type CardAbilities,
   type CardDefinition,
+  type CardId,
   type Keyword,
   type StaticAbility,
   type StaticScope,
@@ -250,6 +252,96 @@ export function unitKeywordValue(
   kind: ValuedKeywordKind,
 ): number {
   return keywordValue(keywordsOf(state, unit), kind);
+}
+
+/**
+ * Abilities and cost modifiers granted *to* `entity` by statics on the Board
+ * (801.3.a).
+ *
+ * "Other friendly units have VISION" and "Friendly units have DEFLECT" both
+ * grant something that desugars — a Play Effect and a cost increase — rather
+ * than a `Keyword` the engine has a rule for. 801.3.a makes the grant
+ * indistinguishable from printing it, so the sweeps that ask what a Game Object
+ * can do have to include this.
+ *
+ * **`activeStatics` deliberately does not.** It reads printed and Attached
+ * abilities only, so a static in a grant would be gathered by the sweep that
+ * produced it — an unbounded recursion for a shape no card prints. The parser
+ * refuses it too.
+ *
+ * `from` names the *granting* Permanent, which is what lets `abilityFor` find
+ * the ability's text again when a Chain item refers to it.
+ */
+/**
+ * Could *any* card in this game grant an ability (801.3.a)?
+ *
+ * A cheap pre-pass over the definitions rather than over the Board, and sound
+ * because a static in play has to be printed on some definition the game
+ * carries. It exists because the honest answer — `activeStatics` — evaluates
+ * every static's condition and dependency, and asking it on every trigger
+ * sweep when nothing in the deck grants anything is most of a Monte Carlo
+ * agent's time. Almost every game answers `false` here in one pass.
+ */
+export function anyAbilityGrant(state: GameState): boolean {
+  // Written without `Object.values` or a spread on purpose: this runs on every
+  // trigger and cost-modifier sweep, so it allocates nothing and stops early.
+  for (const key in state.definitions) {
+    const definition = state.definitions[key as CardId];
+    if (definition === undefined) {
+      continue;
+    }
+    if (grantsAbility(definition.abilities?.statics)) {
+      return true;
+    }
+    if (definition.type === 'gear' && grantsAbility(definition.attached?.abilities?.statics)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function grantsAbility(statics: readonly StaticAbility[] | undefined): boolean {
+  if (statics === undefined) {
+    return false;
+  }
+  for (const ability of statics) {
+    if (ability.grant.abilities !== undefined) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** The statics that grant abilities, or nothing at all when none can. */
+export function grantingStatics(state: GameState): readonly ActiveStatic[] {
+  return anyAbilityGrant(state)
+    ? activeStatics(state).filter((entry) => entry.ability.grant.abilities !== undefined)
+    : [];
+}
+
+export function grantedAbilities(
+  state: GameState,
+  entity: EntityId,
+  /**
+   * A precomputed `activeStatics`, for a caller sweeping many entities.
+   *
+   * The sweep is over the whole Board, so recomputing it per entity makes an
+   * O(n) walk O(n²) — and the trigger sweep runs on every event. Callers that
+   * ask about one entity can leave it out.
+   */
+  statics: readonly ActiveStatic[] = grantingStatics(state),
+): readonly { readonly abilities: CardAbilities; readonly from: EntityId }[] {
+  const found: { abilities: CardAbilities; from: EntityId }[] = [];
+  for (const { source, controller, ability } of statics) {
+    if (ability.grant.abilities === undefined) {
+      continue;
+    }
+    if (!reaches(state, source, controller, ability.affects, entity)) {
+      continue;
+    }
+    found.push({ abilities: ability.grant.abilities, from: source });
+  }
+  return found;
 }
 
 /**

@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 184 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 188 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -617,10 +617,10 @@ distinct clauses over 113 occurrences) while the categories are few.
 | Field | What it says |
 |---|---|
 | `affects` | `self` / `friendly` / `enemy` / `any`, plus `here` (355.9), `excludeSelf` for "other", `tag` (133.8) for "your Mechs" and `token` (185) for "your tokens" |
-| `grant` | `might`, `keywords` (801.3.a), `entersReady` (replacing 359.2.c) |
+| `grant` | `might`, `keywords` (801.3.a), `abilities` (801.3.a, for a keyword that *is* one), `entersReady` (replacing 359.2.c), `playTo` (355.2.b) |
 | `condition` | "While I'm buffed", "While I'm at a battlefield" — about the **source**, not its objects |
 
-Four things are load-bearing:
+Five things are load-bearing:
 
 - **The engine must never read `card.keywords` directly.** A granted Tank is as
   much a Tank as a printed one, so `combat.ts` and `move.ts` go through
@@ -635,6 +635,28 @@ Four things are load-bearing:
   card is on the Board the sweep cannot tell it apart from the units it is
   talking about. 359.2.c is about how a card enters, so before the move is also
   when the rules ask.
+- **A grant may be an *ability*, and that is what "Friendly units have DEFLECT"
+  needs.** 801.3.a makes a granted keyword do exactly what a printed one does —
+  so a keyword the ingest *desugars* has to be granted as the thing it desugars
+  into: 809.1.c is a `CostModifier` and 817.1.b is a Play Effect, neither of
+  which is a `Keyword`. `desugarKeyword` in `ingest/text.ts` is that expansion,
+  written once and read by both the printed line and the grant, because two
+  expansions of one keyword would eventually disagree.
+
+  In the engine, `grantedAbilities` answers "what does this static give *this*
+  Game Object", and the three sweeps that ask what a Game Object can do —
+  activation, triggers and cost modifiers — all include it. `AbilityRef.granted`
+  is what lets `abilityFor` read the text back off the *granting* card once the
+  ability is on the Chain.
+
+  **A granted static is deliberately not honoured**, and the reason is a cycle:
+  `activeStatics` would have to gather what it had just produced. It reads
+  printed and Attached abilities only, and the parser refuses the shape.
+
+  It also costs measurably: `grantedAbilities` is a Board sweep and the trigger
+  sweep runs on every event, so `anyAbilityGrant` checks the game's *definitions*
+  first — a single allocation-free pass that answers `false` for almost every
+  deck. Without it the search agent's suite ran 60% slower.
 - **A `self` static is read off the card in hand**, exactly like a `self` cost
   modifier, because that is where the card still is when the question matters.
 - **`tag` and `token` are the same idea and only one of them works today.**
@@ -1696,9 +1718,9 @@ covering every card type including 255 Units and 90 Champion Units. A legal
 deck builds and validates from it with no issues, and the engine plays complete
 games with it — 300 games, all decided, heuristic 59.0% ± 5.5 against random.
 
-149 of those cards carry an ability and 24 a keyword. The keyword figure is low
-against the 184 that parse because keywords ride the same all-or-nothing rule:
-a card whose other clause is unreadable keeps neither. 33 carry a static, 22
+153 of those cards carry an ability and 24 a keyword. The keyword figure is low
+against the 188 that parse because keywords ride the same all-or-nothing rule:
+a card whose other clause is unreadable keeps neither. 37 carry a static, 22
 create Tokens, 15 an Additional Cost, 15 carry Effect Text a Gear lends its
 Top-Most Card, 13 a cost modifier, 8 carry Accelerate, 8 choose a Gear, 7 return
 a card to hand, 5 affect every Unit matching a criterion and 4 grant a keyword.
@@ -1711,7 +1733,7 @@ What it still cannot supply:
 | Power pip Domains | 18 | `powerCost` is a pip *count*, so a multi-Domain card's cost is ambiguous |
 | `might` | 1 | One Unit record has none |
 | Champion Tag on Signature cards | 0 dropped, 30 degraded | See the inference below |
-| Tags of any kind | 0 dropped, 4 degraded | The export has no tag field, so "Your Mechs have +1 Might" and "if you control another Dragon" match nothing |
+| Tags of any kind | 0 dropped, 6 degraded | The export has no tag field, so "Your Mechs have +1 Might" and "if you control another Dragon" match nothing |
 
 Battlefield abilities used to appear here too; 170 gives each Battlefield a
 Game Object now, so the six whose text the grammar reads keep their abilities
@@ -1781,14 +1803,14 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 184 of the 468 cards that have text**, and the shape of what is
+**Coverage is 188 of the 468 cards that have text**, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 184 |
-| Blocked | 284 |
+| Fully parsed | 188 |
+| Blocked | 280 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 4 times, the next 2, and every one of
@@ -1853,6 +1875,12 @@ cutting in half; and "+1 Might **here**" is the same static as "units here have
 +1 Might" with the word at the other end. **+11 together, and the parts overlap
 heavily** — the attack event alone measured +1 and measured +4 once "here"
 targets existed with it, because the cards that want one want both.
+
+Statics that grant a *desugaring* keyword then took it **184 → 188**, and that
+one is a mechanic — the only entry in the recent rounds that is. "Friendly units
+have DEFLECT" and "Other friendly units have VISION" grant something that is not
+a `Keyword` at all: 809.1.c is a cost modifier and 817.1.b is a Play Effect. See
+[Static and passive abilities](#static-and-passive-abilities).
 
 Three of these are worth reading as method rather than as results:
 
@@ -1943,6 +1971,7 @@ What each round actually delivered, for calibrating the next projection:
 | Criteria targets, Gear targets, tag/token scopes | +9 projected, **+10** delivered |
 | The Gold token (187.5) with `[A]` in the pool | +6 projected, **+6** delivered |
 | Shared target phrase, attack/defend events, trailing `here` | +12 projected, **+11** delivered |
+| Statics granting a desugaring keyword (801.3.a) | +4 projected, **+4** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic

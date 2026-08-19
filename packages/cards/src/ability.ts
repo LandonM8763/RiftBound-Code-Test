@@ -224,6 +224,17 @@ export interface AbilityRef {
    * so two Gear at the same ability index do not share one counter.
    */
   readonly from?: EntityId | undefined;
+  /**
+   * `from` names a *granting* Permanent rather than an Attached card.
+   *
+   * 801.3.a makes a granted keyword do exactly what a printed one does, so
+   * "Other friendly units have VISION" gives each of them the Play Effect
+   * Vision desugars into (817.1.b). The ability belongs to the Unit that has
+   * it — `source` — but its text is stated by the granting card, so finding it
+   * again means asking that card's statics. A flag rather than a third id,
+   * because the two ways `from` can be meant are exclusive.
+   */
+  readonly granted?: boolean | undefined;
 }
 
 /**

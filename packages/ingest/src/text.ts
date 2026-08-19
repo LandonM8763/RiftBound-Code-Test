@@ -1318,6 +1318,53 @@ function scopeNamed(text: string): StaticScope | undefined {
 }
 
 /**
+ * The keywords that are *shorthand for an ability* rather than an engine rule,
+ * expanded into what they stand for (801).
+ *
+ * Written once and used twice: a printed keyword line expands here, and so does
+ * one a static grants — "Friendly units have DEFLECT" and a printed DEFLECT
+ * must mean the same thing, which 801.3.a requires and two expansions would
+ * eventually break.
+ *
+ * Only the two the corpus ever grants. The others desugar into shapes a *scope*
+ * cannot carry — Equip is an Activated Ability about the Gear itself, Accelerate
+ * is an Additional Cost on the card being played — so granting them to a set of
+ * Units would be a different mechanic rather than the same one.
+ */
+function desugarKeyword(name: string, value: string | undefined): CardAbilities | undefined {
+  // 809.1.c: a Passive cost increase of `[A]` on Spells and Abilities an
+  // opponent controls that choose this Game Object. 809.1.b.3: omitted is 1.
+  if (/^deflect$/i.test(name)) {
+    return {
+      costModifiers: [
+        {
+          applies: {
+            types: ['unit', 'spell', 'gear', 'ability'],
+            scope: 'opponent',
+            choosesSource: true,
+          },
+          change: { kind: 'increase', anyPower: count(value ?? '1') ?? 1 },
+        },
+      ],
+    };
+  }
+  // 817.1.b: "When this is played, predict", and 436.1 makes a Predict a look
+  // plus an optional Recycle. 436.3.a: an omitted count is 1.
+  if (/^vision$/i.test(name) && value === undefined) {
+    return {
+      triggered: [
+        {
+          condition: { event: 'played', subject: 'self' },
+          optional: true,
+          effect: { target: NO_TARGET, effects: [{ kind: 'recycleTop', count: 1 }] },
+        },
+      ],
+    };
+  }
+  return undefined;
+}
+
+/**
  * The keyword list a grant names, e.g. "ASSAULT and GANKING", "SHIELD 3, TANK".
  *
  * Shared by a static's grant and an effect's, and it reads `MODELLED_KEYWORDS`
@@ -1327,21 +1374,68 @@ function scopeNamed(text: string): StaticScope | undefined {
  * wrong card as printing it.
  */
 function grantedKeywords(text: string): readonly Keyword[] | undefined {
-  const granted: Keyword[] = [];
+  const parsed = grantedKeywordList(text);
+  // An effect's grant carries `Keyword`s only, so a desugaring one — which is
+  // an ability rather than a keyword — is not something this form can express.
+  return parsed === undefined || parsed.abilities !== undefined ? undefined : parsed.keywords;
+}
+
+/**
+ * A keyword list split into the two things a keyword can be: an engine rule
+ * (`Keyword`) and shorthand for an ability (`CardAbilities`).
+ *
+ * "Your Mechs have DEFLECT and GANKING" is one of each, and both halves have to
+ * survive — 801.3.a makes a granted keyword do exactly what a printed one does,
+ * so dropping either would be the wrong card.
+ */
+function grantedKeywordList(
+  text: string,
+): { keywords?: readonly Keyword[]; abilities?: CardAbilities } | undefined {
+  const keywords: Keyword[] = [];
+  let abilities: CardAbilities | undefined;
+  let found = false;
   for (const part of text.split(/\s+and\s+|,\s*/i)) {
     const token = part.trim();
     if (token === '') {
       continue;
     }
+    found = true;
     const rule = MODELLED_KEYWORDS.map((entry) => ({ entry, match: token.match(entry.pattern) })).find(
       (entry) => entry.match !== null,
     );
-    if (rule?.match == null) {
+    if (rule?.match != null) {
+      keywords.push(rule.entry.build(rule.match));
+      continue;
+    }
+    const named = token.match(/^([a-z-]+)(?:\s+(\d+))?$/i);
+    const desugared = named === null ? undefined : desugarKeyword(named[1] ?? '', named[2]);
+    if (desugared === undefined) {
       return undefined;
     }
-    granted.push(rule.entry.build(rule.match));
+    abilities = mergeAbilities(abilities, desugared);
   }
-  return granted.length === 0 ? undefined : granted;
+  if (!found) {
+    return undefined;
+  }
+  return {
+    ...(keywords.length === 0 ? {} : { keywords }),
+    ...(abilities === undefined ? {} : { abilities }),
+  };
+}
+
+/** Union two `CardAbilities`, for a grant naming several keywords. */
+function mergeAbilities(a: CardAbilities | undefined, b: CardAbilities): CardAbilities {
+  if (a === undefined) {
+    return b;
+  }
+  return {
+    ...(a.activated ?? b.activated ? { activated: [...(a.activated ?? []), ...(b.activated ?? [])] } : {}),
+    ...(a.triggered ?? b.triggered ? { triggered: [...(a.triggered ?? []), ...(b.triggered ?? [])] } : {}),
+    ...(a.costModifiers ?? b.costModifiers
+      ? { costModifiers: [...(a.costModifiers ?? []), ...(b.costModifiers ?? [])] }
+      : {}),
+    ...(a.statics ?? b.statics ? { statics: [...(a.statics ?? []), ...(b.statics ?? [])] } : {}),
+  };
 }
 
 /** Read one static clause, or `undefined` if it is outside the grammar. */
@@ -1480,14 +1574,27 @@ function buildStatic(
         };
   }
 
-  const keywords = grantedKeywords(body);
-  return keywords === undefined
-    ? undefined
-    : {
-        affects: scope,
-        grant: { keywords, ...(per === undefined ? {} : { per }) },
-        ...(condition ? { condition } : {}),
-      };
+  // 801.3.a: a granted keyword does exactly what a printed one does, so a
+  // keyword that *is* an ability is granted as that ability — "Friendly units
+  // have DEFLECT" gives each of them 809.1.c's cost increase.
+  const granted = grantedKeywordList(body);
+  if (granted === undefined) {
+    return undefined;
+  }
+  // A count multiplies what a grant *gives*, and an ability has no number to
+  // multiply. Refused rather than silently applied to the keywords alone.
+  if (per !== undefined && granted.abilities !== undefined) {
+    return undefined;
+  }
+  return {
+    affects: scope,
+    grant: {
+      ...(granted.keywords === undefined ? {} : { keywords: granted.keywords }),
+      ...(granted.abilities === undefined ? {} : { abilities: granted.abilities }),
+      ...(per === undefined ? {} : { per }),
+    },
+    ...(condition ? { condition } : {}),
+  };
 }
 
 /** A trigger condition together with any per-turn limit its wording implies. */
@@ -2077,39 +2184,16 @@ export function parseCardText(text: string, card: CardFacts = {}): ParsedText {
       continue;
     }
 
-    // 809.1.c: Deflect X is "Spells and abilities an opponent controls that
-    // target me cost X more Power to play as an additional cost for each time
-    // they choose me", and 809.1.c.1 makes that Power any Domain — which `[A]`
-    // now states. A Passive cost increase, gated on the play choosing this
-    // Game Object.
-    const deflect = line.match(/^deflect(?:\s+(\d+))?$/i);
-    if (deflect !== null) {
-      // 809.1.b.3: an omitted value is 1.
-      costModifiers.push({
-        applies: {
-          // 809.1.d puts it on "Spells and Abilities", both of which pay.
-          types: ['unit', 'spell', 'gear', 'ability'],
-          // "an opponent controls" — `any` would tax the Deflecting player's
-          // own spells for choosing their own Unit.
-          scope: 'opponent',
-          choosesSource: true,
-        },
-        change: { kind: 'increase', anyPower: count(deflect[1] ?? '1') ?? 1 },
-      });
-      continue;
-    }
-
-    // 817.1.b: Vision is "When this is played, predict", and 436.1 makes a
-    // Predict a look plus an optional Recycle. The "you may" is 383.3.a's, so
-    // the whole keyword is an optional Play Effect that Recycles from the top
-    // — the decline is the "or not Recycle it" half.
-    if (/^vision$/i.test(line)) {
-      triggered.push({
-        condition: { event: 'played', subject: 'self' },
-        optional: true,
-        // 436.3.a: an omitted count is 1.
-        effect: { target: NO_TARGET, effects: [{ kind: 'recycleTop', count: 1 }] },
-      });
+    // 809 and 817: the two keywords that are shorthand for an ability rather
+    // than for an engine rule. Expanded by `desugarKeyword`, which a static's
+    // grant reads too — 801.3.a makes a granted keyword do exactly what a
+    // printed one does, and two expansions would eventually disagree.
+    const namedKeyword = line.match(/^([a-z-]+)(?:\s+(\d+))?$/i);
+    const expansion =
+      namedKeyword === null ? undefined : desugarKeyword(namedKeyword[1] ?? '', namedKeyword[2]);
+    if (expansion !== undefined) {
+      triggered.push(...(expansion.triggered ?? []));
+      costModifiers.push(...(expansion.costModifiers ?? []));
       continue;
     }
 

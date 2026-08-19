@@ -82,7 +82,7 @@ export function legalActions(state: GameState, player: PlayerId): readonly Actio
 
   // 377: Activated Abilities. One action per legal target, for the same reason
   // cards get one — 355.8 needs a valid choice before it can go on the Chain.
-  for (const { source, index, from, ability } of activatableAbilities(state, player)) {
+  for (const { source, index, ref, ability } of activatableAbilities(state, player)) {
     const spec = ability.effect.target;
     // `self` needs no choice, so it enumerates as a single action with no
     // target — the effect resolves "me" to the ability's source itself.
@@ -95,7 +95,7 @@ export function legalActions(state: GameState, player: PlayerId): readonly Actio
           type: 'activateAbility',
           source,
           index,
-          ...(from === undefined ? {} : { from }),
+          ...(ref.from === undefined ? {} : { from: ref.from }),
           ...(target === undefined ? {} : { target }),
           ...(destination === undefined ? {} : { destination }),
         });

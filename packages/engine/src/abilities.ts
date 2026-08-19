@@ -18,6 +18,7 @@ import {
   costOf,
   triggeredAbilities,
   type AbilityRef,
+  type CardAbilities,
   type ActivatedAbility,
   type Cost,
   type TriggerCondition,
@@ -27,6 +28,7 @@ import {
 
 import { canPayAdditional } from './additional.js';
 import { activeAbilities, attachedTextOf } from './attach.js';
+import { grantedAbilities, grantingStatics, type ActiveStatic } from './statics.js';
 import { abilityCost } from './costs.js';
 import { dependencyMet } from './dependency.js';
 import { canPay } from './play.js';
@@ -93,11 +95,42 @@ export function abilityFor(
   ref: AbilityRef,
 ): ActivatedAbility | TriggeredAbility | undefined {
   const abilities =
-    ref.from === undefined ? entityCard(state, source).abilities : attachedTextOf(state, ref.from)?.abilities;
+    ref.granted === true
+      ? grantedAbilities(state, source).find((set) => set.from === ref.from)?.abilities
+      : ref.from === undefined
+        ? entityCard(state, source).abilities
+        : attachedTextOf(state, ref.from)?.abilities;
   return ref.kind === 'activated'
     ? activatedAbilities(abilities)[ref.index]
     : triggeredAbilities(abilities)[ref.index];
 }
+
+/**
+ * Everything a Game Object can do: printed, Attached (718.3) and granted
+ * (801.3.a).
+ *
+ * The single answer both sweeps below ask, so a granted ability cannot be
+ * activated but not triggered, or the reverse. `AbilityRef` carries whichever
+ * of the two `from` means, because `abilityFor` has to read the text back.
+ */
+function abilitySets(
+  state: GameState,
+  entity: EntityId,
+  statics: readonly ActiveStatic[],
+): readonly { readonly abilities: CardAbilities; readonly ref: Partial<AbilityRef> }[] {
+  const sets: { abilities: CardAbilities; ref: Partial<AbilityRef> }[] = activeAbilities(
+    state,
+    entity,
+  ).map((set) => ({
+    abilities: set.abilities,
+    ref: set.from === undefined ? {} : { from: set.from },
+  }));
+  for (const set of grantedAbilities(state, entity, statics)) {
+    sets.push({ abilities: set.abilities, ref: { from: set.from, granted: true } });
+  }
+  return sets;
+}
+
 
 /**
  * Every Activated Ability `player` may use right now (rules 376-381).
@@ -119,8 +152,12 @@ export function activatableAbilities(
   readonly ability: ActivatedAbility;
   /** Rule 403: the cost after modification, which is what gets paid. */
   readonly cost: Cost;
-  /** 718.3: the Attached card this ability was read from, if any. */
-  readonly from?: EntityId | undefined;
+  /**
+   * How the source came to have this ability: printed, Attached (718.3) or
+   * granted by a static (801.3.a). Rides onto the Chain item so `abilityFor`
+   * can read the text back, and keys 383.3.e's per-turn limit.
+   */
+  readonly ref: Partial<AbilityRef>;
 }[] {
   // 381: "only ... on the Controlling Player's Turn and during an Open State".
   if (state.activePlayer !== player || isClosed(state) || state.showdown !== null) {
@@ -130,16 +167,18 @@ export function activatableAbilities(
   const found: {
     source: EntityId;
     index: number;
-    from?: EntityId;
+    /** How the source came to have it: Attached (718.3) or granted (801.3.a). */
+    ref: Partial<AbilityRef>;
     ability: ActivatedAbility;
     cost: Cost;
   }[] = [];
+  const granting = grantingStatics(state);
   for (const source of boardEntities(state, player)) {
     const entity = getEntity(state, source);
     // 718.2/718.3: an Attached card's own abilities are Inactive and its
     // Top-Most Card gains the Effect Text's instead, so what a Game Object can
     // do is asked rather than read straight off its card.
-    for (const set of activeAbilities(state, source)) {
+    for (const set of abilitySets(state, source, granting)) {
       activatedAbilities(set.abilities).forEach((ability, index) => {
         // 414: an exhaust cost cannot be paid by something already exhausted.
         if (ability.exhaustSelf === true && entity.exhausted) {
@@ -162,13 +201,7 @@ export function activatableAbilities(
         ) {
           return;
         }
-        found.push({
-          source,
-          index,
-          ...(set.from === undefined ? {} : { from: set.from }),
-          ability,
-          cost,
-        });
+        found.push({ source, index, ref: set.ref, ability, cost });
       });
     }
   }
@@ -366,8 +399,9 @@ export function triggersFor(
   candidates.sort((a, b) => order.indexOf(a.controller) - order.indexOf(b.controller));
 
   const pending: PendingTrigger[] = [];
+  const granting = grantingStatics(state);
   for (const { source, controller } of candidates) {
-    for (const set of activeAbilities(state, source)) {
+    for (const set of abilitySets(state, source, granting)) {
       triggeredAbilities(set.abilities).forEach((ability, index) => {
         if (!matchesTrigger(state, instance, source, controller, ability.condition)) {
           return;
@@ -375,13 +409,13 @@ export function triggersFor(
         if (!dependencyMet(state, source, controller, ability.dependsOn)) {
           return;
         }
-        if (!withinTurnLimit(state, source, index, ability, set.from)) {
+        if (!withinTurnLimit(state, source, index, ability, set.ref.from)) {
           return;
         }
         pending.push({
           source,
           controller,
-          ability: { kind: 'triggered', index, ...(set.from === undefined ? {} : { from: set.from }) },
+          ability: { kind: 'triggered', index, ...set.ref },
         });
       });
     }

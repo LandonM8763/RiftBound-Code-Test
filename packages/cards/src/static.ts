@@ -17,7 +17,7 @@
  * rule 356 gives cost modification its own layered ordering that Might does not
  * have.
  */
-import type { AbilityDependency } from './ability.js';
+import type { AbilityDependency, CardAbilities } from './ability.js';
 import type { Condition } from './condition.js';
 import type { Count } from './count.js';
 import type { Keyword } from './keyword.js';
@@ -103,6 +103,21 @@ export interface StaticGrant {
    * before the card is anywhere.
    */
   readonly playTo?: readonly ('open' | 'occupiedEnemy')[] | undefined;
+  /**
+   * Abilities and cost modifiers granted to everything in scope (801.3.a).
+   *
+   * This is what "Other friendly units have VISION" and "Friendly units have
+   * DEFLECT" need: both keywords *desugar*, so what the scope gains is a
+   * Triggered Ability and a `CostModifier` rather than a `Keyword`. 801.3.a
+   * makes a granted keyword indistinguishable from a printed one, so the
+   * grammar produces the same shapes it would have produced on the card.
+   *
+   * **A granted static is deliberately not honoured.** `activeStatics` reads a
+   * Permanent's printed and Attached abilities only, so a static in here would
+   * have to be gathered by the very sweep that produced it. Nothing in the
+   * corpus grants one.
+   */
+  readonly abilities?: CardAbilities | undefined;
   /**
    * A value read off the state, multiplying everything numeric in this grant.
    *

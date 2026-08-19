@@ -29,6 +29,7 @@ import { mightOf } from './combat.js';
 import { conditionMet, type ConditionContext } from './condition.js';
 import { countOf } from './count.js';
 import { activeAbilities } from './attach.js';
+import { grantedAbilities, grantingStatics } from './statics.js';
 import { dependencyMet } from './dependency.js';
 import { getEntity, type EntityId, type GameState, type PlayerId } from './state.js';
 
@@ -65,12 +66,18 @@ export interface ActiveModifier {
  */
 export function activeModifiers(state: GameState): readonly ActiveModifier[] {
   const found: ActiveModifier[] = [];
+  // Computed once: `grantedAbilities` sweeps the Board, and this walk already
+  // visits every entity on it.
+  const granting = grantingStatics(state);
 
   const collect = (entity: EntityId): void => {
     const controller = getEntity(state, entity).controller;
     // 718.2/718.3, exactly as for statics: an Attached card's own Passives stop
-    // and its Top-Most Card carries the Effect Text's instead.
-    for (const set of activeAbilities(state, entity)) {
+    // and its Top-Most Card carries the Effect Text's instead. 801.3.a adds a
+    // third source — "Friendly units have DEFLECT" grants each of them the cost
+    // increase 809.1.c desugars into.
+    const sets = [...activeAbilities(state, entity), ...grantedAbilities(state, entity, granting)];
+    for (const set of sets) {
       for (const modifier of set.abilities.costModifiers ?? []) {
         if (modifier.applies.scope === 'self') {
           continue;

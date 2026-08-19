@@ -895,8 +895,38 @@ describe('static abilities (rules 363-365)', () => {
     });
   });
 
-  it('refuses a keyword it does not model, even in a scope it understands', () => {
-    expect(parseCardText('Other friendly units have VISION.').unparsed).toHaveLength(1);
+  it('801.3.a: grants a keyword that desugars, as the ability it stands for', () => {
+    // VISION is 817.1.b's Play Effect, so the scope gains that rather than a
+    // `Keyword` — a granted keyword does exactly what a printed one does.
+    const parsed = parseCardText('Other friendly units have VISION.');
+    expect(parsed.unparsed).toHaveLength(0);
+    expect(parsed.abilities?.statics?.[0]).toEqual({
+      affects: { who: 'friendly', excludeSelf: true },
+      grant: {
+        abilities: {
+          triggered: [
+            {
+              condition: { event: 'played', subject: 'self' },
+              optional: true,
+              effect: { target: { kind: 'none' }, effects: [{ kind: 'recycleTop', count: 1 }] },
+            },
+          ],
+        },
+      },
+    });
+  });
+
+  it('splits a mixed grant into the engine rule and the ability', () => {
+    // GANKING is a rule of the engine; DEFLECT is 809.1.c's cost increase.
+    // Both halves have to survive, or the card is wrong.
+    const grant = parseCardText('Friendly units have DEFLECT and GANKING.').abilities?.statics?.[0]
+      ?.grant;
+    expect(grant?.keywords).toEqual([{ kind: 'ganking' }]);
+    expect(grant?.abilities?.costModifiers).toHaveLength(1);
+  });
+
+  it('still refuses a keyword that is neither a rule nor a desugar', () => {
+    expect(parseCardText('Other friendly units have REPEAT 2.').unparsed).toHaveLength(1);
   });
 
   it('refuses the static clauses that want a mechanic instead', () => {

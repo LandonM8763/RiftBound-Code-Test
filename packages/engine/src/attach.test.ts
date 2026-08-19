@@ -352,7 +352,7 @@ describe('abilities move with the attachment (718.2-718.3)', () => {
     expect(lent).toHaveLength(1);
     // 377.3.a.1 keeps the text on the Gear, so the ability records where to
     // read it from while belonging to the Unit.
-    expect(lent[0]!.from).toBe(gear);
+    expect(lent[0]!.ref.from).toBe(gear);
   });
 
   it('718.3: and its Static, which reads as though printed on the Unit', () => {
@@ -707,6 +707,78 @@ describe('Deflect (809)', () => {
       anyPower: 2,
     });
     expect(totalCost(state, me, BOLT, {}, plain)).toEqual({ energy: 1, power: [] });
+  });
+
+  it('801.3.a: a Deflect granted by a static taxes exactly as a printed one', () => {
+    // "Friendly units have DEFLECT" grants the cost increase 809.1.c desugars
+    // into, so the *granted* Unit is the one that gets taxed — not the granter.
+    const BANNER_OF_GUARD = makeUnit(2, ['fury'], {
+      id: cardId('A-052'),
+      name: 'Banner of Guard',
+      cost: cost(1),
+      abilities: {
+        statics: [
+          {
+            affects: { who: 'friendly', excludeSelf: true },
+            grant: {
+              abilities: {
+                costModifiers: [
+                  {
+                    applies: {
+                      types: ['unit', 'spell', 'gear', 'ability'],
+                      scope: 'opponent',
+                      choosesSource: true,
+                    },
+                    change: { kind: 'increase', anyPower: 1 },
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    });
+    const registry = CardRegistry.from([
+      LEGEND,
+      CHAMPION,
+      PLAIN,
+      DEFLECTOR,
+      BOLT,
+      BANNER_OF_GUARD,
+      RUNE,
+      ...BATTLEFIELDS,
+    ] as CardDefinition[]);
+    const list: DeckList = {
+      legend: LEGEND.id,
+      champion: CHAMPION.id,
+      main: [
+        ...Array.from({ length: 8 }, () => PLAIN.id),
+        ...Array.from({ length: 4 }, () => BANNER_OF_GUARD.id),
+        ...Array.from({ length: 4 }, () => BOLT.id),
+      ],
+      runes: Array.from({ length: 8 }, () => RUNE.id),
+      battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
+    };
+    let state = createGame({ decks: [list, list], registry, seed: 'granted-deflect' }).state;
+    while (state.phase === 'mulligan') {
+      state = reduce(state, { type: 'mulligan', cards: [] }).state;
+    }
+    while (state.phase !== 'main' && !isOver(state)) {
+      state = reduce(state, { type: 'resolvePhase' }).state;
+    }
+    const me = state.activePlayer;
+    const them = me === 0 ? 1 : 0;
+    const [a, banner] = onBoardFor(state, them, BANNER_OF_GUARD.id);
+    const [b, guarded] = onBoardFor(a, them, PLAIN.id);
+    state = b;
+
+    expect(totalCost(state, me, BOLT, {}, guarded)).toEqual({
+      energy: 1,
+      power: [],
+      anyPower: 1,
+    });
+    // "Other friendly units" — the granting card is not one of them.
+    expect(totalCost(state, me, BOLT, {}, banner)).toEqual({ energy: 1, power: [] });
   });
 
   it('809.1.c: does not tax its own controller`s spells', () => {

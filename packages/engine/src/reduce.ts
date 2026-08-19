@@ -521,7 +521,8 @@ function activateAbility(
   const player = requirePriority(state);
   const available = activatableAbilities(state, player);
   const chosen = available.find(
-    (candidate) => candidate.source === source && candidate.index === index && candidate.from === from,
+    (candidate) =>
+      candidate.source === source && candidate.index === index && candidate.ref.from === from,
   );
 
   if (chosen === undefined) {
@@ -563,7 +564,7 @@ function activateAbility(
         noted: null,
         target: target ?? null,
         destination: destination ?? null,
-        ability: { kind: 'activated', index, ...(from === undefined ? {} : { from }) },
+        ability: { ...chosen.ref, kind: 'activated', index },
       },
     ],
     passes: 0,
