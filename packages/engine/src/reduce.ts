@@ -357,7 +357,7 @@ function playCard(
 
   // Step 2 (355.6): targets are chosen now, and step 5 (358.1) checks them.
   const effect = effectOf(definition);
-  if (effect !== undefined && !isValidTarget(state, player, effect.target, target)) {
+  if (effect !== undefined && !isValidTarget(state, player, effect.target, target, card)) {
     throw new IllegalActionError(`${definition.name} has no valid target ${String(target)}`);
   }
   if (effect === undefined && target !== undefined) {
@@ -529,7 +529,7 @@ function activateAbility(
       `Ability ${index} of ${source} cannot be activated by player ${player} now`,
     );
   }
-  if (!isValidTarget(state, player, chosen.ability.effect.target, target)) {
+  if (!isValidTarget(state, player, chosen.ability.effect.target, target, source)) {
     throw new IllegalActionError(`Ability ${index} of ${source} has no valid target ${String(target)}`);
   }
 
@@ -629,7 +629,7 @@ function resolveTrigger(
 
   // 402.2: the choices are made now, and 358.1's legality check applies to them
   // exactly as it does to a played card's.
-  if (!isValidTarget(state, player, ability.effect.target, target)) {
+  if (!isValidTarget(state, player, ability.effect.target, target, top.entity)) {
     throw new IllegalActionError('Invalid target for the Triggered Ability');
   }
 
@@ -725,7 +725,10 @@ function queueTriggers(
     // Finalized Chain Item — it is removed at step 2 instead. 402.4.a is
     // explicit that this is not the ability being countered, so nothing else
     // observes it; it simply does not go on.
-    if (choosesTarget && legalTargets(next, trigger.controller, ability.effect.target).length === 0) {
+    if (
+      choosesTarget &&
+      legalTargets(next, trigger.controller, ability.effect.target, trigger.source).length === 0
+    ) {
       continue;
     }
 
@@ -1328,12 +1331,61 @@ function openShowdown(state: GameState, events: GameEvent[]): GameState {
 
   events.push({ type: 'showdownOpened', battlefield: index, focus: contestedBy });
 
-  return {
+  const opened: GameState = {
     ...state,
     showdown: { battlefield: index, focus: contestedBy, passes: 0, combat, attacker, defender },
     priority: contestedBy,
     passes: 0,
   };
+  // 464.2.c.3 applies the designations once the Showdown exists, so the sweep
+  // sees the Combat it is describing.
+  return attacker === null || defender === null
+    ? opened
+    : designateCombatants(opened, index, attacker, defender, events);
+}
+
+
+/**
+ * 464.2.c.3: Units at the Contested Battlefield gain the Attacker or Defender
+ * designation, and 464.2.e collects whatever that triggered.
+ *
+ * The Attacker's event is raised first, which is 464.2.e.1's order: "the
+ * Attacking player, who has Focus, places Triggered Abilities on the Chain
+ * first … followed by the Defending Player".
+ *
+ * 464.2.c.3.a is not modelled: a Unit that becomes present *after* this moment
+ * gains its designation in the following Cleanup, and that later designation
+ * raises nothing here. `mightOf` still reads the role off the Showdown, so
+ * Assault and Shield are unaffected — only a "when I attack" trigger on a
+ * latecomer is missed.
+ */
+function designateCombatants(
+  state: GameState,
+  index: number,
+  attacker: PlayerId,
+  defender: PlayerId,
+  events: GameEvent[],
+): GameState {
+  let next = state;
+  for (const player of [attacker, defender]) {
+    const units = (next.battlefields[index]?.units ?? []).filter(
+      (unit) => getEntity(next, unit).controller === player,
+    );
+    if (units.length === 0) {
+      continue;
+    }
+    next = raiseEvent(
+      next,
+      {
+        event: player === attacker ? 'attack' : 'defend',
+        actor: player,
+        objects: units,
+        battlefield: index,
+      },
+      events,
+    );
+  }
+  return next;
 }
 
 /**
@@ -1384,7 +1436,7 @@ function becomeCombatShowdown(state: GameState, events: GameEvent[]): GameState 
     defender,
   });
 
-  return {
+  const escalated: GameState = {
     ...state,
     // 464.2.d, step 3 of the Combat Showdown Step: the Attacker gains Focus.
     //
@@ -1399,6 +1451,7 @@ function becomeCombatShowdown(state: GameState, events: GameEvent[]): GameState 
     priority: attacker,
     passes: 0,
   };
+  return designateCombatants(escalated, showdown.battlefield, attacker, defender, events);
 }
 
 /**

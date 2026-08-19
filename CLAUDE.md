@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 173 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 184 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -561,7 +561,7 @@ A `TriggerCondition` is three things rather than one variant:
 
 | Field | Rule | What it says |
 |---|---|---|
-| `event` | 383.2 | What happened: `played`, `dies`, `conquer`, `hold`, `move`, `winCombat`, `buffed`, `discard`, `activateAbility`, `beginningPhase`, `endOfTurn` |
+| `event` | 383.2 | What happened: `played`, `dies`, `conquer`, `hold`, `move`, `winCombat`, `attack`, `defend`, `buffed`, `stun`, `discard`, `activateAbility`, `beginningPhase`, `endOfTurn` |
 | `subject` | 383.1 | Whose: `self`, `you`, `friendly`, `enemy`, `any` |
 | `filter` | 383.1 | Which: card type, `excludeSelf`, a cost floor, `here`, an ordinal |
 
@@ -585,6 +585,15 @@ Four things about it are load-bearing:
 - **`triggersFor` takes `extraSources`.** A corpse is off the Board, so its own
   Deathknell would never be found; naming it keeps it a candidate *without*
   making it the only one, which is what lets a bystander see the same death.
+
+**`attack` and `defend` are rule 464.2.c.3's designations, not the Move that
+caused them.** They are raised when Combat opens, for every Unit the Attacker or
+Defender controls at the Contested Battlefield, which is the moment the
+designation applies and 464.2.e collects what it triggered. The Attacker's event
+goes first, which is 464.2.e.1's order. 464.2.c.3.a is not modelled: a Unit that
+arrives *later* gains its designation in the following Cleanup and raises
+nothing — `mightOf` still reads the role off the Showdown, so Assault and Shield
+are unaffected and only a "when I attack" on a latecomer is missed.
 
 `filter.ordinal` and `limitPerTurn` are different things and both exist: the
 ordinal picks *which* occurrence fires ("your second card in a turn"), the limit
@@ -1221,6 +1230,15 @@ Three things follow:
   Passive Kill (428.1.a.2) queues *after* it, so `combat.ts` names the
   Battlefield explicitly. Miss the second and the card is a silent no-op.
 
+**Every clause that takes a target builds it with one function.** The phrase is
+four orthogonal parts — an article (`a` / `another`), a controller scope, a noun
+(`unit` / `gear`) and a place (`at a battlefield` / `here`) — and eight clause
+rules used to assemble their own, which is how "another" came to be honoured
+nowhere and "here" nowhere else. `unitTarget` in `ingest/text.ts` builds all of
+them. `parseEffects` also tries a **whole-line** clause before splitting on
+"and", because "and" is both a sequence joiner and part of single clauses:
+"give a unit SHIELD 3 and TANK this turn" is one grant, not two halves.
+
 **A Gear is a legal target for anything that moves or kills it, and for nothing
 else.** `TargetSpec.unit` takes a `cardType`, defaulting to `unit`, because 428
 kills any Permanent and 412's zone move does not care which — only the sweep
@@ -1678,12 +1696,12 @@ covering every card type including 255 Units and 90 Champion Units. A legal
 deck builds and validates from it with no issues, and the engine plays complete
 games with it — 300 games, all decided, heuristic 59.0% ± 5.5 against random.
 
-134 of those cards carry an ability and 21 a keyword. The keyword figure is low
-against the 173 that parse because keywords ride the same all-or-nothing rule:
-a card whose other clause is unreadable keeps neither. 31 carry a static, 16
-create Tokens, 15 an Additional Cost, 14 carry Effect Text a Gear lends its
-Top-Most Card, 13 a cost modifier, 8 carry Accelerate, 8 choose a Gear, 6 return
-a card to hand, 4 affect every Unit matching a criterion and 3 grant a keyword.
+149 of those cards carry an ability and 24 a keyword. The keyword figure is low
+against the 184 that parse because keywords ride the same all-or-nothing rule:
+a card whose other clause is unreadable keeps neither. 33 carry a static, 22
+create Tokens, 15 an Additional Cost, 15 carry Effect Text a Gear lends its
+Top-Most Card, 13 a cost modifier, 8 carry Accelerate, 8 choose a Gear, 7 return
+a card to hand, 5 affect every Unit matching a criterion and 4 grant a keyword.
 
 What it still cannot supply:
 
@@ -1763,14 +1781,14 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 173 of the 468 cards that have text**, and the shape of what is
+**Coverage is 184 of the 468 cards that have text**, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 173 |
-| Blocked | 295 |
+| Fully parsed | 184 |
+| Blocked | 284 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 4 times, the next 2, and every one of
@@ -1826,13 +1844,30 @@ target, tag- and token-scoped statics — plus **the tag scope's data gap 166 �
 167**, and **the Gold token (187.5) with `[A]` in the Rune Pool (135.2.e.5.b)
 167 → 173**.
 
-Two of those are worth reading as method rather than as results:
+A second reading of the shortest blocked cards then took it **173 → 184**, and
+it is the same lesson twice: none of what it added is a mechanic either. "An
+enemy unit **here**" and "**another** friendly unit" are two fields on the
+target spec (355.9); "when I attack" is rule 464.2.c.3's designation raised as
+an event; "SHIELD 3 **and** TANK" is one grant the sequence splitter was
+cutting in half; and "+1 Might **here**" is the same static as "units here have
++1 Might" with the word at the other end. **+11 together, and the parts overlap
+heavily** — the attack event alone measured +1 and measured +4 once "here"
+targets existed with it, because the cards that want one want both.
+
+Three of these are worth reading as method rather than as results:
 
 - **The four small extensions came from reading the shortest blocked cards, not
   from the mechanic table.** None of them is a mechanic — "all enemy units in
   combat" is a target variant, "kill a gear" is one word in a regex — and
   together they beat every subsystem left on the list, which topped out at +3.
   When the tail is flat, look at the *cards* again rather than at the ranking.
+- **The target phrase is now built once and shared.** Eight clause rules each
+  assembled their own `TargetSpec` from the same four parts, which is why
+  "another" was honoured nowhere and "here" nowhere else. `unitTarget` builds
+  all of them, so widening the phrase is one edit rather than eight — and a
+  ninth verb inherits it for free. `parseEffects` also tries a **whole-line**
+  clause before splitting on "and", because "and" is both a sequence joiner and
+  part of single clauses.
 - **The Gold token is the counter-example to "the corpus mentions it a lot".**
   Its wording is the most-printed token clause in the corpus by a wide margin —
   ~20 distinct clauses — and a first counterfactual measured it at **+0**,
@@ -1907,6 +1942,7 @@ What each round actually delivered, for calibrating the next projection:
 | Vision (817) and Predict (436) | +3 projected, **+3** delivered |
 | Criteria targets, Gear targets, tag/token scopes | +9 projected, **+10** delivered |
 | The Gold token (187.5) with `[A]` in the pool | +6 projected, **+6** delivered |
+| Shared target phrase, attack/defend events, trailing `here` | +12 projected, **+11** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic
@@ -1953,17 +1989,17 @@ What the corpus is blocked on now, in the order measurement puts them:
    controller…", "choose one •…". +1 and +0. The effect model has no outcome
    conditions and no modes.
 
-**The tail is now literally flat.** Past `REPEAT 2` (4 cards) and one Gold-token
-wording (2), *every remaining unparsed shape appears on exactly one card* — 325
-shapes, 325 cards — and **273 of the 295 blocked cards are blocked by exactly
-one clause**. Building every mechanic in the table above reaches **177 of 468**,
+**The tail is now literally flat.** Past `REPEAT 2` (4 cards), *every remaining
+unparsed shape appears on exactly one card* — 315 shapes, 315 cards — and **257
+of the 284 blocked cards are blocked by exactly one clause**. Building every
+mechanic in the table above reaches **188 of 468**,
 measured, and there is no further mechanic to find: the rest is one card per
 unit of work whichever route is taken, a parser rule or an authored entry.
 
 **This is where the curve flattens.** The rounds after Additional Costs
-delivered +11, +6, +5, +5, +2, +12, +6, +4, +4, +3, +4, +5, +10 and +6;
+delivered +11, +6, +5, +5, +2, +12, +6, +4, +4, +3, +4, +5, +10, +6 and +11;
 everything left is +2 or less, and the largest of them needs a subsystem rather
-than an extension. Coverage past ~175 means paying subsystem prices for one or
+than an extension. Coverage past ~185 means paying subsystem prices for one or
 two cards at a time — which is the
 point at which a hand-authored overlay stops being an admission of defeat and
 starts being cheaper than the mechanic. `ingest/authored.ts` is that seam: it

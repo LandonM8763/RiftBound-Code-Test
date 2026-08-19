@@ -512,11 +512,23 @@ describe('granted keywords and wider conditions', () => {
     expect(parseCardText('Give a unit DEFLECT this turn.').unparsed).toHaveLength(1);
   });
 
-  it('refuses two keywords in one clause', () => {
-    // Split on "and" before it reaches the clause grammar; half a grant is the
-    // wrong card, so the whole line fails.
-    expect(parseCardText('Give a unit SHIELD 3 and TANK this turn.').unparsed.length)
-      .toBeGreaterThan(0);
+  it('801.3.a: grants two keywords from one clause, as two grants', () => {
+    // The whole line is matched before `parseEffects` splits on "and", which is
+    // what keeps the two halves of one grant together.
+    const parsed = parseCardText('Give a unit SHIELD 3 and TANK this turn.');
+    expect(parsed.unparsed).toHaveLength(0);
+    expect(parsed.effect?.effects).toEqual([
+      { kind: 'grantKeyword', keyword: { kind: 'shield', value: 3 } },
+      { kind: 'grantKeyword', keyword: { kind: 'tank' } },
+    ]);
+  });
+
+  it('still fails the whole clause when one of the two is unmodelled', () => {
+    // Half a grant is the wrong card, so an unreadable second keyword loses
+    // the first as well.
+    expect(
+      parseCardText('Give a unit SHIELD 3 and REPEAT 2 this turn.').unparsed,
+    ).toHaveLength(1);
   });
 
   it('161.1.a: reads "while you have 8+ runes" as a count of the Board', () => {
@@ -592,13 +604,17 @@ describe('zone movement', () => {
     });
   });
 
-  it('refuses "another", which needs an excludeSelf the target model lacks', () => {
-    // Reading it as the plain form would let the card bounce itself, which the
-    // printed text forbids.
-    expect(
-      parseCardText("When you play me, return another unit at a battlefield to its owner's hand.")
-        .unparsed,
-    ).toHaveLength(1);
+  it('355.9: reads "another" as an excludeSelf, so the card cannot bounce itself', () => {
+    const parsed = parseCardText(
+      "When you play me, return another unit at a battlefield to its owner's hand.",
+    );
+    expect(parsed.unparsed).toHaveLength(0);
+    expect(parsed.abilities?.triggered?.[0]?.effect.target).toEqual({
+      kind: 'unit',
+      scope: 'any',
+      atBattlefield: true,
+      excludeSelf: true,
+    });
   });
 
   it('refuses a Might filter on the target', () => {
@@ -1418,6 +1434,47 @@ describe('effects that affect everything (355.5.a)', () => {
   });
 });
 
+describe('the target phrase, shared by every clause that takes one', () => {
+  it('355.9: reads "here" as the source\'s own Battlefield', () => {
+    expect(parseCardText('Deal 1 to an enemy unit here.').effect?.target).toEqual({
+      kind: 'unit',
+      scope: 'enemy',
+      here: true,
+    });
+  });
+
+  it('keeps "here" and "at a battlefield" apart', () => {
+    expect(parseCardText('Deal 1 to an enemy unit at a battlefield.').effect?.target).toEqual({
+      kind: 'unit',
+      scope: 'enemy',
+      atBattlefield: true,
+    });
+  });
+
+  it('reads "another" the same way on every verb', () => {
+    for (const line of ['Kill another friendly unit.', 'Buff another friendly unit.']) {
+      expect(parseCardText(line).effect?.target).toEqual({
+        kind: 'unit',
+        scope: 'friendly',
+        excludeSelf: true,
+      });
+    }
+  });
+});
+
+describe('the combat designations (464.2.c.3)', () => {
+  it('reads "when I attack" and "when I defend"', () => {
+    expect(parseCardText('When I attack, buff me.').abilities?.triggered?.[0]?.condition).toEqual({
+      event: 'attack',
+      subject: 'self',
+    });
+    expect(parseCardText('When I defend, buff me.').abilities?.triggered?.[0]?.condition).toEqual({
+      event: 'defend',
+      subject: 'self',
+    });
+  });
+});
+
 describe('the Gold gear token (187.5)', () => {
   it('reads a Might-less gear token', () => {
     const parsed = parseCardText('Play a Gold gear token exhausted.');
@@ -1473,6 +1530,24 @@ describe('static scopes beyond friendly and enemy', () => {
       affects: { who: 'friendly', token: true },
       grant: { entersReady: true },
     });
+  });
+
+  it('355.9: reads a trailing "here" onto the scope', () => {
+    expect(
+      parseCardText('Other friendly units have +1 Might here.').abilities?.statics?.[0],
+    ).toEqual({
+      affects: { who: 'friendly', here: true, excludeSelf: true },
+      grant: { might: 1 },
+    });
+  });
+
+  it('leaves a trailing "here" alone when it belongs to a count', () => {
+    // "equal to the number of enemy units here" ends in the same word and
+    // means something else, so the printed reading is tried first.
+    expect(
+      parseCardText('I have ASSAULT equal to the number of enemy units here.').abilities
+        ?.statics?.[0]?.affects,
+    ).toEqual({ who: 'self' });
   });
 
   it('reads "your units here" as the friendly-here scope', () => {

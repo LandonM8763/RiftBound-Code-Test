@@ -304,6 +304,50 @@ describe('targeting (rule 355.9)', () => {
     expect(targets).not.toContain(atBase);
   });
 
+  it('355.9: narrows to the source\'s own Battlefield with "here"', () => {
+    let state = inMainPhase();
+    const me = state.activePlayer;
+    const [a, source] = onBoard(state, me, PLAIN, 0);
+    state = a;
+    const [b, sameField] = onBoard(state, me, PLAIN, 0);
+    state = b;
+    const [c, elsewhere] = onBoard(state, me, PLAIN, 1);
+    state = c;
+
+    const targets = legalTargets(state, me, { kind: 'unit', scope: 'any', here: true }, source);
+
+    expect(targets).toContain(sameField);
+    expect(targets).toContain(source);
+    expect(targets).not.toContain(elsewhere);
+  });
+
+  it('names nothing when the source is not at a Battlefield', () => {
+    let state = inMainPhase();
+    const me = state.activePlayer;
+    const [a, atBase] = onBoard(state, me, PLAIN, 'base');
+    state = a;
+    const [b] = onBoard(state, me, PLAIN, 0);
+    state = b;
+
+    // A source in a Base names no Battlefield, so 355.8 makes the card
+    // unplayable rather than letting it reach the whole Board.
+    expect(legalTargets(state, me, { kind: 'unit', scope: 'any', here: true }, atBase)).toEqual([]);
+  });
+
+  it('excludes the source itself for "another"', () => {
+    let state = inMainPhase();
+    const me = state.activePlayer;
+    const [a, source] = onBoard(state, me, PLAIN, 'base');
+    state = a;
+    const [b, other] = onBoard(state, me, PLAIN, 'base');
+    state = b;
+
+    const spec = { kind: 'unit' as const, scope: 'friendly' as const, excludeSelf: true };
+    expect(legalTargets(state, me, spec, source)).toEqual([other]);
+    // Without a source there is nothing to exclude, which is the plain reading.
+    expect(legalTargets(state, me, spec)).toContain(source);
+  });
+
   it('refuses to play a targeting card without a valid target', () => {
     let state = withEnergy(inMainPhase(), 1);
     const [withBolt, bolt] = toHand(state, BOLT);

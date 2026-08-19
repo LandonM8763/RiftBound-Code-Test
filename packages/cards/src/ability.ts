@@ -90,6 +90,16 @@ export type TriggerEvent =
   | 'move'
   /** A Combat resolved with this player as the winner (466.3). */
   | 'winCombat'
+  /**
+   * A Unit gained the Attacker designation (464.2.c.3).
+   *
+   * "When I attack" — raised for every Unit the Attacker controls at the
+   * Contested Battlefield when Combat opens, which is the moment 464.2.c.3
+   * applies the designation and 464.2.e collects what it triggered.
+   */
+  | 'attack'
+  /** The mirror: a Unit gained the Defender designation (464.2.c.3). */
+  | 'defend'
   /** A Buff was placed (702). */
   | 'buffed'
   /**

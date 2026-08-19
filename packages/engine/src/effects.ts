@@ -130,6 +130,8 @@ export function legalTargets(
   state: GameState,
   controller: PlayerId,
   spec: TargetSpec,
+  /** The effect's source, for the source-relative `here` and `excludeSelf`. */
+  source?: EntityId | undefined,
 ): EntityId[] {
   // "A unit from your trash" — a card in a Non-Board Zone, not a Game Object on
   // the Board, so this walks the trash rather than the Battlefields and Bases.
@@ -172,6 +174,17 @@ export function legalTargets(
     }
   }
 
+  // 355.9's "here": the source's own Battlefield, and none at all when the
+  // source is not at one. Judged once rather than per candidate.
+  let here: number | undefined;
+  if (spec.here === true) {
+    const location = source === undefined ? undefined : getEntity(state, source).location;
+    if (location?.kind !== 'battlefield') {
+      return [];
+    }
+    here = location.index;
+  }
+
   const wanted = spec.cardType ?? 'unit';
   return candidates
     .filter(({ unit, atBattlefield }) => {
@@ -179,6 +192,16 @@ export function legalTargets(
         return false;
       }
       if (spec.atBattlefield === true && !atBattlefield) {
+        return false;
+      }
+      if (here !== undefined) {
+        const at = getEntity(state, unit).location;
+        if (at.kind !== 'battlefield' || at.index !== here) {
+          return false;
+        }
+      }
+      // "another": never the source itself.
+      if (spec.excludeSelf === true && unit === source) {
         return false;
       }
       const owner = getEntity(state, unit).controller;
@@ -311,13 +334,14 @@ export function isValidTarget(
   controller: PlayerId,
   spec: TargetSpec,
   target: EntityId | undefined,
+  source?: EntityId | undefined,
 ): boolean {
   // A self-targeting card takes no chosen target; supplying one is an error,
   // not a different reading.
   if (spec.kind !== 'unit' && spec.kind !== 'trashCard' && spec.kind !== 'gear') {
     return target === undefined;
   }
-  return target !== undefined && legalTargets(state, controller, spec).includes(target);
+  return target !== undefined && legalTargets(state, controller, spec, source).includes(target);
 }
 
 /**

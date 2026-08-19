@@ -183,25 +183,6 @@ const RULES_RESTATEMENTS: readonly RegExp[] = [
 ];
 
 /**
- * A modelled keyword by name, for the "give a unit X this turn" grant.
- *
- * Reuses `MODELLED_KEYWORDS` rather than a second table, so a keyword the
- * engine does not implement cannot be granted by an effect either — 801.3.a
- * makes a granted keyword do exactly what a printed one does, and granting one
- * the engine ignores would be the same wrong card as printing it.
- */
-function keywordNamed(name: string, value: string | undefined): Keyword | undefined {
-  const line = value === undefined ? name : `${name} ${value}`;
-  for (const rule of MODELLED_KEYWORDS) {
-    const match = line.match(rule.pattern);
-    if (match !== null) {
-      return rule.build(match);
-    }
-  }
-  return undefined;
-}
-
-/**
  * A count read off the state: "your MIGHTY units", "enemy units here", "other
  * battlefield you or allies control".
  *
@@ -375,14 +356,37 @@ interface ClauseRule {
 }
 
 const SELF: TargetSpec = { kind: 'self' };
-const UNIT_ANY: TargetSpec = { kind: 'unit', scope: 'any' };
-const UNIT_FRIENDLY: TargetSpec = { kind: 'unit', scope: 'friendly' };
-const UNIT_ENEMY: TargetSpec = { kind: 'unit', scope: 'enemy' };
 
 /** The "friendly "/"enemy " prefix a target phrase may carry, or "any". */
 function unitScope(prefix: string | undefined): 'any' | 'friendly' | 'enemy' {
   const word = (prefix ?? '').trim().toLowerCase();
   return word === 'friendly' ? 'friendly' : word === 'enemy' ? 'enemy' : 'any';
+}
+
+/**
+ * One builder for every "a/another [friendly|enemy] unit/gear [where]" phrase.
+ *
+ * The four parts are orthogonal and each clause that takes a target captures
+ * them in the same order, so writing the assembly once is what stops "another"
+ * being honoured on `kill` and forgotten on `buff`.
+ */
+function unitTarget(
+  article: string | undefined,
+  scope: string | undefined,
+  noun: string | undefined,
+  where: string | undefined,
+): TargetSpec {
+  const cardType = (noun ?? 'unit').trim().toLowerCase();
+  const place = (where ?? '').trim().toLowerCase();
+  return {
+    kind: 'unit',
+    scope: unitScope(scope),
+    ...(cardType === 'gear' ? { cardType: 'gear' as const } : {}),
+    ...(place === 'at a battlefield' ? { atBattlefield: true } : {}),
+    ...(place === 'here' ? { here: true } : {}),
+    // 355.9's "another": never the effect's own source.
+    ...(/^another$/i.test((article ?? '').trim()) ? { excludeSelf: true } : {}),
+  };
 }
 
 const CLAUSES: readonly ClauseRule[] = [
@@ -482,30 +486,29 @@ const CLAUSES: readonly ClauseRule[] = [
     },
   },
   {
-    pattern: /^deal (\d+) to an? (friendly |enemy )?unit(?: at a battlefield)?$/i,
+    // 417 damages a Unit and nothing else, so the noun is fixed here where
+    // `kill` and `toHand` take one — a Gear cannot be damaged.
+    pattern: /^deal (\d+) to (an?|another) (friendly |enemy )?unit( at a battlefield| here)?$/i,
     build: (m) => {
       const n = count(m[1] ?? '');
-      if (n === undefined) return undefined;
-      const scope = (m[2] ?? '').trim().toLowerCase();
-      const atBattlefield = /at a battlefield$/i.test(m[0]);
-      const base: TargetSpec =
-        scope === 'friendly' ? UNIT_FRIENDLY : scope === 'enemy' ? UNIT_ENEMY : UNIT_ANY;
-      return {
-        effects: [{ kind: 'dealDamage', amount: n }],
-        target: atBattlefield ? { ...base, atBattlefield: true } : base,
-      };
+      return n === undefined
+        ? undefined
+        : {
+            effects: [{ kind: 'dealDamage', amount: n }],
+            target: unitTarget(m[2], m[3], 'unit', m[4]),
+          };
     },
   },
   {
-    pattern: /^give an? (friendly |enemy )?unit \+(\d+) might this turn$/i,
+    pattern: /^give (an?|another) (friendly |enemy )?unit( here)? \+(\d+) might this turn$/i,
     build: (m) => {
-      const n = count(m[2] ?? '');
-      if (n === undefined) return undefined;
-      const scope = (m[1] ?? '').trim().toLowerCase();
-      return {
-        effects: [{ kind: 'giveMight', amount: n }],
-        target: scope === 'friendly' ? UNIT_FRIENDLY : scope === 'enemy' ? UNIT_ENEMY : UNIT_ANY,
-      };
+      const n = count(m[4] ?? '');
+      return n === undefined
+        ? undefined
+        : {
+            effects: [{ kind: 'giveMight', amount: n }],
+            target: unitTarget(m[1], m[2], 'unit', m[3]),
+          };
     },
   },
   {
@@ -593,24 +596,20 @@ const CLAUSES: readonly ClauseRule[] = [
      * is split on "and" before it reaches here and fails, which is the correct
      * outcome: half a grant is the wrong card.
      */
-    pattern: /^give (?:an? (friendly |enemy )?unit|(me)) ([a-z]+)(?:\s+(\d+))? this turn$/i,
+    pattern:
+      /^give (?:(an?|another) (friendly |enemy )?unit( here)?|(me)) ([a-z][a-z\s\d,-]*?) this turn$/i,
     build: (m) => {
-      const keyword = keywordNamed(m[3] ?? '', m[4]);
-      if (keyword === undefined) {
-        return undefined;
-      }
-      const scope = (m[1] ?? '').trim().toLowerCase();
-      return {
-        effects: [{ kind: 'grantKeyword', keyword }],
-        target:
-          m[2] !== undefined
-            ? SELF
-            : scope === 'friendly'
-              ? UNIT_FRIENDLY
-              : scope === 'enemy'
-                ? UNIT_ENEMY
-                : UNIT_ANY,
-      };
+      // 801.3.a grants each keyword separately, so "SHIELD 3 and TANK" is two
+      // grants on one target rather than an unreadable clause. The whole line
+      // is matched before `parseEffects` splits on "and", which is what lets
+      // the two arrive together.
+      const granted = grantedKeywords(m[5] ?? '');
+      return granted === undefined
+        ? undefined
+        : {
+            effects: granted.map((keyword) => ({ kind: 'grantKeyword' as const, keyword })),
+            target: m[4] !== undefined ? SELF : unitTarget(m[1], m[2], 'unit', m[3]),
+          };
     },
   },
   {
@@ -623,21 +622,14 @@ const CLAUSES: readonly ClauseRule[] = [
      * a Might filter. Reading either as the unqualified form would let the card
      * hit something the printed text forbids.
      */
-    pattern: /^return an? (friendly |enemy )?(unit|gear)( at a battlefield)? to (?:its|their) owner'?s? hand$/i,
-    build: (m) => {
-      // 355.9.a.1 makes a Unit target a Game Object on the Board, and a Gear is
-      // one too — 412's zone move does not care which. Only the sweep narrows.
-      const cardType = (m[2] ?? 'unit').toLowerCase() as 'unit' | 'gear';
-      return {
-        effects: [{ kind: 'toHand' }],
-        target: {
-          kind: 'unit',
-          scope: unitScope(m[1]),
-          ...(cardType === 'unit' ? {} : { cardType }),
-          ...(m[3] === undefined ? {} : { atBattlefield: true }),
-        },
-      };
-    },
+    // 355.9.a.1 makes a Unit target a Game Object on the Board, and a Gear is
+    // one too — 412's zone move does not care which. Only the sweep narrows.
+    pattern:
+      /^return (an?|another) (friendly |enemy )?(unit|gear)( at a battlefield| here)? to (?:its|their) owner'?s? hand$/i,
+    build: (m) => ({
+      effects: [{ kind: 'toHand' }],
+      target: unitTarget(m[1], m[2], m[3], m[4]),
+    }),
   },
   {
     /** "Return me to my owner's hand" — the same effect, already-determined target. */
@@ -660,65 +652,23 @@ const CLAUSES: readonly ClauseRule[] = [
   {
     // 428 kills any Permanent, so "kill a gear" is the same clause with a
     // different noun — the sweep narrows and the effect does not change.
-    pattern: /^kill an? (friendly |enemy )?(unit|gear)(?: at a battlefield)?$/i,
-    build: (m) => {
-      const cardType = (m[2] ?? 'unit').toLowerCase() as 'unit' | 'gear';
-      const atBattlefield = /at a battlefield$/i.test(m[0]);
-      return {
-        effects: [{ kind: 'kill' }],
-        target: {
-          kind: 'unit',
-          scope: unitScope(m[1]),
-          ...(cardType === 'unit' ? {} : { cardType }),
-          ...(atBattlefield ? { atBattlefield: true } : {}),
-        },
-      };
-    },
+    pattern: /^kill (an?|another) (friendly |enemy )?(unit|gear)( at a battlefield| here)?$/i,
+    build: (m) => ({ effects: [{ kind: 'kill' }], target: unitTarget(m[1], m[2], m[3], m[4]) }),
   },
   {
     // Rule 423. Same shape as `kill` above, because the wording is the same and
     // only the verb differs.
-    pattern: /^stun an? (friendly |enemy )?unit(?: at a battlefield)?$/i,
-    build: (m) => {
-      const scope = (m[1] ?? '').trim().toLowerCase();
-      const base: TargetSpec =
-        scope === 'friendly' ? UNIT_FRIENDLY : scope === 'enemy' ? UNIT_ENEMY : UNIT_ANY;
-      const atBattlefield = /at a battlefield$/i.test(m[0]);
-      return {
-        effects: [{ kind: 'stun' }],
-        target: atBattlefield ? { ...base, atBattlefield: true } : base,
-      };
-    },
+    pattern: /^stun (an?|another) (friendly |enemy )?unit( at a battlefield| here)?$/i,
+    build: (m) => ({ effects: [{ kind: 'stun' }], target: unitTarget(m[1], m[2], 'unit', m[3]) }),
   },
   {
-    pattern: /^ready an? (friendly |enemy )?unit$/i,
-    build: (m) => {
-      const scope = (m[1] ?? '').trim().toLowerCase();
-      return {
-        effects: [{ kind: 'ready' }],
-        target: scope === 'friendly' ? UNIT_FRIENDLY : scope === 'enemy' ? UNIT_ENEMY : UNIT_ANY,
-      };
-    },
-  },
-  {
-    pattern: /^buff an? (friendly |enemy )?unit$/i,
-    build: (m) => {
-      const scope = (m[1] ?? '').trim().toLowerCase();
-      return {
-        effects: [{ kind: 'buff' }],
-        target: scope === 'friendly' ? UNIT_FRIENDLY : scope === 'enemy' ? UNIT_ENEMY : UNIT_ANY,
-      };
-    },
-  },
-  {
-    pattern: /^heal an? (friendly |enemy )?unit$/i,
-    build: (m) => {
-      const scope = (m[1] ?? '').trim().toLowerCase();
-      return {
-        effects: [{ kind: 'heal' }],
-        target: scope === 'friendly' ? UNIT_FRIENDLY : scope === 'enemy' ? UNIT_ENEMY : UNIT_ANY,
-      };
-    },
+    // One rule rather than three: the verbs differ and the target phrase does
+    // not, which is the whole reason `unitTarget` exists.
+    pattern: /^(ready|buff|heal|exhaust) (an?|another) (friendly |enemy )?unit( at a battlefield| here)?$/i,
+    build: (m) => ({
+      effects: [{ kind: (m[1] ?? '').toLowerCase() as 'ready' | 'buff' | 'heal' | 'exhaust' }],
+      target: unitTarget(m[2], m[3], 'unit', m[4]),
+    }),
   },
   {
     // 467-471: "you score 1 point". 471.1.a.1 keeps it clear of the Final
@@ -946,6 +896,12 @@ const CONDITIONS: readonly {
   // Combat (466.3).
   { pattern: /^i win (?:a )?combat$/i, build: () => ({ event: 'winCombat', subject: 'self' }) },
   { pattern: /^you win (?:a )?combat$/i, build: () => ({ event: 'winCombat', subject: 'you' }) },
+
+  // The designations of 464.2.c.3. "When I attack or defend" is genuinely two
+  // conditions, so it produces two abilities rather than one — `parseAbility`
+  // splits it, the same way a card with two sentences produces two.
+  { pattern: /^i attack$/i, build: () => ({ event: 'attack', subject: 'self' }) },
+  { pattern: /^i defend$/i, build: () => ({ event: 'defend', subject: 'self' }) },
 
   // Stun (423). 423.1.a.1 is what makes "when you stun" meaningful — the
   // engine raises the event only when the status actually changes.
@@ -1361,7 +1317,15 @@ function scopeNamed(text: string): StaticScope | undefined {
   return STATIC_SCOPES.find((entry) => entry.pattern.test(text))?.scope ?? taggedScope(text);
 }
 
-/** The keyword list a static may grant, e.g. "ASSAULT and GANKING". */
+/**
+ * The keyword list a grant names, e.g. "ASSAULT and GANKING", "SHIELD 3, TANK".
+ *
+ * Shared by a static's grant and an effect's, and it reads `MODELLED_KEYWORDS`
+ * rather than a second table — so a keyword the engine does not implement
+ * cannot be granted either way. 801.3.a makes a granted keyword do exactly what
+ * a printed one does, and granting one the engine ignores would be the same
+ * wrong card as printing it.
+ */
 function grantedKeywords(text: string): readonly Keyword[] | undefined {
   const granted: Keyword[] = [];
   for (const part of text.split(/\s+and\s+|,\s*/i)) {
@@ -1452,12 +1416,36 @@ export function parseStatic(line: string): StaticAbility | undefined {
   if (have === null) {
     return undefined;
   }
-  const scope = scopeNamed((have[1] ?? '').trim());
+  const printedScope = (have[1] ?? '').trim();
+  const printedBody = (have[2] ?? '').trim();
+
+  // 355.9's "here" is printed at either end — "Other friendly units here have
+  // +1 Might" and "Other friendly units have +1 Might here" are the same
+  // statement — so a trailing one is moved onto the scope, which is the half it
+  // is about. As a *fallback* rather than a rewrite: "I have ASSAULT equal to
+  // the number of enemy units here" ends in the same word and means something
+  // else entirely, so the printed reading is tried first and only a failure
+  // reaches this one.
+  const trailingHere = /^(.+?)\s+here$/i.exec(printedBody);
+  const asPrinted = buildStatic(printedScope, printedBody, condition);
+  if (asPrinted !== undefined || trailingHere === null) {
+    return asPrinted;
+  }
+  return buildStatic(`${printedScope} here`, (trailingHere[1] ?? '').trim(), condition);
+}
+
+/** The grant half of a static, once its scope phrase and body are separated. */
+function buildStatic(
+  scopePhrase: string,
+  printed: string,
+  condition: Condition | undefined,
+): StaticAbility | undefined {
+  const scope = scopeNamed(scopePhrase);
   if (scope === undefined) {
     return undefined;
   }
 
-  let body = (have[2] ?? '').trim();
+  let body = printed;
 
   // "I have +1 Might **for each friendly gear**", "I have ASSAULT **equal to
   // the number of enemy units here**". The count multiplies whatever the grant
@@ -1554,6 +1542,15 @@ export function parseCondition(head: string): ParsedCondition | undefined {
  * a card that damages one Unit and buffs another cannot be represented.
  */
 export function parseEffects(body: string): CardEffect | undefined {
+  // A whole-line match wins over the split, because "and" is both a sequence
+  // joiner and part of single clauses — "give a unit SHIELD 3 and TANK this
+  // turn" is one grant, not two halves. Every clause pattern is anchored, so
+  // a whole-line match can only be the clause it names.
+  const asOne = matchClause(body.replace(/[.]+$/, '').trim());
+  if (asOne !== undefined) {
+    return { target: asOne.target, effects: asOne.effects };
+  }
+
   const parts = body
     .split(/,\s*then\s+|\s+then\s+|\.\s*|,\s*and\s+|\s+and\s+|,\s*/i)
     .map((part) => part.replace(/[.]+$/, '').trim())
@@ -1567,15 +1564,7 @@ export function parseEffects(body: string): CardEffect | undefined {
   let target: TargetSpec = NO_TARGET;
 
   for (const part of parts) {
-    const rule = CLAUSES.map((candidate) => ({
-      candidate,
-      match: part.match(candidate.pattern),
-    })).find((entry) => entry.match !== null);
-
-    if (rule === undefined || rule.match === null) {
-      return undefined;
-    }
-    const built = rule.candidate.build(rule.match);
+    const built = matchClause(part);
     if (built === undefined) {
       return undefined;
     }
@@ -1589,6 +1578,25 @@ export function parseEffects(body: string): CardEffect | undefined {
   }
 
   return { target, effects };
+}
+
+/**
+ * Build from the *first* clause rule whose pattern consumes `part` whole.
+ *
+ * First match rather than first success on purpose: a rule that matches and
+ * then refuses has decided the clause is one it owns and is wrong — "play a 4
+ * Might Recruit unit token" is a token clause with the wrong Might, not an
+ * invitation to try something else. Falling through would turn a deliberate
+ * refusal into a different reading.
+ */
+function matchClause(part: string): { effects: Effect[]; target: TargetSpec } | undefined {
+  for (const candidate of CLAUSES) {
+    if (candidate.pattern.test(part)) {
+      const match = part.match(candidate.pattern);
+      return match === null ? undefined : candidate.build(match);
+    }
+  }
+  return undefined;
 }
 
 /** Split a line into `"<lead>: <body>"`, respecting only the first colon. */

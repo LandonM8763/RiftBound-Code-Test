@@ -58,7 +58,9 @@ export function legalActions(state: GameState, player: PlayerId): readonly Actio
       return [];
     }
     const spec = ability.effect.target;
-    const targets = needsTargetChoice(spec) ? legalTargets(state, player, spec) : [undefined];
+    const targets = needsTargetChoice(spec)
+      ? legalTargets(state, player, spec, top.entity)
+      : [undefined];
     const pendingActions: Action[] = [];
     for (const target of targets) {
       for (const destination of choicesOfDestination(state, player, ability.effect)) {
@@ -84,7 +86,9 @@ export function legalActions(state: GameState, player: PlayerId): readonly Actio
     const spec = ability.effect.target;
     // `self` needs no choice, so it enumerates as a single action with no
     // target — the effect resolves "me" to the ability's source itself.
-    const targets = needsTargetChoice(spec) ? legalTargets(state, player, spec) : [undefined];
+    const targets = needsTargetChoice(spec)
+      ? legalTargets(state, player, spec, source)
+      : [undefined];
     for (const target of targets) {
       for (const destination of choicesOfDestination(state, player, ability.effect)) {
         actions.push({
@@ -121,7 +125,7 @@ export function legalActions(state: GameState, player: PlayerId): readonly Actio
     // (rule 355.8), so one action is offered per legal target.
     const effect = effectOf(check.card);
     const targets = needsTargetChoice(effect?.target)
-      ? legalTargets(state, player, effect?.target as TargetSpec)
+      ? legalTargets(state, player, effect?.target as TargetSpec, entity.id)
       : [undefined];
 
     for (const target of targets) {
@@ -173,7 +177,7 @@ export function legalActions(state: GameState, player: PlayerId): readonly Actio
     const effect = effectOf(definition);
     const at = state.entities[card]?.hiddenAt;
     const targets = needsTargetChoice(effect?.target)
-      ? legalTargets(state, player, effect?.target as TargetSpec).filter(
+      ? legalTargets(state, player, effect?.target as TargetSpec, card).filter(
           // 811.1.d.2: choices are restricted to the Battlefield it was hidden at.
           (target) => at === undefined || allowedFromFacedown(state, at, target),
         )

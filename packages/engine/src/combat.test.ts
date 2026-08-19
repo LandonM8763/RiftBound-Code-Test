@@ -13,6 +13,8 @@ import { describe, expect, it } from 'vitest';
 
 import { assignDamage, combatResult, mightOf, sumMight } from './combat.js';
 import { keywordsOf, unitKeywordValue } from './statics.js';
+import type { GameEvent } from './events.js';
+import { currentLegalActions } from './legal.js';
 import { checkInvariants } from './invariants.js';
 import { moveEntity, withEntity } from './mutate.js';
 import { reduce } from './reduce.js';
@@ -50,6 +52,39 @@ const CAUSTIC = makeUnit(2, ['fury'], {
           target: { kind: 'all', scope: 'any', here: true },
           effects: [{ kind: 'dealDamage', amount: 3 }],
         },
+      },
+    ],
+  },
+});
+
+/** "When I attack, deal 1 to an enemy unit here" — 464.2.c.3's designation. */
+const RAIDER = makeUnit(2, ['fury'], {
+  id: cardId('C-017'),
+  name: 'Raider',
+  cost: cost(1),
+  abilities: {
+    triggered: [
+      {
+        condition: { event: 'attack', subject: 'self' },
+        effect: {
+          target: { kind: 'unit', scope: 'enemy', here: true },
+          effects: [{ kind: 'dealDamage', amount: 1 }],
+        },
+      },
+    ],
+  },
+});
+
+/** The mirror, so the two designations can be told apart. */
+const SENTRY = makeUnit(9, ['fury'], {
+  id: cardId('C-018'),
+  name: 'Sentry',
+  cost: cost(1),
+  abilities: {
+    triggered: [
+      {
+        condition: { event: 'defend', subject: 'self' },
+        effect: { target: { kind: 'none' }, effects: [{ kind: 'draw', count: 1 }] },
       },
     ],
   },
@@ -97,6 +132,8 @@ const REGISTRY = CardRegistry.from([
   TANK,
   BACKLINE,
   CAUSTIC,
+  RAIDER,
+  SENTRY,
   FURY_RUNE,
   ...BATTLEFIELDS,
 ] as CardDefinition[]);
@@ -113,6 +150,8 @@ function deck(): DeckList {
       ...Array.from({ length: 2 }, () => TANK.id),
       ...Array.from({ length: 2 }, () => BACKLINE.id),
       ...Array.from({ length: 2 }, () => CAUSTIC.id),
+      ...Array.from({ length: 2 }, () => RAIDER.id),
+      ...Array.from({ length: 2 }, () => SENTRY.id),
     ],
     runes: Array.from({ length: 8 }, () => FURY_RUNE.id),
     battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
@@ -343,6 +382,50 @@ describe('fighting a Combat end to end', () => {
     }
 
     expect(state.entities[setup.mover]!.damage).toBe(3);
+    checkInvariants(state);
+  });
+
+  it('464.2.c.3: the designations fire "when I attack" and "when I defend"', () => {
+    const setup = poised(RAIDER, SENTRY);
+    const attacker = playerId(setup.attacker);
+    const defender = playerId(setup.defender);
+    const handBefore = setup.state.players[defender]!.zones.hand.length;
+
+    // Moving in opens the Combat, which applies the designations (464.2.c.3)
+    // and collects what they triggered (464.2.e).
+    let state = reduce(setup.state, {
+      type: 'moveUnits',
+      units: [setup.mover],
+      to: battlefieldLocation(0),
+    }).state;
+    expect(state.chain.length).toBeGreaterThan(0);
+
+    const sentry = state.battlefields[0]?.units.find(
+      (unit) => state.entities[unit]!.controller === defender,
+    );
+
+    // Drained one item at a time, because the Combat Cleanup that follows heals
+    // every Unit (466.1.a.1) — the damage is only visible while it is marked.
+    const seen: GameEvent[] = [];
+    for (let i = 0; i < 12 && state.chain.length > 0; i += 1) {
+      // 402.2: a pending item is the only thing its controller may do, and it
+      // carries the target choice — so the Chain is drained by taking the
+      // offered action rather than by passing.
+      const pending = state.chain[state.chain.length - 1]?.pending === true;
+      const action = pending
+        ? currentLegalActions(state).find((one) => one.type === 'resolveTrigger')
+        : undefined;
+      const step = reduce(state, action ?? { type: 'pass' });
+      state = step.state;
+      seen.push(...step.events);
+    }
+
+    // The Raider's "deal 1 to an enemy unit here" found the defending Sentry
+    // and nothing at another Battlefield.
+    expect(seen).toContainEqual({ type: 'damageDealt', unit: sentry, amount: 1 });
+    // The Sentry's "when I defend, draw 1" fired for its controller.
+    expect(state.players[defender]!.zones.hand.length).toBe(handBefore + 1);
+    expect(attacker).not.toBe(defender);
     checkInvariants(state);
   });
 

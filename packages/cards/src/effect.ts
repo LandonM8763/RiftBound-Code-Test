@@ -46,6 +46,23 @@ export type TargetSpec =
       readonly scope: 'any' | 'friendly' | 'enemy';
       readonly atBattlefield?: boolean | undefined;
       /**
+       * "an enemy unit **here**" — 355.9's here, the source's own Battlefield.
+       *
+       * Source-relative, like `StaticScope.here` and the `all` spec's: a source
+       * that is not at a Battlefield names none, so nothing qualifies and 355.8
+       * makes the card unplayable rather than letting it reach the whole Board.
+       * Distinct from `atBattlefield`, which admits every Battlefield.
+       */
+      readonly here?: boolean | undefined;
+      /**
+       * "**another** friendly unit" — never the effect's own source.
+       *
+       * The same word `StaticScope.excludeSelf` reads, and load-bearing for the
+       * same reason: without it "when you play me, buff another friendly unit"
+       * would offer the card itself, which the printed text forbids.
+       */
+      readonly excludeSelf?: boolean | undefined;
+      /**
        * "Kill a gear", "return a gear to its owner's hand".
        *
        * Defaults to `unit`. A Gear is a Permanent like a Unit (428 kills either
