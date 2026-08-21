@@ -18,6 +18,7 @@
 import {
   cardId,
   isDomain,
+  type AttachedText,
   type CardDefinition,
   type CardId,
   type Cost,
@@ -407,8 +408,8 @@ function normalizeCard(
               // Equip line reads but whose Effect Text does not keeps neither,
               // because a Gear that Attaches and then lends nothing is a
               // different card from the one printed.
-              ...(parsedWhole && parsed.attached !== undefined
-                ? { attached: parsed.attached }
+              ...((parsedWhole ? parsed.attached : model?.attached) !== undefined
+                ? { attached: (parsedWhole ? parsed.attached : model?.attached) as AttachedText }
                 : {}),
               ...(parsedWhole && parsed.reaction === true
                 ? { timing: 'reaction' as const }

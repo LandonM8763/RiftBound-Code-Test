@@ -15,6 +15,7 @@ import {
 import { describe, expect, it } from 'vitest';
 
 import { mightOf } from './combat.js';
+import { conditionMet } from './condition.js';
 import { legalTargets } from './effects.js';
 import { checkInvariants } from './invariants.js';
 import { currentLegalActions } from './legal.js';
@@ -107,6 +108,26 @@ const WITHER = makeSpell(['calm'], {
   },
 });
 
+/**
+ * "Choose an enemy unit. If it is stunned, kill it. Otherwise, stun it."
+ *
+ * Two guarded steps rather than a branch tree — and the point of the test is
+ * that the second guard cannot see what the first step did.
+ */
+const RECKONING = makeSpell(['calm'], {
+  id: cardId('E-037'),
+  name: 'Reckoning',
+  cost: cost(1),
+  timing: 'action',
+  effect: {
+    target: { kind: 'unit', scope: 'enemy' },
+    effects: [
+      { kind: 'kill', condition: { kind: 'targetIs', stunned: true } },
+      { kind: 'stun', condition: { kind: 'not', condition: { kind: 'targetIs', stunned: true } } },
+    ],
+  },
+});
+
 /** "Counter a spell." — a Reaction, since the Chain has to be up (425). */
 const REBUKE = makeSpell(['calm'], {
   id: cardId('E-035'),
@@ -175,6 +196,7 @@ const REGISTRY = CardRegistry.from([
   DISARM,
   REBUKE,
   WITHER,
+  RECKONING,
   FURY_RUNE,
   ...BATTLEFIELDS,
 ] as CardDefinition[]);
@@ -196,6 +218,7 @@ function deck(): DeckList {
       ...Array.from({ length: 2 }, () => DISARM.id),
       ...Array.from({ length: 2 }, () => REBUKE.id),
       ...Array.from({ length: 3 }, () => WITHER.id),
+      ...Array.from({ length: 3 }, () => RECKONING.id),
     ],
     runes: Array.from({ length: 8 }, () => FURY_RUNE.id),
     battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
@@ -548,6 +571,65 @@ describe('reducing Might with a printed floor (143.2)', () => {
 
     expect(after.entities[victim]!.mightBonus).toBe(-5);
     expect(mightOf(after, victim)).toBe(0);
+  });
+});
+
+describe('guarded effect steps', () => {
+  it('runs the branch whose guard holds', () => {
+    let state = withEnergy(inMainPhase('guard-stun'), 1);
+    const me = state.activePlayer;
+    const them = playerId((me + 1) % state.players.length);
+    const [a, spell] = toHand(state, RECKONING);
+    state = a;
+    const [b, victim] = onBoard(state, them, PLAIN, 'base');
+    state = b;
+
+    // Not stunned, so the "otherwise" branch runs and the Unit survives.
+    const after = castSpell(state, spell, victim);
+
+    expect(after.entities[victim]!.stunned).toBe(true);
+    expect(after.players[them]!.zones.base).toContain(victim);
+  });
+
+  it('takes the first branch when its guard holds', () => {
+    let state = withEnergy(inMainPhase('guard-kill'), 1);
+    const me = state.activePlayer;
+    const them = playerId((me + 1) % state.players.length);
+    const [a, spell] = toHand(state, RECKONING);
+    state = a;
+    const [b, victim] = onBoard(state, them, PLAIN, 'base');
+    state = withEntity(b, victim, (current) => ({ ...current, stunned: true }));
+
+    const after = castSpell(state, spell, victim);
+
+    expect(after.players[them]!.zones.trash).toContain(victim);
+    checkInvariants(after);
+  });
+
+  it('asks every guard against the state on entry, so an else cannot see the branch above it', () => {
+    // The hazard this rules out: kill a stunned Unit, then have "otherwise,
+    // stun it" observe a corpse that is no longer stunned and stun it again.
+    let state = withEnergy(inMainPhase('guard-once'), 1);
+    const me = state.activePlayer;
+    const them = playerId((me + 1) % state.players.length);
+    const [a, spell] = toHand(state, RECKONING);
+    state = a;
+    const [b, victim] = onBoard(state, them, PLAIN, 'base');
+    state = withEntity(b, victim, (current) => ({ ...current, stunned: true }));
+
+    const after = castSpell(state, spell, victim);
+
+    // Killed by the first branch, and 705's cleanup left it unstunned — which
+    // is exactly the state a re-evaluated "otherwise" would have acted on.
+    expect(after.players[them]!.zones.trash).toContain(victim);
+    expect(after.entities[victim]!.stunned).toBe(false);
+  });
+
+  it('is false without a chosen target, the way a source condition is', () => {
+    const state = inMainPhase('guard-none');
+    expect(
+      conditionMet(state, state.activePlayer, undefined, { kind: 'targetIs', stunned: true }),
+    ).toBe(false);
   });
 });
 

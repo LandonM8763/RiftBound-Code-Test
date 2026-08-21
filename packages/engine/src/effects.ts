@@ -5,7 +5,7 @@
  * a new primitive means a case here and a variant there — not a new code path
  * per card, which is the whole point of the data-driven design.
  */
-import { anyPowerOf, isPlayable, needsTargetChoice, tokenCardId, type Cost } from '@riftbound/cards';
+import { anyPowerOf, isPlayable, needsTargetChoice, tokenCardId, type Cost, type GuardedEffect } from '@riftbound/cards';
 import type { CardEffect, DestinationSpec, Effect, TargetSpec } from '@riftbound/cards';
 
 import type { TriggerEventInstance } from './abilities.js';
@@ -423,6 +423,18 @@ export function executeEffect(
       : invocation.choices;
 
   let next = state;
+  // Every step's guard is asked against the state as it was on entry, so an
+  // "otherwise" cannot see what the branch above it did. A step reading an
+  // earlier step's *outcome* is a different mechanic — see `GuardedEffect`.
+  const before = next;
+  const guarded = (step: GuardedEffect, target: EntityId | undefined): boolean =>
+    conditionMet(before, invocation.controller, invocation.source, step.condition, {
+      ...(invocation.paidAdditionalCost === undefined
+        ? {}
+        : { paidAdditionalCost: invocation.paidAdditionalCost }),
+      ...(target === undefined ? {} : { target }),
+    });
+
   for (const step of effect.effects) {
     // 355.5.a: an `all` spec affects every matching object rather than one
     // chosen one, so a target-consuming effect runs once per object while the
@@ -436,6 +448,9 @@ export function executeEffect(
         invocation.noted,
       );
       for (const one of every) {
+        if (!guarded(step, one)) {
+          continue;
+        }
         next = applyEffect(
           next,
           invocation.controller,
@@ -447,6 +462,9 @@ export function executeEffect(
           invocation.noted,
         );
       }
+      continue;
+    }
+    if (!guarded(step, choices.target)) {
       continue;
     }
     next = applyEffect(

@@ -1228,6 +1228,35 @@ const STATE_PREDICATES: readonly {
   readonly build: (match: RegExpMatchArray) => Condition | undefined;
 }[] = [
   {
+    /**
+     * "if **it** is stunned", "if **it's** an Equipment", "if **it was** an
+     * enemy unit" — a predicate about the chosen target rather than the board.
+     *
+     * The pronoun is what distinguishes it: every other predicate here names a
+     * player or a count. A static has no target, so `parseStatic` refusing one
+     * of these is the same rule that refuses a source-relative condition
+     * without a source.
+     */
+    pattern: /^it(?:'s| is| was| has been)?\s+(?:an? )?([a-z ]+?)$/i,
+    build: (m) => {
+      const word = (m[1] ?? '').trim().toLowerCase();
+      const TARGET_STATES: Readonly<Record<string, Condition>> = {
+        stunned: { kind: 'targetIs', stunned: true },
+        exhausted: { kind: 'targetIs', exhausted: true },
+        ready: { kind: 'targetIs', exhausted: false },
+        damaged: { kind: 'targetIs', damaged: true },
+        buffed: { kind: 'targetIs', buffed: true },
+        attacking: { kind: 'targetIs', role: 'attacker' },
+        defending: { kind: 'targetIs', role: 'defender' },
+        equipment: { kind: 'targetIs', cardType: 'gear' },
+        gear: { kind: 'targetIs', cardType: 'gear' },
+        'enemy unit': { kind: 'targetIs', scope: 'enemy' },
+        'friendly unit': { kind: 'targetIs', scope: 'friendly' },
+      };
+      return TARGET_STATES[word];
+    },
+  },
+  {
     // "if you control a Poro", "if you control another Dragon",
     // "if you control two or more gear"
     pattern:
@@ -1648,6 +1677,12 @@ export function parseStatic(line: string): StaticAbility | undefined {
           ? { kind: 'buffed' }
           : { kind: 'atBattlefield' }
         : parseStatePredicate(predicate);
+    // A static has no chosen target, so a `targetIs` predicate could never
+    // hold — the same reason a source-relative condition is refused without a
+    // source. Refused rather than left to read false forever.
+    if (condition?.kind === 'targetIs') {
+      return undefined;
+    }
     // A "while" the grammar cannot read must fail the card: dropping it would
     // make the static unconditional, which is strictly stronger than printed.
     if (condition === undefined) {

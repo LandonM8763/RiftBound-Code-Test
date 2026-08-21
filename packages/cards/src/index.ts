@@ -42,7 +42,7 @@ export type {
 } from './cost-modifier.js';
 
 export { NO_TARGET, needsDestination, needsTarget, needsTargetChoice } from './effect.js';
-export type { CardEffect, DestinationSpec, Effect, TargetSpec } from './effect.js';
+export type { CardEffect, DestinationSpec, Effect, GuardedEffect, TargetSpec } from './effect.js';
 export type {
   AttachedText,
   BattlefieldCard,

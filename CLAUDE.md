@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 215 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 219 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -760,6 +760,48 @@ Three things are load-bearing:
   only `buffed` and `atBattlefield` specially because those are about the source
   rather than the state. Dropping an unreadable one would make the static
   unconditional, which is strictly stronger than printed.
+
+### Guarded effect steps
+
+`GuardedEffect` in `cards/effect.ts`, evaluated in `engine/effects.ts`.
+
+**A branch is a guard on a step, not a tree.** "Deal 2 to a unit. If it's
+stunned, kill it. Otherwise, stun it." is two steps carrying opposite
+conditions, not an if/else node — which is why this needed no new executor and
+no new shape in the effect model, only an optional `condition` on each entry of
+`CardEffect.effects`. `Condition.not` is what makes the "otherwise" expressible
+without a second field.
+
+It reuses the state-predicate grammar wholesale, so a guard can ask anything a
+static or a cost modifier can. What it adds is one variant, and that variant is
+the reason the feature exists at all:
+
+- **`targetIs` asks about the *chosen target*, which nothing else could.**
+  Stunned, exhausted, damaged, buffed, a card type, an Attacker or Defender
+  designation, friendly or enemy. `ConditionContext.target` carries it, and the
+  pronoun is what the parser keys on — "if **it** is stunned" names the target
+  where every other predicate names a player or a count.
+- **`parseStatic` refuses a `targetIs`.** A static has no chosen target, so the
+  predicate could only ever be false — the same rule that refuses a
+  source-relative condition with no source, and for the same reason: a condition
+  that quietly never holds is a card that plays weaker than printed.
+
+Two things are load-bearing about *when* the guards are asked:
+
+- **Every guard is evaluated against the state on entry**, before any step
+  runs. Otherwise the "otherwise" branch would see what the branch above it did
+  — stun a Unit in step one and the `not stunned` guard on step two stops
+  holding, so both branches fire or neither does depending on their order.
+  `effects.test.ts` pins that with a spell whose two steps would both apply if
+  the guards were asked in sequence.
+- **A guard is asked once per target**, inside the `all` loop rather than
+  outside it, so "deal 2 to all enemy units, killing any that were already
+  damaged" reads each Unit's own state.
+
+The parser produces guards only through the state-predicate grammar it already
+had; the full "Choose X. If Y, A. Otherwise, B." sentence shape is left to the
+authored overlay, because it is a lot of grammar for a handful of cards and
+[the tail is flat](#turning-text-into-effects).
 
 ### Keywords
 
@@ -1904,15 +1946,15 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 215 of the 468 cards that have text** — 211 parsed and 4 hand-authored, and the shape of what is
+**Coverage is 219 of the 468 cards that have text** — 211 parsed and 8 hand-authored, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
 | Fully parsed | 211 |
-| Hand-authored | 4 |
-| Blocked | 253 |
+| Hand-authored | 8 |
+| Blocked | 249 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 4 times, the next 2, and every one of
@@ -2088,6 +2130,7 @@ What each round actually delivered, for calibrating the next projection:
 | The first authored entries | **+4** delivered |
 | Signed Might with a printed floor (143.2) | +5 projected, **+5** delivered |
 | Static restrictions (rule 002) | +8 projected, **+6** delivered |
+| Guarded effect steps and four more authored entries | **+4** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic
@@ -2152,6 +2195,17 @@ point at which a hand-authored overlay stops being an admission of defeat and
 starts being cheaper than the mechanic. `ingest/authored.ts` is that seam: it
 supplies an effect model for a named card, refuses itself if the card's printed
 text has changed since the entry was written, and touches no printed field.
+
+**But an authored entry cannot route around a missing mechanic**, and that is
+the finding that decides what the remaining work is. The overlay supplies an
+effect *model*, so it can only say what the model can express — an entry for
+"choose one •…" is as impossible to write as it is to parse. The measured
+authoring rate against the model as it stood was about **1 blocked card in
+40**; every round that widens the model widens that rate too, which is why the
+work past here is engine mechanics *for the overlay's sake* rather than for the
+parser's. Guarded steps were the first move under that framing: the parser
+gained nothing from `Condition.targetIs` on its own, and four cards became
+authorable that were not before.
 
 Self-targeting was on this list before keywords and triggers, and unlocked
 **nothing** — every self-targeting card was blocked on something else. That is

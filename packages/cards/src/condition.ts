@@ -89,6 +89,42 @@ export type Condition =
       readonly event: 'discard' | 'dies' | 'played' | 'conquer' | 'hold';
       readonly who: 'you' | 'opponent';
       readonly min: number;
+    }
+  /**
+   * "**Otherwise**, stun it" — the negation of the branch above it.
+   *
+   * Its own variant rather than a flag on every other one, because "otherwise"
+   * is a statement about a whole condition and nesting is what expresses that.
+   */
+  | { readonly kind: 'not'; readonly condition: Condition }
+  /**
+   * "If **it** is stunned, kill it", "if **it's** an Equipment, detach it".
+   *
+   * A predicate about the *chosen target* rather than about the board, which is
+   * what separates it from `controls`. Every field is a conjunct; an absent one
+   * imposes nothing.
+   *
+   * **False when there is no chosen target**, the same way a source-relative
+   * condition is false without a source: a static has no target, so one of
+   * these in a static's condition never holds. That is a refusal at ingest
+   * rather than something to rely on.
+   *
+   * Deliberately cannot read Might. `mightOf` consults statics and statics ask
+   * conditions, so a Might predicate here would recurse — the same reason
+   * `Count` refuses one in a static's grant.
+   */
+  | {
+      readonly kind: 'targetIs';
+      readonly stunned?: boolean | undefined;
+      readonly exhausted?: boolean | undefined;
+      readonly damaged?: boolean | undefined;
+      readonly buffed?: boolean | undefined;
+      /** "if it's an Equipment" — the target's card type. */
+      readonly cardType?: CardType | undefined;
+      /** "if it's attacking" — 464.2.c.3's designation, read off the Showdown. */
+      readonly role?: 'attacker' | 'defender' | undefined;
+      /** "if it was an enemy unit" — whose it is, relative to the controller. */
+      readonly scope?: 'friendly' | 'enemy' | undefined;
     };
 
 /** True for the conditions that are about the source rather than the state. */

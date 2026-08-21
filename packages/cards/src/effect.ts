@@ -176,6 +176,21 @@ export type DestinationSpec =
   | { readonly kind: 'base' };
 
 /** A single thing a card does. */
+/**
+ * One step of a card's rules text, with an optional guard on it.
+ *
+ * `Effect` is the verb; this is the verb plus "if …". Two shapes needed it:
+ * "If it is stunned, kill it. **Otherwise**, stun it" is two guarded steps
+ * rather than a branch tree, and "if it was an enemy unit, …" is one.
+ *
+ * **Every guard is evaluated once, before any step runs.** A step's condition
+ * asks about the situation the card is responding to, not about what the card's
+ * own earlier steps did — so "if it is stunned, kill it. Otherwise, stun it"
+ * cannot stun the Unit it just killed. Reading an earlier step's *outcome* is a
+ * different mechanic (an outcome register) and is deliberately not this one.
+ */
+export type GuardedEffect = Effect & { readonly condition?: Condition | undefined };
+
 export type Effect =
   /**
    * "Draw 1", or "draw 1 **for each of your MIGHTY units**".
@@ -438,8 +453,12 @@ export interface CardEffect {
    * general sub-action protocol, and none of that exists yet.
    */
   readonly destination?: DestinationSpec | undefined;
-  /** Executed in order, which is how rule 359.2.b reads a card top to bottom. */
-  readonly effects: readonly Effect[];
+  /**
+   * Executed in order, which is how rule 359.2.b reads a card top to bottom.
+   *
+   * Each step may carry its own guard — see `GuardedEffect`.
+   */
+  readonly effects: readonly GuardedEffect[];
   /**
    * "When you play me, **if you control a Poro**, buff me and draw 1."
    *

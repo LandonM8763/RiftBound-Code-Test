@@ -29,7 +29,7 @@
  * reuses collector numbers across printings — so the name is the stable key and
  * the id is not.
  */
-import type { CardAbilities, CardEffect, Keyword } from '@riftbound/cards';
+import type { AttachedText, CardAbilities, CardEffect, Keyword } from '@riftbound/cards';
 
 /** One card's hand-authored model, with the text it was written against. */
 export interface AuthoredCard {
@@ -54,6 +54,14 @@ export interface AuthoredCard {
    * card's whole reading, keywords included.
    */
   readonly keywords?: readonly Keyword[] | undefined;
+  /**
+   * A Gear's Effect Text (136.1, 718.3) — what it lends its Top-Most Card.
+   *
+   * Its own field for the same reason `GearCard.attached` is: 718.2 and 724
+   * make a card's two halves active at different times, so collapsing them
+   * would give an unattached Gear abilities it does not have.
+   */
+  readonly attached?: AttachedText | undefined;
   /** Why this card needs authoring rather than a parser rule. */
   readonly note?: string | undefined;
 }
@@ -120,6 +128,101 @@ export const AUTHORED_CARDS: Readonly<Record<string, AuthoredCard>> = {
       ],
     },
     note: 'Printed "draw a 1" — a typo in the source, not a wording to parse.',
+  },
+
+  // Guarded steps (see `GuardedEffect`): two branches on one check, which is
+  // what "Otherwise" means. The parser has no grammar for "Choose X. If Y, A.
+  // Otherwise, B." and teaching it one buys these three cards and nothing else.
+  'Solari Chief': {
+    text: 'When you play me, choose an enemy unit. If it is stunned, kill it. Otherwise, stun it.',
+    abilities: {
+      triggered: [
+        {
+          condition: { event: 'played', subject: 'self' },
+          effect: {
+            target: { kind: 'unit', scope: 'enemy' },
+            effects: [
+              { kind: 'kill', condition: { kind: 'targetIs', stunned: true } },
+              {
+                kind: 'stun',
+                condition: { kind: 'not', condition: { kind: 'targetIs', stunned: true } },
+              },
+            ],
+          },
+        },
+      ],
+    },
+    note: '"Otherwise" as the negation of the branch above it.',
+  },
+
+  // "If it was an enemy unit" is asked *before* the Kill, which is what
+  // `GuardedEffect` guarantees — after it, the phrase would have nothing to
+  // read. The source prints "BGold", a typo for the Gold token of 187.5.
+  'Blood Money': {
+    text:
+      'ACTION Kill a unit at a battlefield with 2 Might or less. If it was an enemy unit, play a ' +
+      'Gold gear token exhausted. If it was a friendly unit, play two BGold gear tokens exhausted.',
+    effect: {
+      target: { kind: 'unit', scope: 'any', atBattlefield: true, maxMight: 2 },
+      effects: [
+        { kind: 'kill' },
+        {
+          kind: 'createToken',
+          token: 'gold',
+          count: 1,
+          where: 'base',
+          ready: false,
+          condition: { kind: 'targetIs', scope: 'enemy' },
+        },
+        {
+          kind: 'createToken',
+          token: 'gold',
+          count: 2,
+          where: 'base',
+          ready: false,
+          condition: { kind: 'targetIs', scope: 'friendly' },
+        },
+      ],
+    },
+    note: 'Two guards read before the Kill; the source prints "BGold" for Gold.',
+  },
+
+  // "Deal 4 to it instead" is the same check twice with opposite signs, which
+  // is exactly two guarded steps — no replacement machinery needed.
+  'Sudden Storm': {
+    text: "HIDDEN ACTION Deal 2 to a unit at a battlefield. If it's attacking, deal 4 to it instead.",
+    effect: {
+      target: { kind: 'unit', scope: 'any', atBattlefield: true },
+      effects: [
+        {
+          kind: 'dealDamage',
+          amount: 2,
+          condition: { kind: 'not', condition: { kind: 'targetIs', role: 'attacker' } },
+        },
+        { kind: 'dealDamage', amount: 4, condition: { kind: 'targetIs', role: 'attacker' } },
+      ],
+    },
+    note: '"instead" as two mutually exclusive guards rather than a replacement.',
+  },
+
+  // 818.1.c.3 allows a non-resource Equip cost, and the parser refuses one
+  // rather than reading the resource half alone — which would be cheaper than
+  // printed. Written out here, the cost is exactly what 356.7 already states.
+  // The trailing "+4 Might" is 137.1's Might Bonus, the Effect Text's half.
+  'Blade of the Ruined King': {
+    text: 'EQUIP — Order, Kill a friendly unit +4 Might',
+    abilities: {
+      activated: [
+        {
+          cost: { energy: 0, power: ['order'] },
+          exhaustSelf: false,
+          payments: [{ kind: 'kill', what: 'unit' }],
+          effect: { target: { kind: 'unit', scope: 'friendly' }, effects: [{ kind: 'attach' }] },
+        },
+      ],
+    },
+    attached: { mightBonus: 4 },
+    note: 'Equip with a non-resource cost (818.1.c.3, 356.7) plus a Might Bonus (137.1).',
   },
 
   // 423.1.a.1's stun event with an enemy subject. "one or more" is a plural the

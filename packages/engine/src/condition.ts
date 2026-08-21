@@ -13,7 +13,7 @@
 import { isSourceCondition, type Condition } from '@riftbound/cards';
 
 import { countOf } from './count.js';
-import { getPlayer, type EntityId, type GameState, type PlayerId } from './state.js';
+import { entityCard, getPlayer, type EntityId, type GameState, type PlayerId } from './state.js';
 
 /**
  * Is `condition` satisfied for `player`?
@@ -26,12 +26,78 @@ import { getPlayer, type EntityId, type GameState, type PlayerId } from './state
  */
 export interface ConditionContext {
   /**
+   * The target chosen for the effect being executed (355.6).
+   *
+   * Carried alongside the state for the same reason `paidAdditionalCost` is: a
+   * `targetIs` predicate asks about a choice the card made, not about anything
+   * readable off the board on its own.
+   */
+  readonly target?: EntityId | undefined;
+  /**
    * Whether the optional Additional Cost was paid (356.2.b).
    *
    * A choice the player made at step 2 rather than anything readable off the
    * board, which is why it arrives alongside the state rather than in it.
    */
   readonly paidAdditionalCost?: boolean | undefined;
+}
+
+/**
+ * Does the chosen target satisfy this predicate?
+ *
+ * Every field is a conjunct. `role` reads 464.2.c.3's designation off the
+ * Showdown rather than being passed in, because a condition has no Combat
+ * context of its own — and unlike Might, reading the designation cannot recurse
+ * back through `mightOf`.
+ */
+function targetSatisfies(
+  state: GameState,
+  player: PlayerId,
+  condition: Extract<Condition, { kind: 'targetIs' }>,
+  target: EntityId | undefined,
+): boolean {
+  if (target === undefined) {
+    return false;
+  }
+  const entity = state.entities[target];
+  if (entity === undefined) {
+    return false;
+  }
+  if (condition.stunned !== undefined && entity.stunned !== condition.stunned) {
+    return false;
+  }
+  if (condition.exhausted !== undefined && entity.exhausted !== condition.exhausted) {
+    return false;
+  }
+  if (condition.damaged !== undefined && entity.damage > 0 !== condition.damaged) {
+    return false;
+  }
+  if (condition.buffed !== undefined && entity.buffs > 0 !== condition.buffed) {
+    return false;
+  }
+  if (condition.cardType !== undefined && entityCard(state, target).type !== condition.cardType) {
+    return false;
+  }
+  if (condition.scope !== undefined) {
+    const friendly = entity.controller === player;
+    if (friendly !== (condition.scope === 'friendly')) {
+      return false;
+    }
+  }
+  if (condition.role !== undefined) {
+    const showdown = state.showdown;
+    if (showdown === null || !showdown.combat || entity.location.kind !== 'battlefield') {
+      return false;
+    }
+    if (entity.location.index !== showdown.battlefield) {
+      return false;
+    }
+    const side = condition.role === 'attacker' ? showdown.attacker : showdown.defender;
+    if (side === null || entity.controller !== side) {
+      return false;
+    }
+  }
+  return true;
 }
 
 export function conditionMet(
@@ -47,6 +113,18 @@ export function conditionMet(
 
   if (condition.kind === 'paidAdditionalCost') {
     return context.paidAdditionalCost === true;
+  }
+
+  // "Otherwise" — the branch above, negated.
+  if (condition.kind === 'not') {
+    return !conditionMet(state, player, source, condition.condition, context);
+  }
+
+  // A predicate about the chosen target. False without one, exactly as a
+  // source-relative condition is false without a source: a static has no
+  // target, so one of these never holds there.
+  if (condition.kind === 'targetIs') {
+    return targetSatisfies(state, player, condition, context.target);
   }
 
   if (isSourceCondition(condition)) {
