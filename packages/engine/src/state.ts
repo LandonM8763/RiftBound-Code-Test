@@ -306,6 +306,16 @@ export interface ChainItem {
    */
   readonly targets: readonly EntityId[];
   /**
+   * The Game Object the triggering event was about, for a `triggerObject`
+   * target — "When a friendly unit dies, buff **it**".
+   *
+   * Recorded when the trigger is queued rather than looked up on resolution,
+   * because by then the event is over: the Unit that died is in the trash and
+   * the Move that happened has been superseded. `null` for a played card and
+   * for a trigger whose event was about no object.
+   */
+  readonly triggerObject: EntityId | null;
+  /**
    * The Destination chosen for a `move` effect (449.1), carried alongside the
    * target for the same reason. `null` when the card moves nothing.
    */

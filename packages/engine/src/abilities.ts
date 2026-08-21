@@ -35,7 +35,9 @@ import {
   objectForbidden,
   type ActiveStatic,
 } from './statics.js';
+import { mightOf } from './combat.js';
 import { abilityCost } from './costs.js';
+import { MIGHTY_THRESHOLD } from './count.js';
 import { dependencyMet } from './dependency.js';
 import { canPay } from './play.js';
 import {
@@ -53,6 +55,15 @@ export interface PendingTrigger {
   readonly source: EntityId;
   readonly controller: PlayerId;
   readonly ability: AbilityRef;
+  /**
+   * Which of the event's objects satisfied the condition — the "it" of "When a
+   * friendly unit dies, buff it".
+   *
+   * *Which* one matters when an event carries several: a Combat is won by
+   * every survivor (466.3), so an ability watching one of them has to know
+   * which. Absent when the event was about no object.
+   */
+  readonly object?: EntityId | undefined;
 }
 
 /**
@@ -279,12 +290,12 @@ export function matchesTrigger(
   source: EntityId,
   controller: PlayerId,
   condition: TriggerCondition,
-): boolean {
+): { readonly object?: EntityId | undefined } | undefined {
   if (condition.event !== instance.event) {
-    return false;
+    return undefined;
   }
   if (!matchesEvent(state, instance, source, controller, condition)) {
-    return false;
+    return undefined;
   }
 
   const filter = condition.filter;
@@ -299,16 +310,20 @@ export function matchesTrigger(
       filter.minEnergy !== undefined ||
       filter.minPower !== undefined ||
       filter.buffed !== undefined ||
+      filter.mighty !== undefined ||
       filter.excludeTag !== undefined);
 
   if (!objectSubject && !objectFilter) {
-    return true;
+    // The condition is about the event rather than its objects, so the first
+    // object (if any) is what "it" refers to.
+    return { object: instance.objects?.[0] };
   }
-  return (instance.objects ?? []).some(
+  const found = (instance.objects ?? []).find(
     (object) =>
       matchesObjectSubject(state, object, source, controller, condition.subject) &&
       matchesObjectFilter(state, object, source, filter),
   );
+  return found === undefined ? undefined : { object: found };
 }
 
 /** The parts of a condition that are about the event rather than its objects. */
@@ -430,6 +445,11 @@ function matchesObjectFilter(
   if (filter.excludeTag !== undefined && card.tags.includes(filter.excludeTag)) {
     return false;
   }
+  // 708: Mighty is Might >= 5. Safe to compute here — `mightOf` consults
+  // statics and cost modifiers, and a trigger sweep is neither.
+  if (filter.mighty !== undefined && mightOf(state, object) >= MIGHTY_THRESHOLD !== filter.mighty) {
+    return false;
+  }
   return true;
 }
 
@@ -496,7 +516,8 @@ export function triggersFor(
   for (const { source, controller } of candidates) {
     for (const set of abilitySets(state, source, granting)) {
       triggeredAbilities(set.abilities).forEach((ability, index) => {
-        if (!matchesTrigger(state, instance, source, controller, ability.condition)) {
+        const matched = matchesTrigger(state, instance, source, controller, ability.condition);
+        if (matched === undefined) {
           return;
         }
         if (!dependencyMet(state, source, controller, ability.dependsOn)) {
@@ -509,6 +530,7 @@ export function triggersFor(
           source,
           controller,
           ability: { kind: 'triggered', index, ...set.ref },
+          ...(matched.object === undefined ? {} : { object: matched.object }),
         });
       });
     }

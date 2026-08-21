@@ -930,6 +930,17 @@ const CLAUSES: readonly ClauseRule[] = [
     }),
   },
   {
+    // "…**give it** +1 Might this turn": the pronoun again, on the one clause
+    // that carries an amount as well as a verb.
+    pattern: /^give it ([+-])(\d+) might this turn(?:, to a minimum of (\d+) might)?$/i,
+    build: (m) => {
+      const grant = signedMight(m[1], m[2], m[3]);
+      return grant === undefined
+        ? undefined
+        : { effects: [grant], target: NO_TARGET, pronoun: true };
+    },
+  },
+  {
     // "…**and ready it**": the pronoun is the run's target, named once.
     pattern: /^(ready|buff|heal|exhaust|kill|stun|recall) it$/i,
     build: (m) => ({
@@ -1151,6 +1162,13 @@ const CONDITIONS: readonly {
     },
   },
   {
+    // 706-709: "when you play a **MIGHTY** unit". A description rather than a
+    // keyword, true exactly while Might is 5 or greater — safe to read here
+    // because a trigger sweep is not something `mightOf` consults back.
+    pattern: /^you play a mighty unit$/i,
+    build: () => ({ event: 'played', subject: 'you', filter: { mighty: true } }),
+  },
+  {
     // 811: "when you play a card **from HIDDEN**" — out of the Facedown Zone.
     // "from face down" is the same wording with the keyword spelled out.
     pattern: /^you play a card from (?:hidden|face ?down)$/i,
@@ -1248,6 +1266,19 @@ const CONDITIONS: readonly {
     // "When I move **from** a battlefield" — the other end of the Move (446).
     pattern: /^i move from a battlefield$/i,
     build: () => ({ event: 'move', subject: 'self', filter: { direction: 'from' } }),
+  },
+  {
+    // "When a unit moves **from here**" — both ends at once: 355.9's here on
+    // the Move's origin rather than its Destination.
+    pattern: /^an? ((?:friendly|enemy) )?unit moves from (?:here|my location)$/i,
+    build: (m) => {
+      const who = (m[1] ?? '').trim().toLowerCase();
+      return {
+        event: 'move',
+        subject: who === 'friendly' ? 'friendly' : who === 'enemy' ? 'enemy' : 'any',
+        filter: { direction: 'from', here: true },
+      };
+    },
   },
   {
     // "to a battlefield **other than mine**" — the mirror of `here`, which is
@@ -2128,14 +2159,24 @@ function buildStatic(
     // 1 — which is exactly the per-unit value the count then scales.
   }
 
-  const might = body.match(/^([+-]\d+) might$/i);
+  const might = body.match(/^([+-]\d+) might(?:, to a minimum of (\d+) might)?$/i);
   if (might !== null) {
     const amount = Number.parseInt(might[1] ?? '', 10);
+    const floor = might[2] === undefined ? undefined : count(might[2]);
+    // 143.2.b: the floor only means anything on a reduction. Printed on a
+    // positive grant it would be noise, so it is refused rather than dropped.
+    if (might[2] !== undefined && (floor === undefined || amount >= 0)) {
+      return undefined;
+    }
     return Number.isNaN(amount)
       ? undefined
       : {
           affects: scope,
-          grant: { might: amount, ...(per === undefined ? {} : { per }) },
+          grant: {
+            might: amount,
+            ...(floor === undefined ? {} : { minimumMight: floor }),
+            ...(per === undefined ? {} : { per }),
+          },
           ...(condition ? { condition } : {}),
         };
   }
@@ -2281,8 +2322,8 @@ export function parseEffects(body: string): CardEffect | undefined {
   // turn" is one grant, not two halves. Every clause pattern is anchored, so
   // a whole-line match can only be the clause it names.
   const asOne = matchClause(body.replace(/[.]+$/, '').trim());
-  // A pronoun clause alone has nothing to refer back to, so the whole-line
-  // path refuses it for the same reason the split path does.
+  // A pronoun clause alone refers to the triggering object, which the split
+  // path below builds — so the whole-line shortcut steps aside for it.
   if (asOne !== undefined && asOne.pronoun !== true) {
     return {
       target: asOne.target,
@@ -2328,10 +2369,11 @@ export function parseEffects(body: string): CardEffect | undefined {
     effects.push(...built.effects);
   }
 
-  // A pronoun with nothing to refer back to is an untargeted effect that does
-  // nothing — a card that parses and is wrong, so the run is refused instead.
+  // A pronoun with nothing earlier in the run to refer back to is the "it" of
+  // "When a friendly unit dies, buff **it**" — the triggering event's object.
+  // `parseLine` refuses that outside a trigger, where there is no such object.
   if (pronoun && target.kind === 'none') {
-    return undefined;
+    target = { kind: 'triggerObject' };
   }
 
   return { target, effects, ...(destination === undefined ? {} : { destination }) };
@@ -2477,7 +2519,9 @@ function parseLine(line: string): {
     // timing marker there first — "Exhaust: REACTION - ADD 1". The marker is
     // timing, not effect, so it comes off before the body is parsed.
     const effect = parseEffects(body.replace(/^(?:action|reaction)\s*[-—]\s*/i, ''));
-    if (effect === undefined) {
+    // 377: an Activated Ability is not triggered by anything, so there is no
+    // "it" for a pronoun to refer to.
+    if (effect === undefined || effect.target.kind === 'triggerObject') {
       return undefined;
     }
     return {
@@ -2571,7 +2615,9 @@ function parseLine(line: string): {
     return undefined;
   }
   const effect = parseEffects(gated.rest);
-  if (effect === undefined) {
+  // A `triggerObject` target outside a Triggered Ability has nothing to refer
+  // to, so the pronoun would resolve to nothing and the card would do nothing.
+  if (effect === undefined || effect.target.kind === 'triggerObject') {
     return undefined;
   }
   return {

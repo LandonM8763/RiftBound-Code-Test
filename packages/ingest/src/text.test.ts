@@ -2487,3 +2487,46 @@ describe("trigger events the reducer now raises", () => {
     ).toEqual([{ event: "move", subject: "enemy", filter: { notHere: true } }]);
   });
 });
+
+describe("the triggering object, and a floor on a static grant", () => {
+  it('reads a bare "it" as the triggering event\'s object', () => {
+    const parsed = parseCardText("When you ready a friendly unit, give it +1 Might this turn.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.triggered?.[0]?.effect).toEqual({
+      target: { kind: "triggerObject" },
+      effects: [{ kind: "giveMight", amount: 1 }],
+    });
+  });
+
+  it("keeps a pronoun that refers back within the run as an ordinary target", () => {
+    // "Move a friendly unit and ready it" chooses the Unit, so "it" is that
+    // choice — not the triggering object, which a Spell does not have.
+    const parsed = parseCardText("Move a friendly unit and ready it.");
+    expect(parsed.effect?.target).toEqual({ kind: "unit", scope: "friendly" });
+  });
+
+  it("refuses the pronoun outside a trigger, where there is nothing to refer to", () => {
+    expect(parseCardText("Ready it.").unparsed).not.toEqual([]);
+    expect(parseCardText("Exhaust: Buff it.").unparsed).not.toEqual([]);
+  });
+
+  it("143.2: a static Might reduction may carry a printed floor", () => {
+    const parsed = parseCardText("Enemy units here have -8 Might, to a minimum of 1 Might.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.statics?.[0]?.grant).toEqual({ might: -8, minimumMight: 1 });
+  });
+
+  it("refuses a floor on a grant that raises Might, where it would be noise", () => {
+    expect(
+      parseCardText("Other friendly units have +1 Might, to a minimum of 1 Might.").unparsed,
+    ).not.toEqual([]);
+  });
+
+  it("708: MIGHTY narrows a trigger's object, where a static grant may not", () => {
+    expect(
+      parseCardText("When you play a MIGHTY unit, draw 1.").abilities?.triggered?.[0]?.condition,
+    ).toEqual({ event: "played", subject: "you", filter: { mighty: true } });
+    // `mightOf` consults statics, so a grant counting Might would recurse.
+    expect(parseCardText("I have +1 Might for each my Might.").unparsed).not.toEqual([]);
+  });
+});

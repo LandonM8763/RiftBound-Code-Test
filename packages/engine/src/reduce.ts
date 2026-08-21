@@ -437,6 +437,8 @@ function playCard(
           // 808.1.d.3's note is for a source that leaves the Board before its
           // ability resolves; a played card is on the Chain and has not.
           noted: null,
+          // A played card is not a trigger, so there is no "it" to refer to.
+          triggerObject: null,
           ability: null,
           // 356.2.b: a Spell resolves off the Chain later, so the declaration
           // has to travel with it — "if you paid the additional cost" is asked
@@ -572,6 +574,7 @@ function activateAbility(
         controller: player,
         pending: false,
         noted: null,
+        triggerObject: null,
         targets: targets ?? [],
         destination: destination ?? null,
         ability: { ...chosen.ref, kind: 'activated', index },
@@ -846,6 +849,9 @@ function queueTriggers(
           // 808.1.d.3: note where the source was, so a Deathknell reading "my
           // battlefield" still has one once the Unit is in the trash.
           noted: instance.battlefield ?? null,
+          // The "it" of "when a friendly unit dies, buff it" — recorded now,
+          // for the same reason `noted` is: by resolution the event is over.
+          triggerObject: trigger.object ?? null,
         },
       ],
       passes: 0,
@@ -1170,6 +1176,8 @@ function pass(state: GameState): ReduceResult {
           // 808.1.d.3: the Battlefield noted when this trigger was queued, so
           // "at my battlefield" still names one after the source has died.
           ...(top.noted === null ? {} : { noted: top.noted }),
+          // The "it" of "when a friendly unit dies, buff it".
+          ...(top.triggerObject === null ? {} : { triggerObject: top.triggerObject }),
         },
         ability.effect,
         events,

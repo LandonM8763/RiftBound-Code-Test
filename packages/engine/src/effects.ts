@@ -81,6 +81,15 @@ export interface EffectInvocation {
    */
   readonly paidAdditionalCost?: boolean | undefined;
   /**
+   * The Game Object the triggering event was about, for a `triggerObject`
+   * target — "When a friendly unit dies, buff **it**".
+   *
+   * Carried rather than looked up, because by resolution the event is over:
+   * the Unit that died is in the trash and the Move has been superseded. The
+   * same reasoning as `noted`, and set at the same moment.
+   */
+  readonly triggerObject?: EntityId | undefined;
+  /**
    * 808.1.d.3: the Battlefield noted when this ability's source left the Board.
    *
    * "Deal 4 to all units at my battlefield" printed as a Deathknell resolves
@@ -493,12 +502,21 @@ export function executeEffect(
     return state;
   }
 
-  // 355.6 is about choices; "me" is not one, so it is resolved here rather
-  // than enumerated when the card was played.
+  // 355.6 is about *choosing*; neither "me" nor "it" is a choice, so both are
+  // resolved here rather than enumerated when the card was played.
   const choices: EffectChoices =
     effect.target.kind === 'self'
       ? { ...invocation.choices, targets: [invocation.source] }
-      : invocation.choices;
+      : effect.target.kind === 'triggerObject'
+        ? {
+            ...invocation.choices,
+            // An object that has left the Board resolves to nothing rather
+            // than to a stale id: 705 strips a departed Unit's counters and
+            // most verbs check `onBoard` anyway, but an empty set says it once.
+            targets:
+              invocation.triggerObject === undefined ? [] : [invocation.triggerObject],
+          }
+        : invocation.choices;
 
   let next = state;
   // Every step's guard is asked against the state as it was on entry, so an

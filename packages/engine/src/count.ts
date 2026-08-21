@@ -20,7 +20,7 @@ import {
 } from './state.js';
 
 /** 708: a Unit is Mighty exactly while its Might is 5 or greater. */
-const MIGHTY_THRESHOLD = 5;
+export const MIGHTY_THRESHOLD = 5;
 
 /**
  * How many things this count refers to, right now.

@@ -20,6 +20,8 @@ import {
 } from "@riftbound/cards/testing";
 import { describe, expect, it } from "vitest";
 
+import { mightOf } from "./combat.js";
+
 import { activatableAbilities, triggersFor } from "./abilities.js";
 import { dependencyMet } from "./dependency.js";
 import { currentLegalActions, legalActions } from "./legal.js";
@@ -296,6 +298,39 @@ const SNIPER = makeUnit(2, ["fury"], {
   abilities: { activated: [{ cost: cost(1), effect: DAMAGE_TWO }] },
 });
 
+/** "When a friendly unit dies, buff it" — the "it" is the Unit that died. */
+const AVENGER = makeUnit(2, ["fury"], {
+  id: cardId("A-075"),
+  name: "Avenger",
+  cost: cost(1),
+  abilities: {
+    triggered: [
+      {
+        condition: { event: "dies", subject: "friendly", filter: { excludeSelf: true } },
+        effect: { target: { kind: "triggerObject" }, effects: [{ kind: "buff" }] },
+      },
+    ],
+  },
+});
+
+/** "When you ready a friendly unit, give it +2 Might this turn." */
+const CHEERLEADER = makeUnit(2, ["fury"], {
+  id: cardId("A-076"),
+  name: "Cheerleader",
+  cost: cost(1),
+  abilities: {
+    triggered: [
+      {
+        condition: { event: "ready", subject: "friendly" },
+        effect: {
+          target: { kind: "triggerObject" },
+          effects: [{ kind: "giveMight", amount: 2 }],
+        },
+      },
+    ],
+  },
+});
+
 /** "[0], Exhaust: Ready a friendly unit" — a readying the reducer can drive. */
 const WAKER = makeUnit(2, ["fury"], {
   id: cardId("A-073"),
@@ -485,6 +520,8 @@ const REGISTRY = CardRegistry.from([
   SEER,
   TOLLKEEPER,
   EXECUTE,
+  AVENGER,
+  CHEERLEADER,
   WAKER,
   SLAYER,
   ROUSER,
@@ -1881,5 +1918,62 @@ describe("events the reducer raises (415, 355.6, 702)", () => {
 
     const before = handSize(state, me);
     expect(handSize(use(state, slayer, victim), me)).toBe(before);
+  });
+});
+
+describe("the triggering object as a target", () => {
+  const use = (state: GameState, source: EntityId, victim: EntityId): GameState =>
+    resolveChain(
+      reduce(state, { type: "activateAbility", source, index: 0, targets: [victim] }).state,
+    );
+
+  it('resolves "it" to the object the event was about, not to the source', () => {
+    let state = inMainPhase("trigger-object");
+    const me = state.activePlayer;
+    const [a] = withBoardCard(state, CHEERLEADER.id);
+    state = a;
+    const [b, waker] = withBoardCard(state, WAKER.id);
+    state = b;
+    const [c, sleeping] = withBoardCard(state, PLAIN.id);
+    state = withEntity(c, sleeping, (current) => ({ ...current, exhausted: true }));
+
+    const woken = use(state, waker, sleeping);
+    // The Unit that was readied got the Might, not the card watching for it.
+    expect(mightOf(woken, sleeping)).toBe(PLAIN.might + 2);
+    expect(me).toBe(woken.activePlayer);
+  });
+
+  it("picks the object that satisfied the condition when an event carries several", () => {
+    let state = inMainPhase("which-object");
+    const [a] = withBoardCard(state, CHEERLEADER.id);
+    state = a;
+    const [b, waker] = withBoardCard(state, WAKER.id);
+    state = b;
+    const [c, first] = withBoardCard(state, PLAIN.id);
+    state = withEntity(c, first, (current) => ({ ...current, exhausted: true }));
+    const [d, second] = withBoardCard(state, PLAIN.id);
+    state = withEntity(d, second, (current) => ({ ...current, exhausted: true }));
+
+    const woken = use(state, waker, first);
+    expect(mightOf(woken, first)).toBe(PLAIN.might + 2);
+    // The other Unit was never readied, so it is not what "it" refers to.
+    expect(mightOf(woken, second)).toBe(PLAIN.might);
+  });
+
+  it("428.1.a.1.b: a dead object is still what the pronoun names", () => {
+    let state = inMainPhase("dead-object");
+    const [a] = withBoardCard(state, AVENGER.id);
+    state = a;
+    const [b, slayer] = withBoardCard(state, SLAYER.id);
+    state = b;
+    const [c, victim] = withBoardCard(state, PLAIN.id);
+    state = c;
+
+    // The Unit is in the trash by the time the ability resolves, so the Buff
+    // reaches nothing — but the trigger fired and named the right object, and
+    // 705 is why a departed Unit holds no counters.
+    const after = use(state, slayer, victim);
+    expect(getEntity(after, victim).buffs).toBe(0);
+    expect(after.chain).toHaveLength(0);
   });
 });

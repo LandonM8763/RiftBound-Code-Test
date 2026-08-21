@@ -223,7 +223,25 @@ export type TargetSpec =
    * so nothing here requires one; what happens to a Gear without one is the
    * `equip` effect's business (821.1.c.4: the cost cannot be paid).
    */
-  | { readonly kind: 'gear'; readonly scope: 'friendly' };
+  | { readonly kind: 'gear'; readonly scope: 'friendly' }
+  /**
+   * The Game Object the event that triggered this ability was about — the "it"
+   * of "When a friendly unit dies, buff **it**".
+   *
+   * Not a target *choice*, for the same reason `self` is not: 355.6 is about
+   * choosing, and which object this refers to was settled by what happened. So
+   * it is resolved when the effect executes rather than enumerated when the
+   * ability is played, and `needsTargetChoice` is false for it.
+   *
+   * Distinct from `self`, which is the Game Object the *text is printed on*.
+   * "When a friendly unit dies, buff it" buffs the unit that died, not the
+   * card watching for it.
+   *
+   * Only a Triggered Ability has one. A card whose rules text uses this outside
+   * a trigger is refused at ingest: the pronoun would have nothing to refer to,
+   * and an effect with no target does nothing at all.
+   */
+  | { readonly kind: 'triggerObject' };
 
 /**
  * Where a `move` effect sends its target (rule 449.1).

@@ -131,6 +131,19 @@ export interface StaticGrant {
    */
   readonly might?: number | undefined;
   /**
+   * "Stunned enemy units here have -8 Might, **to a minimum of 1 Might**"
+   * (143.2).
+   *
+   * The floor the reduction stops at, measured against the Unit's *actual*
+   * Might — 143.2.b.1 is explicit that a negative Might "is not 0" and that
+   * effects calculating Might use the actual value, so a Unit already below the
+   * floor loses nothing rather than being raised to it.
+   *
+   * Only meaningful on a negative grant, which is why it is refused on a
+   * positive one at ingest rather than quietly ignored.
+   */
+  readonly minimumMight?: number | undefined;
+  /**
    * Keywords granted (801.3.a).
    *
    * 801.3.a.3: a grant with no stated duration lasts as long as the granting

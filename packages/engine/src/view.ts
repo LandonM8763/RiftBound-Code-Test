@@ -64,6 +64,8 @@ export interface ChainItemView {
   /** Rule 400: still working through the steps of playing, awaiting 402.2. */
   readonly pending: boolean;
   readonly targets: readonly EntityId[];
+  /** The "it" of a Triggered Ability's effect — public like the rest (328). */
+  readonly triggerObject: EntityId | null;
   /** 377.3.a.1: which ability, when this item is one rather than a card. */
   readonly ability: AbilityRef | null;
   /**
@@ -292,6 +294,7 @@ export function observe(state: GameState, viewer: PlayerId): GameView {
       controller: item.controller,
       pending: item.pending,
       targets: item.targets,
+      triggerObject: item.triggerObject,
       ability: item.ability,
       noted: item.noted,
     })),

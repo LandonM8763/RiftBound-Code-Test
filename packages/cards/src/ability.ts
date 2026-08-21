@@ -216,6 +216,15 @@ export interface TriggerFilter {
   /** "another **non-Recruit** unit" — the object must *not* carry this tag. */
   readonly excludeTag?: string | undefined;
   /**
+   * "a **MIGHTY** unit" (706-709) — a description, not a keyword: true exactly
+   * while the object's Might is 5 or greater.
+   *
+   * Safe here where it is refused in a `StaticGrant`, and for the reason that
+   * distinction always turns on: `mightOf` consults statics, so a static
+   * reading Might recurses — but nothing consults a trigger sweep back.
+   */
+  readonly mighty?: boolean | undefined;
+  /**
    * "your second card in a turn" — the event must be the Nth of its kind for
    * that actor this turn, counting from 1.
    *

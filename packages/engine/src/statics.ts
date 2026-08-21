@@ -155,14 +155,45 @@ export function staticMight(state: GameState, unit: EntityId): number {
   // Might. Counted here rather than in `mightOf` so that every caller which
   // already consults statics picks it up without a second lookup.
   let total = attachedMight(state, unit);
+
+  // 143.2.b.1: a printed floor is measured against the *actual* Might, so the
+  // reduction has to know what it is reducing. That is why the grants are
+  // applied in two passes — every unfloored one first, then the floored ones
+  // against the running total. Within a pass the order does not matter, since
+  // only a floored grant is order-sensitive.
+  //
+  // The base deliberately excludes the Assault/Shield designation (807, 814):
+  // reading it goes through `keywordsOf`, which consults statics, which is
+  // what this function is in the middle of computing. A Unit whose Might is
+  // raised by a designation is therefore floored slightly early — the safe
+  // direction, since it reduces *less* than printed rather than more.
+  const card = entityCard(state, unit);
+  const entity = getEntity(state, unit);
+  const base = card.type === 'unit' ? card.might + entity.mightBonus + entity.buffs : 0;
+
+  const floored: { change: number; minimum: number }[] = [];
   for (const { source, controller, ability } of activeStatics(state)) {
     const might = ability.grant.might;
     if (might === undefined || might === 0) {
       continue;
     }
-    if (reaches(state, source, controller, ability.affects, unit)) {
-      total += might * grantMultiplier(state, source, controller, ability);
+    if (!reaches(state, source, controller, ability.affects, unit)) {
+      continue;
     }
+    const change = might * grantMultiplier(state, source, controller, ability);
+    const minimum = ability.grant.minimumMight;
+    if (minimum === undefined || change >= 0) {
+      total += change;
+      continue;
+    }
+    floored.push({ change, minimum });
+  }
+
+  for (const { change, minimum } of floored) {
+    // The floor binds this grant alone, the way 356.4.e binds a discount's
+    // minimum to its own discount rather than to the running total.
+    const room = base + total - minimum;
+    total += Math.min(0, Math.max(change, -Math.max(0, room)));
   }
   return total;
 }

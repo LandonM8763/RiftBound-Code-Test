@@ -197,6 +197,7 @@ export function determinize(view: GameView, knowledge: Knowledge, seed: number |
       controller: item.controller,
       pending: item.pending,
       targets: item.targets,
+      triggerObject: item.triggerObject,
       destination: null,
       ability: item.ability,
     };

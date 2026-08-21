@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 248 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 251 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -1541,6 +1541,27 @@ gear", so the narrowing lives on the spec rather than on each effect. This is
 separate from `TargetSpec.gear`, which is 821.1.c's "a Card **you control** with
 the Equipment tag" and admits an already-Attached one.
 
+**"It" is not a target choice either, and it is not "me".** `TargetSpec` has a
+`triggerObject` variant for the "it" of "When a friendly unit dies, buff **it**"
+— the Game Object the *event* was about, where `self` is the Game Object the
+*text is printed on*. Confusing the two buffs the card watching instead of the
+Unit that died.
+
+Three things are load-bearing:
+
+- **Which object, when the event carries several.** A Combat is won by every
+  survivor (466.3), so `matchesTrigger` reports *which* object satisfied the
+  condition rather than a bare yes, and `PendingTrigger` carries it.
+- **It is recorded when the trigger is queued, not looked up on resolution.**
+  By then the event is over: the Unit that died is in the trash and the Move
+  has been superseded. Exactly the reasoning behind 808.1.d.3's `noted`, set at
+  the same moment and for the same reason.
+- **A pronoun outside a Triggered Ability is refused.** A Spell and an
+  Activated Ability have no triggering event, so "it" would resolve to nothing
+  and the card would silently do nothing. A pronoun that refers *back within
+  the run* — "move a friendly unit and ready **it**" — is a different thing and
+  stays an ordinary target.
+
 **"Me" is not a target choice.** `TargetSpec` has a `self` variant for the "me"
 of "ready me" and "give me +2 Might". Rule 355.6 is about *choosing* something,
 and which Game Object "me" refers to is already settled by which card the text
@@ -2077,15 +2098,15 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 248 of the 468 cards that have text** — 240 parsed and 8 hand-authored, and the shape of what is
+**Coverage is 251 of the 468 cards that have text** — 243 parsed and 8 hand-authored, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 240 |
+| Fully parsed | 243 |
 | Hand-authored | 8 |
-| Blocked | 220 |
+| Blocked | 217 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 4 times, the next 2, and every one of
@@ -2266,6 +2287,7 @@ What each round actually delivered, for calibrating the next projection:
 | Seven shared clause shapes, read once rather than per card | **+7** delivered |
 | Object filters and ability-use restrictions (002, 377) | **+6** delivered |
 | Five trigger events and six trigger filters | **+10** delivered |
+| The triggering object as a target, and a floored static grant | **+3** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic
