@@ -297,10 +297,14 @@ export interface ChainItem {
   readonly controller: PlayerId;
   readonly pending: boolean;
   /**
-   * The target chosen when the card was played (rule 355.8), carried until it
-   * resolves. `null` for a card that does not target.
+   * The targets chosen when the card was played (rule 355.8), carried until it
+   * resolves. Empty for a card that does not target.
+   *
+   * A list because one spec may choose several objects — "up to 2 friendly
+   * units" is one choice of a *set*, and 355.6 makes each member a Target. A
+   * card naming one target holds a list of one.
    */
-  readonly target: EntityId | null;
+  readonly targets: readonly EntityId[];
   /**
    * The Destination chosen for a `move` effect (449.1), carried alongside the
    * target for the same reason. `null` when the card moves nothing.

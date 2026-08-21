@@ -3,7 +3,12 @@
  *
  * Rule numbers cite the official Riftbound Core Rules, RUP4 of 2026-07-16.
  */
-import { CardRegistry, cardId, cost, type CardDefinition } from '@riftbound/cards';
+import {
+  CardRegistry,
+  cardId,
+  cost,
+  type CardDefinition,
+} from "@riftbound/cards";
 import {
   makeBattlefield,
   makeGear,
@@ -11,16 +16,16 @@ import {
   makeRune,
   makeSpell,
   makeUnit,
-} from '@riftbound/cards/testing';
-import { describe, expect, it } from 'vitest';
+} from "@riftbound/cards/testing";
+import { describe, expect, it } from "vitest";
 
-import { IllegalActionError } from './actions.js';
-import { checkInvariants } from './invariants.js';
-import { currentLegalActions, legalActions } from './legal.js';
-import { reduce } from './reduce.js';
-import { entersReady } from './statics.js';
-import { moveEntity, withPlayer } from './mutate.js';
-import { createGame, type DeckList } from './setup.js';
+import { IllegalActionError } from "./actions.js";
+import { checkInvariants } from "./invariants.js";
+import { currentLegalActions, legalActions } from "./legal.js";
+import { reduce } from "./reduce.js";
+import { entersReady } from "./statics.js";
+import { moveEntity, withPlayer } from "./mutate.js";
+import { createGame, type DeckList } from "./setup.js";
 import {
   type EntityId,
   type GameState,
@@ -29,32 +34,40 @@ import {
   playerId,
   playerLocation,
   sameLocation,
-} from './state.js';
+} from "./state.js";
 
-const LEGEND = makeLegend(['fury', 'calm'], { id: cardId('P-000') });
-const CHAMPION = makeUnit(3, ['fury'], { id: cardId('P-001'), champion: true });
+const LEGEND = makeLegend(["fury", "calm"], { id: cardId("P-000") });
+const CHAMPION = makeUnit(3, ["fury"], { id: cardId("P-001"), champion: true });
 /** 1 Energy, no Power: affordable from a single exhausted Rune. */
-const CHEAP_UNIT = makeUnit(2, ['fury'], { id: cardId('P-010'), name: 'Cheap', cost: cost(1) });
+const CHEAP_UNIT = makeUnit(2, ["fury"], {
+  id: cardId("P-010"),
+  name: "Cheap",
+  cost: cost(1),
+});
 /** 1 Fury Power and no Energy: only payable by Recycling a Fury Rune. */
-const POWER_UNIT = makeUnit(4, ['fury'], {
-  id: cardId('P-011'),
-  name: 'Power Unit',
-  cost: cost(0, 'fury'),
+const POWER_UNIT = makeUnit(4, ["fury"], {
+  id: cardId("P-011"),
+  name: "Power Unit",
+  cost: cost(0, "fury"),
 });
-const GEAR = makeGear(['fury'], { id: cardId('P-012'), name: 'Gear', cost: cost(1) });
-const ACTION_SPELL = makeSpell(['fury'], {
-  id: cardId('P-013'),
-  name: 'Action Spell',
+const GEAR = makeGear(["fury"], {
+  id: cardId("P-012"),
+  name: "Gear",
   cost: cost(1),
-  timing: 'action',
 });
-const REACTION_SPELL = makeSpell(['fury'], {
-  id: cardId('P-014'),
-  name: 'Reaction Spell',
+const ACTION_SPELL = makeSpell(["fury"], {
+  id: cardId("P-013"),
+  name: "Action Spell",
   cost: cost(1),
-  timing: 'reaction',
+  timing: "action",
 });
-const FURY_RUNE = makeRune('fury', { id: cardId('P-100') });
+const REACTION_SPELL = makeSpell(["fury"], {
+  id: cardId("P-014"),
+  name: "Reaction Spell",
+  cost: cost(1),
+  timing: "reaction",
+});
+const FURY_RUNE = makeRune("fury", { id: cardId("P-100") });
 const BATTLEFIELDS = Array.from({ length: 3 }, (_, i) =>
   makeBattlefield({ id: cardId(`P-20${i}`) }),
 );
@@ -95,16 +108,18 @@ function deck(): DeckList {
 /** Take the empty Mulligan for every player so play can begin (rule 117). */
 function pastMulligan(state: GameState): GameState {
   let next = state;
-  while (next.phase === 'mulligan') {
-    next = reduce(next, { type: 'mulligan', cards: [] }).state;
+  while (next.phase === "mulligan") {
+    next = reduce(next, { type: "mulligan", cards: [] }).state;
   }
   return next;
 }
 
-function inMainPhase(seed = 'play'): GameState {
-  let state = pastMulligan(createGame({ decks: [deck(), deck()], registry: REGISTRY, seed }).state);
-  while (state.phase !== 'main' && !isOver(state)) {
-    state = reduce(state, { type: 'resolvePhase' }).state;
+function inMainPhase(seed = "play"): GameState {
+  let state = pastMulligan(
+    createGame({ decks: [deck(), deck()], registry: REGISTRY, seed }).state,
+  );
+  while (state.phase !== "main" && !isOver(state)) {
+    state = reduce(state, { type: "resolvePhase" }).state;
   }
   return state;
 }
@@ -114,7 +129,10 @@ function inMainPhase(seed = 'play'): GameState {
  * Deck if the shuffle did not deal it. Tests here are about the Process of
  * Play, so which cards the opening hand happened to contain is noise.
  */
-function withCardInHand(state: GameState, card: CardDefinition): [GameState, EntityId] {
+function withCardInHand(
+  state: GameState,
+  card: CardDefinition,
+): [GameState, EntityId] {
   const player = state.activePlayer;
   const zones = state.players[player]!.zones;
 
@@ -123,11 +141,13 @@ function withCardInHand(state: GameState, card: CardDefinition): [GameState, Ent
     return [state, held];
   }
 
-  const inDeck = zones.mainDeck.find((id) => state.entities[id]!.card === card.id);
+  const inDeck = zones.mainDeck.find(
+    (id) => state.entities[id]!.card === card.id,
+  );
   if (inDeck === undefined) {
     throw new Error(`${card.name} is in neither hand nor deck`);
   }
-  return [moveEntity(state, inDeck, playerLocation(player, 'hand')), inDeck];
+  return [moveEntity(state, inDeck, playerLocation(player, "hand")), inDeck];
 }
 
 function addEnergy(state: GameState, count: number): GameState {
@@ -137,15 +157,15 @@ function addEnergy(state: GameState, count: number): GameState {
       (id) => !next.entities[id]!.exhausted,
     );
     if (rune === undefined) {
-      throw new Error('No ready Rune left to exhaust');
+      throw new Error("No ready Rune left to exhaust");
     }
-    next = reduce(next, { type: 'addEnergy', rune }).state;
+    next = reduce(next, { type: "addEnergy", rune }).state;
   }
   return next;
 }
 
-describe('Rune Pools (rules 165-167)', () => {
-  it('starts the Main Phase empty', () => {
+describe("Rune Pools (rules 165-167)", () => {
+  it("starts the Main Phase empty", () => {
     const state = inMainPhase();
     for (const player of state.players) {
       expect(player.pool.energy).toBe(0);
@@ -153,33 +173,35 @@ describe('Rune Pools (rules 165-167)', () => {
     }
   });
 
-  it('exhausts a Rune to Add 1 Energy (rule 164.2.a)', () => {
+  it("exhausts a Rune to Add 1 Energy (rule 164.2.a)", () => {
     const state = inMainPhase();
     const player = state.activePlayer;
     const rune = state.players[player]!.zones.runes[0]!;
 
-    const after = reduce(state, { type: 'addEnergy', rune }).state;
+    const after = reduce(state, { type: "addEnergy", rune }).state;
 
     expect(after.players[player]!.pool.energy).toBe(1);
     expect(after.entities[rune]!.exhausted).toBe(true);
     checkInvariants(after);
   });
 
-  it('refuses to exhaust the same Rune twice', () => {
+  it("refuses to exhaust the same Rune twice", () => {
     const state = inMainPhase();
     const rune = state.players[state.activePlayer]!.zones.runes[0]!;
-    const once = reduce(state, { type: 'addEnergy', rune }).state;
+    const once = reduce(state, { type: "addEnergy", rune }).state;
 
-    expect(() => reduce(once, { type: 'addEnergy', rune })).toThrow(IllegalActionError);
+    expect(() => reduce(once, { type: "addEnergy", rune })).toThrow(
+      IllegalActionError,
+    );
   });
 
-  it('Recycles a Rune to Add 1 Power of its Domain (rules 164.2.b, 416.1.b)', () => {
+  it("Recycles a Rune to Add 1 Power of its Domain (rules 164.2.b, 416.1.b)", () => {
     const state = inMainPhase();
     const player = state.activePlayer;
     const rune = state.players[player]!.zones.runes[0]!;
     const deckBefore = state.players[player]!.zones.runeDeck.length;
 
-    const after = reduce(state, { type: 'addPower', rune }).state;
+    const after = reduce(state, { type: "addPower", rune }).state;
 
     expect(after.players[player]!.pool.power.fury).toBe(1);
     expect(after.players[player]!.zones.runes).not.toContain(rune);
@@ -189,18 +211,18 @@ describe('Rune Pools (rules 165-167)', () => {
     checkInvariants(after);
   });
 
-  it('empties at the end of the turn, losing anything unspent (rule 317.2.e)', () => {
+  it("empties at the end of the turn, losing anything unspent (rule 317.2.e)", () => {
     const state = addEnergy(inMainPhase(), 2);
     const player = state.activePlayer;
     expect(state.players[player]!.pool.energy).toBe(2);
 
-    const ending = reduce(state, { type: 'endTurn' }).state;
-    const passed = reduce(ending, { type: 'resolvePhase' }).state;
+    const ending = reduce(state, { type: "endTurn" }).state;
+    const passed = reduce(ending, { type: "resolvePhase" }).state;
 
     expect(passed.players[player]!.pool.energy).toBe(0);
   });
 
-  it('167: loses an unspent [A] too, not just Energy and named Power', () => {
+  it("167: loses an unspent [A] too, not just Energy and named Power", () => {
     const state = inMainPhase();
     const player = state.activePlayer;
     const withWild = withPlayer(state, player, (seat) => ({
@@ -208,20 +230,20 @@ describe('Rune Pools (rules 165-167)', () => {
       pool: { ...seat.pool, energy: 0, anyPower: 2 },
     }));
 
-    const ending = reduce(withWild, { type: 'endTurn' }).state;
-    const passed = reduce(ending, { type: 'resolvePhase' }).state;
+    const ending = reduce(withWild, { type: "endTurn" }).state;
+    const passed = reduce(ending, { type: "resolvePhase" }).state;
 
     expect(passed.players[player]!.pool.anyPower).toBe(0);
   });
 });
 
-describe('playing permanents (rule 359.2)', () => {
-  it('pays the cost and puts a Unit on the board exhausted (rule 359.2.c)', () => {
+describe("playing permanents (rule 359.2)", () => {
+  it("pays the cost and puts a Unit on the board exhausted (rule 359.2.c)", () => {
     let state = addEnergy(inMainPhase(), 1);
     const player = state.activePlayer;
     const [ready, card] = withCardInHand(state, CHEAP_UNIT);
 
-    state = reduce(ready, { type: 'playCard', card }).state;
+    state = reduce(ready, { type: "playCard", card }).state;
 
     expect(state.players[player]!.pool.energy).toBe(0);
     expect(state.players[player]!.zones.base).toContain(card);
@@ -229,54 +251,64 @@ describe('playing permanents (rule 359.2)', () => {
     checkInvariants(state);
   });
 
-  it('puts Gear on the board ready at the Base (rule 359.2.d)', () => {
+  it("puts Gear on the board ready at the Base (rule 359.2.d)", () => {
     let state = addEnergy(inMainPhase(), 1);
     const [ready, card] = withCardInHand(state, GEAR);
 
-    state = reduce(ready, { type: 'playCard', card }).state;
+    state = reduce(ready, { type: "playCard", card }).state;
 
     expect(state.entities[card]!.exhausted).toBe(false);
     expect(
-      sameLocation(state.entities[card]!.location, playerLocation(state.activePlayer, 'base')),
+      sameLocation(
+        state.entities[card]!.location,
+        playerLocation(state.activePlayer, "base"),
+      ),
     ).toBe(true);
   });
 
-  it('pays a Power cost by Recycling (rule 357.1)', () => {
+  it("pays a Power cost by Recycling (rule 357.1)", () => {
     let state = inMainPhase();
     const player = state.activePlayer;
     const rune = state.players[player]!.zones.runes[0]!;
-    state = reduce(state, { type: 'addPower', rune }).state;
+    state = reduce(state, { type: "addPower", rune }).state;
 
     const [ready, card] = withCardInHand(state, POWER_UNIT);
-    state = reduce(ready, { type: 'playCard', card }).state;
+    state = reduce(ready, { type: "playCard", card }).state;
 
     expect(state.players[player]!.pool.power.fury).toBe(0);
     expect(state.players[player]!.zones.base).toContain(card);
   });
 
-  it('refuses a card the pool cannot pay for', () => {
+  it("refuses a card the pool cannot pay for", () => {
     const [state, card] = withCardInHand(inMainPhase(), CHEAP_UNIT);
 
     expect(state.players[state.activePlayer]!.pool.energy).toBe(0);
-    expect(() => reduce(state, { type: 'playCard', card })).toThrow(/Cannot pay/);
+    expect(() => reduce(state, { type: "playCard", card })).toThrow(
+      /Cannot pay/,
+    );
   });
 
-  it('does not offer an unaffordable card', () => {
+  it("does not offer an unaffordable card", () => {
     const state = inMainPhase();
-    const plays = currentLegalActions(state).filter((action) => action.type === 'playCard');
+    const plays = currentLegalActions(state).filter(
+      (action) => action.type === "playCard",
+    );
     expect(plays).toHaveLength(0);
   });
 
-  it('leaves a Unit played this turn exhausted until the next Awaken (rule 315.1.b)', () => {
-    const [ready, card] = withCardInHand(addEnergy(inMainPhase(), 1), CHEAP_UNIT);
-    let state = reduce(ready, { type: 'playCard', card }).state;
+  it("leaves a Unit played this turn exhausted until the next Awaken (rule 315.1.b)", () => {
+    const [ready, card] = withCardInHand(
+      addEnergy(inMainPhase(), 1),
+      CHEAP_UNIT,
+    );
+    let state = reduce(ready, { type: "playCard", card }).state;
     expect(state.entities[card]!.exhausted).toBe(true);
 
     // Round the table back to the same player's Awaken.
     for (let i = 0; i < 2; i += 1) {
-      state = reduce(state, { type: 'endTurn' }).state;
-      while (state.phase !== 'main' && !isOver(state)) {
-        state = reduce(state, { type: 'resolvePhase' }).state;
+      state = reduce(state, { type: "endTurn" }).state;
+      while (state.phase !== "main" && !isOver(state)) {
+        state = reduce(state, { type: "resolvePhase" }).state;
       }
     }
 
@@ -284,13 +316,16 @@ describe('playing permanents (rule 359.2)', () => {
   });
 });
 
-describe('the Chain (rules 327-331)', () => {
+describe("the Chain (rules 327-331)", () => {
   function withSpellOnChain(): GameState {
-    const [state, card] = withCardInHand(addEnergy(inMainPhase('chain'), 1), ACTION_SPELL);
-    return reduce(state, { type: 'playCard', card }).state;
+    const [state, card] = withCardInHand(
+      addEnergy(inMainPhase("chain"), 1),
+      ACTION_SPELL,
+    );
+    return reduce(state, { type: "playCard", card }).state;
   }
 
-  it('a Spell lingers on the Chain and Closes the state (rules 331.1, 359.3)', () => {
+  it("a Spell lingers on the Chain and Closes the state (rules 331.1, 359.3)", () => {
     const state = withSpellOnChain();
 
     expect(state.chain).toHaveLength(1);
@@ -298,27 +333,29 @@ describe('the Chain (rules 327-331)', () => {
     expect(state.chain[0]?.pending).toBe(false);
   });
 
-  it('offers the opponent only Reactions while the state is Closed (rule 309.1.a)', () => {
+  it("offers the opponent only Reactions while the state is Closed (rule 309.1.a)", () => {
     const state = withSpellOnChain();
     const opponent = playerId((state.activePlayer + 1) % state.players.length);
     // Priority moves around the table as players pass.
-    const passed = reduce(state, { type: 'pass' }).state;
+    const passed = reduce(state, { type: "pass" }).state;
 
     expect(passed.priority).toBe(opponent);
-    const plays = legalActions(passed, opponent).filter((action) => action.type === 'playCard');
+    const plays = legalActions(passed, opponent).filter(
+      (action) => action.type === "playCard",
+    );
     for (const play of plays) {
       const card = passed.entities[(play as { card: EntityId }).card]!;
       expect(card.card).toBe(REACTION_SPELL.id);
     }
   });
 
-  it('resolves the top item once everyone passes (rule 359.3.d)', () => {
+  it("resolves the top item once everyone passes (rule 359.3.d)", () => {
     let state = withSpellOnChain();
     const player = state.activePlayer;
     const spell = state.chain[0]!.entity;
 
-    state = reduce(state, { type: 'pass' }).state;
-    state = reduce(state, { type: 'pass' }).state;
+    state = reduce(state, { type: "pass" }).state;
+    state = reduce(state, { type: "pass" }).state;
 
     expect(state.chain).toHaveLength(0);
     expect(isClosed(state)).toBe(false);
@@ -328,59 +365,65 @@ describe('the Chain (rules 327-331)', () => {
     checkInvariants(state);
   });
 
-  it('stacks a second item and resolves it first', () => {
-    const [ready, first] = withCardInHand(addEnergy(inMainPhase('stack'), 2), ACTION_SPELL);
-    let state = reduce(ready, { type: 'playCard', card: first }).state;
+  it("stacks a second item and resolves it first", () => {
+    const [ready, first] = withCardInHand(
+      addEnergy(inMainPhase("stack"), 2),
+      ACTION_SPELL,
+    );
+    let state = reduce(ready, { type: "playCard", card: first }).state;
 
     const [staged, second] = withCardInHand(state, REACTION_SPELL);
-    state = reduce(staged, { type: 'playCard', card: second }).state;
+    state = reduce(staged, { type: "playCard", card: second }).state;
     expect(state.chain.map((item) => item.entity)).toEqual([first, second]);
 
-    state = reduce(state, { type: 'pass' }).state;
-    state = reduce(state, { type: 'pass' }).state;
+    state = reduce(state, { type: "pass" }).state;
+    state = reduce(state, { type: "pass" }).state;
 
     // Last on is first off.
     expect(state.chain.map((item) => item.entity)).toEqual([first]);
   });
 
-  it('refuses a non-Reaction Spell while the state is Closed (rule 358.4)', () => {
+  it("refuses a non-Reaction Spell while the state is Closed (rule 358.4)", () => {
     const [state, card] = withCardInHand(withSpellOnChain(), ACTION_SPELL);
 
-    expect(() => reduce(state, { type: 'playCard', card })).toThrow(/Closed/);
+    expect(() => reduce(state, { type: "playCard", card })).toThrow(/Closed/);
   });
 
-  it('refuses to end the turn while the Chain still holds items', () => {
+  it("refuses to end the turn while the Chain still holds items", () => {
     const state = withSpellOnChain();
-    expect(() => reduce(state, { type: 'endTurn' })).toThrow(/Chain/);
+    expect(() => reduce(state, { type: "endTurn" })).toThrow(/Chain/);
   });
 
-  it('refuses a pass when there is no Chain', () => {
-    expect(() => reduce(inMainPhase(), { type: 'pass' })).toThrow(/Chain is empty/);
+  it("refuses a pass when there is no Chain", () => {
+    expect(() => reduce(inMainPhase(), { type: "pass" })).toThrow(
+      /Chain is empty/,
+    );
   });
 });
 
-describe('Priority (rules 312-313)', () => {
-  it('belongs to the Turn Player on entering the Main Phase (rule 312.2.a)', () => {
+describe("Priority (rules 312-313)", () => {
+  it("belongs to the Turn Player on entering the Main Phase (rule 312.2.a)", () => {
     const state = inMainPhase();
     expect(state.priority).toBe(state.activePlayer);
   });
 
-  it('belongs to nobody outside the Main Phase', () => {
+  it("belongs to nobody outside the Main Phase", () => {
     const state = pastMulligan(
-      createGame({ decks: [deck(), deck()], registry: REGISTRY, seed: 'prio' }).state,
+      createGame({ decks: [deck(), deck()], registry: REGISTRY, seed: "prio" })
+        .state,
     );
-    expect(state.phase).toBe('awaken');
+    expect(state.phase).toBe("awaken");
     expect(state.priority).toBeNull();
   });
 
-  it('gives the player without Priority no actions', () => {
+  it("gives the player without Priority no actions", () => {
     const state = inMainPhase();
     const opponent = playerId((state.activePlayer + 1) % state.players.length);
     expect(legalActions(state, opponent)).toEqual([]);
   });
 
-  it('only ever offers actions reduce will accept', () => {
-    let state = inMainPhase('accepts');
+  it("only ever offers actions reduce will accept", () => {
+    let state = inMainPhase("accepts");
     for (let step = 0; step < 40 && !isOver(state); step += 1) {
       const actions = currentLegalActions(state);
       for (const action of actions) {
@@ -396,21 +439,26 @@ describe('Priority (rules 312-313)', () => {
 
 describe('"I enter ready" (rule 363 replacing 359.2.c)', () => {
   /** The most repeated static clause in the card corpus. */
-  const EAGER = makeUnit(2, ['fury'], {
-    id: cardId('P-090'),
-    name: 'Eager',
+  const EAGER = makeUnit(2, ["fury"], {
+    id: cardId("P-090"),
+    name: "Eager",
     cost: cost(1),
-    abilities: { statics: [{ affects: { who: 'self' }, grant: { entersReady: true } }] },
+    abilities: {
+      statics: [{ affects: { who: "self" }, grant: { entersReady: true } }],
+    },
   });
 
   /** "Other friendly units enter ready" — the same grant from the Board. */
-  const MARSHAL = makeUnit(2, ['fury'], {
-    id: cardId('P-091'),
-    name: 'Marshal',
+  const MARSHAL = makeUnit(2, ["fury"], {
+    id: cardId("P-091"),
+    name: "Marshal",
     cost: cost(1),
     abilities: {
       statics: [
-        { affects: { who: 'friendly', excludeSelf: true }, grant: { entersReady: true } },
+        {
+          affects: { who: "friendly", excludeSelf: true },
+          grant: { entersReady: true },
+        },
       ],
     },
   });
@@ -433,7 +481,10 @@ describe('"I enter ready" (rule 363 replacing 359.2.c)', () => {
   }
 
   /** Mint a card of `card` into the Turn Player's hand. */
-  function inHand(state: GameState, card: CardDefinition): [GameState, EntityId] {
+  function inHand(
+    state: GameState,
+    card: CardDefinition,
+  ): [GameState, EntityId] {
     const player = state.activePlayer;
     const entity = state.nextEntityId as EntityId;
     const next: GameState = {
@@ -446,7 +497,7 @@ describe('"I enter ready" (rule 363 replacing 359.2.c)', () => {
           card: card.id,
           owner: player,
           controller: player,
-          location: playerLocation(player, 'hand'),
+          location: playerLocation(player, "hand"),
           exhausted: false,
           damage: 0,
           mightBonus: 0,
@@ -457,43 +508,46 @@ describe('"I enter ready" (rule 363 replacing 359.2.c)', () => {
       },
       players: state.players.map((seat) =>
         seat.id === player
-          ? { ...seat, zones: { ...seat.zones, hand: [...seat.zones.hand, entity] } }
+          ? {
+              ...seat,
+              zones: { ...seat.zones, hand: [...seat.zones.hand, entity] },
+            }
           : seat,
       ),
     };
     return [next, entity];
   }
 
-  it('enters a Unit exhausted by default (359.2.c)', () => {
-    const [state, card] = inHand(ready('plain-enter'), CHEAP_UNIT);
-    const played = reduce(state, { type: 'playCard', card }).state;
+  it("enters a Unit exhausted by default (359.2.c)", () => {
+    const [state, card] = inHand(ready("plain-enter"), CHEAP_UNIT);
+    const played = reduce(state, { type: "playCard", card }).state;
     expect(played.entities[card]!.exhausted).toBe(true);
   });
 
-  it('enters ready when the card says so, read from hand', () => {
+  it("enters ready when the card says so, read from hand", () => {
     // The static is on the card being played, so a sweep of the Board would
     // never find it — the card is still in hand when the question is asked.
-    const [state, card] = inHand(ready('eager'), EAGER);
-    const played = reduce(state, { type: 'playCard', card }).state;
+    const [state, card] = inHand(ready("eager"), EAGER);
+    const played = reduce(state, { type: "playCard", card }).state;
     expect(played.entities[card]!.exhausted).toBe(false);
   });
 
-  it('lets a Unit already on the Board grant it to others', () => {
-    let state = ready('marshal');
+  it("lets a Unit already on the Board grant it to others", () => {
+    let state = ready("marshal");
     const [withMarshal, marshal] = inHand(state, MARSHAL);
-    state = reduce(withMarshal, { type: 'playCard', card: marshal }).state;
+    state = reduce(withMarshal, { type: "playCard", card: marshal }).state;
     // The Marshal itself entered exhausted: its own scope excludes it.
     expect(state.entities[marshal]!.exhausted).toBe(true);
 
     const [withOther, other] = inHand(state, CHEAP_UNIT);
-    const played = reduce(withOther, { type: 'playCard', card: other }).state;
+    const played = reduce(withOther, { type: "playCard", card: other }).state;
     expect(played.entities[other]!.exhausted).toBe(false);
   });
 
-  it('does not grant it across the table', () => {
-    let state = ready('marshal-enemy');
+  it("does not grant it across the table", () => {
+    let state = ready("marshal-enemy");
     const [withMarshal, marshal] = inHand(state, MARSHAL);
-    state = reduce(withMarshal, { type: 'playCard', card: marshal }).state;
+    state = reduce(withMarshal, { type: "playCard", card: marshal }).state;
 
     // Same Board, but the opponent's own play is unaffected: the grant is
     // friendly-scoped, judged from the Marshal's controller.
@@ -502,8 +556,8 @@ describe('"I enter ready" (rule 363 replacing 359.2.c)', () => {
     expect(entersReady(state, state.activePlayer, CHEAP_UNIT)).toBe(true);
   });
 
-  it('says nothing about a card with no such static', () => {
-    const state = ready('gear-enter');
+  it("says nothing about a card with no such static", () => {
+    const state = ready("gear-enter");
     expect(entersReady(state, state.activePlayer, CHEAP_UNIT)).toBe(false);
     expect(entersReady(state, state.activePlayer, GEAR)).toBe(false);
   });

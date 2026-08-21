@@ -5,7 +5,15 @@
  * a new primitive means a case here and a variant there — not a new code path
  * per card, which is the whole point of the data-driven design.
  */
-import { anyPowerOf, isPlayable, needsTargetChoice, tokenCardId, type Cost, type GuardedEffect } from '@riftbound/cards';
+import {
+  anyPowerOf,
+  isPlayable,
+  needsTargetChoice,
+  targetCount,
+  tokenCardId,
+  type Cost,
+  type GuardedEffect,
+} from '@riftbound/cards';
 import type { CardEffect, DestinationSpec, Effect, TargetSpec } from '@riftbound/cards';
 
 import type { TriggerEventInstance } from './abilities.js';
@@ -39,7 +47,12 @@ import {
  * not ripple through every caller.
  */
 export interface EffectChoices {
-  readonly target?: EntityId | undefined;
+  /**
+   * The chosen Targets (355.6). A list because one spec may choose several;
+   * a card naming one target holds a list of one, and a card naming none holds
+   * an empty list.
+   */
+  readonly targets?: readonly EntityId[] | undefined;
   /** Where a `move` effect sends its target. */
   readonly destination?: Location | undefined;
 }
@@ -374,20 +387,37 @@ function boardEntitiesOf(state: GameState, player: PlayerId): EntityId[] {
   return found;
 }
 
-/** Whether a chosen target is still valid (rule 358.1, the Check Legality step). */
+/**
+ * Whether the chosen Targets are still valid (rule 358.1, the Check Legality
+ * step).
+ *
+ * Every member is checked, because 355.6 makes each one a Target in its own
+ * right — a set with one invalid member is not a partially legal choice.
+ */
 export function isValidTarget(
   state: GameState,
   controller: PlayerId,
   spec: TargetSpec,
-  target: EntityId | undefined,
+  targets: readonly EntityId[] | undefined,
   source?: EntityId | undefined,
 ): boolean {
+  const chosen = targets ?? [];
   // A self-targeting card takes no chosen target; supplying one is an error,
   // not a different reading.
   if (!needsTargetChoice(spec)) {
-    return target === undefined;
+    return chosen.length === 0;
   }
-  return target !== undefined && legalTargets(state, controller, spec, source).includes(target);
+  const { min, max } = targetCount(spec);
+  if (chosen.length < min || chosen.length > max) {
+    return false;
+  }
+  // 355.6 chooses distinct objects: naming one twice would apply the effect to
+  // it twice from a single choice.
+  if (new Set(chosen).size !== chosen.length) {
+    return false;
+  }
+  const legal = legalTargets(state, controller, spec, source);
+  return chosen.every((one) => legal.includes(one));
 }
 
 /**
@@ -419,7 +449,7 @@ export function executeEffect(
   // than enumerated when the card was played.
   const choices: EffectChoices =
     effect.target.kind === 'self'
-      ? { ...invocation.choices, target: invocation.source }
+      ? { ...invocation.choices, targets: [invocation.source] }
       : invocation.choices;
 
   let next = state;
@@ -436,17 +466,39 @@ export function executeEffect(
     });
 
   for (const step of effect.effects) {
-    // 355.5.a: an `all` spec affects every matching object rather than one
-    // chosen one, so a target-consuming effect runs once per object while the
-    // rest — a draw, a Score — still run once.
-    if (effect.target.kind === 'all' && consumesTarget(step.kind)) {
-      const every = allTargets(
-        next,
-        invocation.controller,
-        effect.target,
-        invocation.source,
-        invocation.noted,
-      );
+    // A target-consuming step runs once per object; a step that takes no
+    // target — a draw, a Score — runs once whatever the spec chose. That is
+    // one rule covering two different ways to reach a set: 355.5.a's criteria,
+    // which choose nothing and are enumerated here at resolution, and a
+    // counted spec, whose set was chosen when the card was played.
+    if (consumesTarget(step.kind)) {
+      const every =
+        effect.target.kind === 'all'
+          ? allTargets(
+              next,
+              invocation.controller,
+              effect.target,
+              invocation.source,
+              invocation.noted,
+            )
+          : (choices.targets ?? []);
+      // A spec that chooses nothing at all still runs its steps once, with no
+      // target — "draw 1" is not skipped for want of one.
+      if (every.length === 0 && effect.target.kind !== 'all') {
+        if (guarded(step, undefined)) {
+          next = applyEffect(
+            next,
+            invocation.controller,
+            invocation.source,
+            step,
+            choices,
+            events,
+            context,
+            invocation.noted,
+          );
+        }
+        continue;
+      }
       for (const one of every) {
         if (!guarded(step, one)) {
           continue;
@@ -456,7 +508,7 @@ export function executeEffect(
           invocation.controller,
           invocation.source,
           step,
-          { ...choices, target: one },
+          { ...choices, targets: [one] },
           events,
           context,
           invocation.noted,
@@ -464,7 +516,7 @@ export function executeEffect(
       }
       continue;
     }
-    if (!guarded(step, choices.target)) {
+    if (!guarded(step, choices.targets?.[0])) {
       continue;
     }
     next = applyEffect(
@@ -492,7 +544,7 @@ function applyEffect(
   /** 808.1.d.3's noted Battlefield, for a "here" whose source has left the Board. */
   noted?: number | undefined,
 ): GameState {
-  const target = choices.target;
+  const target = choices.targets?.[0];
   switch (effect.kind) {
     case 'draw': {
       // "Draw 1 for each of your MIGHTY units": the printed number is per-unit,

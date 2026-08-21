@@ -20,6 +20,18 @@ import type { Keyword } from './keyword.js';
  * choices for every target before it can go on the Chain — and re-checked at
  * the Check Legality step (358.1).
  */
+/**
+ * How many objects one target spec chooses (rule 355.6).
+ *
+ * `min` below `max` is the "**up to** 2" wording, where choosing fewer — or
+ * none — is legal; equal bounds are the "give **two** friendly units each"
+ * wording, where the card does nothing if the board cannot supply them (355.8).
+ */
+export interface TargetCount {
+  readonly min: number;
+  readonly max: number;
+}
+
 export type TargetSpec =
   /** Affects the controller, or nothing in particular. No choice to make. */
   | { readonly kind: 'none' }
@@ -80,6 +92,21 @@ export type TargetSpec =
        * does not exist to be read wrong.
        */
       readonly cardType?: 'unit' | 'gear' | undefined;
+      /**
+       * "**up to 2** friendly units", "give **two** friendly units each +1
+       * Might" — one choice of several objects rather than several choices.
+       *
+       * Omitted means exactly one, which is what every other spec here means.
+       * Rule 355.6 makes each chosen object a Target, so a counted spec is
+       * still choosing: 355.8 wants the whole set settled before the card
+       * reaches the Chain, and 358.1 re-checks every member of it.
+       *
+       * Bounded on purpose. `legalActions` enumerates the combinations, so an
+       * unbounded "any number of" would be 2^n actions — and the corpus only
+       * prints that alongside damage splitting, which is a mechanic of its
+       * own.
+       */
+      readonly count?: TargetCount | undefined;
     }
   /**
    * **Every** Game Object matching the criteria — "deal 2 to all enemy units",
@@ -487,6 +514,14 @@ export function needsTargetChoice(spec: TargetSpec | undefined): boolean {
       spec.kind === 'gear' ||
       spec.kind === 'chainItem')
   );
+}
+
+/**
+ * How many objects a spec chooses. Everything but a counted `unit` chooses
+ * exactly one, so this is where the default lives rather than at each caller.
+ */
+export function targetCount(spec: TargetSpec | undefined): TargetCount {
+  return spec?.kind === 'unit' && spec.count !== undefined ? spec.count : { min: 1, max: 1 };
 }
 
 /** True when playing this card requires the player to choose a Destination. */

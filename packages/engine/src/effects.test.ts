@@ -14,11 +14,12 @@ import {
 } from '@riftbound/cards/testing';
 import { describe, expect, it } from 'vitest';
 
+import { IllegalActionError } from './actions.js';
 import { mightOf } from './combat.js';
 import { conditionMet } from './condition.js';
 import { legalTargets } from './effects.js';
 import { checkInvariants } from './invariants.js';
-import { currentLegalActions } from './legal.js';
+import { currentLegalActions, legalActions } from './legal.js';
 import { moveEntity, withEntity } from './mutate.js';
 import { reduce } from './reduce.js';
 import { createGame, type DeckList } from './setup.js';
@@ -26,6 +27,7 @@ import {
   battlefieldLocation,
   type EntityId,
   type GameState,
+  getEntity,
   isOver,
   playerId,
   playerLocation,
@@ -176,6 +178,30 @@ const DISARM = makeSpell(['fury'], {
   },
 });
 
+/** "Give two friendly units each +1 Might this turn." — a counted target (355.6). */
+const WAR_CRY = makeSpell(['fury'], {
+  id: cardId('E-040'),
+  name: 'War Cry',
+  cost: cost(1),
+  timing: 'action',
+  effect: {
+    target: { kind: 'unit', scope: 'friendly', count: { min: 2, max: 2 } },
+    effects: [{ kind: 'giveMight', amount: 1 }],
+  },
+});
+
+/** "Buff up to 2 friendly units." — the bounds differ, so choosing fewer is legal. */
+const BLESSING = makeSpell(['fury'], {
+  id: cardId('E-041'),
+  name: 'Blessing',
+  cost: cost(1),
+  timing: 'action',
+  effect: {
+    target: { kind: 'unit', scope: 'friendly', count: { min: 0, max: 2 } },
+    effects: [{ kind: 'buff' }],
+  },
+});
+
 const FURY_RUNE = makeRune('fury', { id: cardId('E-100') });
 const BATTLEFIELDS = Array.from({ length: 3 }, (_, i) =>
   makeBattlefield({ id: cardId(`E-20${i}`) }),
@@ -197,6 +223,8 @@ const REGISTRY = CardRegistry.from([
   REBUKE,
   WITHER,
   RECKONING,
+  WAR_CRY,
+  BLESSING,
   FURY_RUNE,
   ...BATTLEFIELDS,
 ] as CardDefinition[]);
@@ -219,6 +247,8 @@ function deck(): DeckList {
       ...Array.from({ length: 2 }, () => REBUKE.id),
       ...Array.from({ length: 3 }, () => WITHER.id),
       ...Array.from({ length: 3 }, () => RECKONING.id),
+      ...Array.from({ length: 2 }, () => WAR_CRY.id),
+      ...Array.from({ length: 2 }, () => BLESSING.id),
     ],
     runes: Array.from({ length: 8 }, () => FURY_RUNE.id),
     battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
@@ -301,7 +331,7 @@ function castSpell(state: GameState, spell: EntityId, target?: EntityId): GameSt
   let next = reduce(state, {
     type: 'playCard',
     card: spell,
-    ...(target === undefined ? {} : { target }),
+    ...(target === undefined ? {} : { targets: [target] }),
   }).state;
   next = reduce(next, { type: 'pass' }).state;
   next = reduce(next, { type: 'pass' }).state;
@@ -645,10 +675,10 @@ describe('Counter (rule 425)', () => {
     state = c;
 
     // The Bolt lingers on the Chain (359.3), which is what makes it Counterable.
-    state = reduce(state, { type: 'playCard', card: bolt, target: victim }).state;
+    state = reduce(state, { type: 'playCard', card: bolt, targets: [victim]}).state;
     expect(state.chain).toHaveLength(1);
 
-    state = reduce(state, { type: 'playCard', card: rebuke, target: bolt }).state;
+    state = reduce(state, { type: 'playCard', card: rebuke, targets: [bolt]}).state;
     expect(state.chain).toHaveLength(2);
 
     // Resolve the Rebuke; the Bolt is cleared rather than resolving.
@@ -684,7 +714,7 @@ describe('Counter (rule 425)', () => {
     state = a;
     const [b, victim] = onBoard(state, me, PLAIN, 'base');
     state = b;
-    state = reduce(state, { type: 'playCard', card: bolt, target: victim }).state;
+    state = reduce(state, { type: 'playCard', card: bolt, targets: [victim]}).state;
 
     // Bolt costs 1 Energy.
     expect(legalTargets(state, me, { kind: 'chainItem', maxEnergy: 1 })).toEqual([bolt]);
@@ -714,10 +744,10 @@ describe('spell effects (rule 359.3.d)', () => {
     state = b;
 
     // On the Chain, not yet resolved.
-    const onChain = reduce(state, { type: 'playCard', card: bolt, target: victim }).state;
+    const onChain = reduce(state, { type: 'playCard', card: bolt, targets: [victim]}).state;
     expect(onChain.entities[victim]!.damage).toBe(0);
     expect(onChain.chain).toHaveLength(1);
-    expect(onChain.chain[0]?.target).toBe(victim);
+    expect(onChain.chain[0]?.targets).toEqual([victim]);
   });
 
   it('draws cards for an untargeted Spell', () => {
@@ -767,7 +797,7 @@ describe('spell effects (rule 359.3.d)', () => {
     const [b, victim] = onBoard(state, state.activePlayer, PLAIN, 'base');
     state = b;
 
-    let onChain = reduce(state, { type: 'playCard', card: bolt, target: victim }).state;
+    let onChain = reduce(state, { type: 'playCard', card: bolt, targets: [victim]}).state;
     // The target is removed while the Spell sits on the Chain.
     onChain = moveEntity(onChain, victim, playerLocation(onChain.activePlayer, 'trash'));
 
@@ -839,7 +869,7 @@ describe('permanent effects (rule 359.2.b)', () => {
     state = b;
 
     expect(() =>
-      reduce(state, { type: 'playCard', card: plain, target: other }),
+      reduce(state, { type: 'playCard', card: plain, targets: [other]}),
     ).toThrow(/does not target/);
   });
 });
@@ -878,5 +908,97 @@ describe('effects and Combat', () => {
     expect(state.battlefields[0]?.units).toEqual([mine]);
     expect(state.battlefields[0]?.controller).toBe(me);
     checkInvariants(state);
+  });
+});
+
+describe('counted targets (rule 355.6)', () => {
+  it('applies the effect to every chosen object', () => {
+    let state = withEnergy(inMainPhase('counted'), 1);
+    const [a, first] = onBoard(state, 0, PLAIN, 'base');
+    state = a;
+    const [b, second] = onBoard(state, 0, PLAIN, 'base');
+    state = b;
+    const [c, cry] = toHand(state, WAR_CRY);
+    state = c;
+
+    state = reduce(state, { type: 'playCard', card: cry, targets: [first, second] }).state;
+    state = reduce(reduce(state, { type: 'pass' }).state, { type: 'pass' }).state;
+
+    expect(mightOf(state, first)).toBe(PLAIN.might + 1);
+    expect(mightOf(state, second)).toBe(PLAIN.might + 1);
+    checkInvariants(state);
+  });
+
+  it('offers one action per combination, and never the same set twice', () => {
+    let state = withEnergy(inMainPhase('combinations'), 1);
+    for (let i = 0; i < 3; i += 1) {
+      const [next] = onBoard(state, 0, PLAIN, 'base');
+      state = next;
+    }
+    const [withCry, cry] = toHand(state, WAR_CRY);
+    state = withCry;
+
+    const plays = legalActions(state, state.activePlayer).filter(
+      (action) => action.type === 'playCard' && action.card === cry,
+    ) as { targets?: readonly EntityId[] }[];
+
+    // Three Units the player controls, plus the Champion already in play: the
+    // sets are the unordered pairs, so C(n, 2) of them and no duplicates.
+    const sets = plays.map((play) => [...(play.targets ?? [])].sort().join(','));
+    expect(new Set(sets).size).toBe(sets.length);
+    expect(plays.every((play) => play.targets?.length === 2)).toBe(true);
+  });
+
+  it('355.6: refuses a set naming the same object twice', () => {
+    let state = withEnergy(inMainPhase('duplicate'), 1);
+    const [a, only] = onBoard(state, 0, PLAIN, 'base');
+    state = a;
+    const [b, cry] = toHand(state, WAR_CRY);
+    state = b;
+
+    expect(() =>
+      reduce(state, { type: 'playCard', card: cry, targets: [only, only] }),
+    ).toThrow(IllegalActionError);
+  });
+
+  it('refuses a set outside the spec\'s bounds', () => {
+    let state = withEnergy(inMainPhase('bounds'), 1);
+    const [a, first] = onBoard(state, 0, PLAIN, 'base');
+    state = a;
+    const [b, second] = onBoard(state, 0, PLAIN, 'base');
+    state = b;
+    const [c, third] = onBoard(state, 0, PLAIN, 'base');
+    state = c;
+    const [d, cry] = toHand(state, WAR_CRY);
+    state = d;
+
+    // "two friendly units" is exact: one is too few and three too many.
+    expect(() => reduce(state, { type: 'playCard', card: cry, targets: [first] })).toThrow(
+      IllegalActionError,
+    );
+    expect(() =>
+      reduce(state, { type: 'playCard', card: cry, targets: [first, second, third] }),
+    ).toThrow(IllegalActionError);
+  });
+
+  it('"up to" makes choosing fewer — or none — a legal choice', () => {
+    let state = withEnergy(inMainPhase('uptoN'), 1);
+    const [a, only] = onBoard(state, 0, PLAIN, 'base');
+    state = a;
+    const [b, blessing] = toHand(state, BLESSING);
+    state = b;
+
+    const offered = legalActions(state, state.activePlayer).filter(
+      (action) => action.type === 'playCard' && action.card === blessing,
+    ) as { targets?: readonly EntityId[] }[];
+    const sizes = new Set(offered.map((play) => play.targets?.length ?? 0));
+    expect(sizes).toContain(0);
+    expect(sizes).toContain(1);
+
+    // Choosing none still resolves: the steps run, they just reach nobody.
+    const none = reduce(state, { type: 'playCard', card: blessing }).state;
+    const settled = reduce(reduce(none, { type: 'pass' }).state, { type: 'pass' }).state;
+    expect(getEntity(settled, only).buffs).toBe(0);
+    checkInvariants(settled);
   });
 });

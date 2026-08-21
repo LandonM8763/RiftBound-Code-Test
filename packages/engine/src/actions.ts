@@ -27,16 +27,20 @@ export type Action =
   /**
    * Play a card from hand (rules 349-359).
    *
-   * Units need a Location. A card whose rules text targets needs `target`,
+   * Units need a Location. A card whose rules text targets needs `targets`,
    * chosen now rather than on resolution: rule 355.8 requires valid choices for
    * every target before the card can go on the Chain.
+   *
+   * A list rather than one id because a spec may choose several (355.6 makes
+   * each chosen object a Target of its own). Almost every card names one, and
+   * for those the list holds exactly one.
    */
   | {
       readonly type: 'playCard';
       readonly card: EntityId;
       /** Where a Unit enters the Board (359.2.c). Entering is not a Move. */
       readonly location?: Location;
-      readonly target?: EntityId;
+      readonly targets?: readonly EntityId[];
       /** Where a `move` effect on the card sends its target (rule 449.1). */
       readonly destination?: Location;
       /**
@@ -71,7 +75,7 @@ export type Action =
        * has it only because something is Equipped to it.
        */
       readonly from?: EntityId;
-      readonly target?: EntityId;
+      readonly targets?: readonly EntityId[];
       readonly destination?: Location;
     }
   /**
@@ -90,7 +94,7 @@ export type Action =
   | {
       readonly type: 'resolveTrigger';
       readonly perform: boolean;
-      readonly target?: EntityId;
+      readonly targets?: readonly EntityId[];
       readonly destination?: Location;
     }
   /**

@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 219 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 222 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -495,7 +495,7 @@ builds the batch on top of it. Keep that split — a win rate computed inside
 | `additional.ts` | Additional Costs (356.2): what can be paid, and paying it |
 | `statics.ts` | Static and Passive abilities: Might, granted keywords, entering ready, and rule 002's restrictions |
 | `costs.ts` | Rule 356's layers: what a card or ability actually costs to play |
-| `legal.ts` | `legalActions(state, player)` |
+| `legal.ts` | `legalActions(state, player)`, and `targetChoices` — every legal *set* of Targets for a spec (355.6) |
 | `view.ts` | Per-player observable view; redacts hidden zones |
 | `token.ts` | Tokens (179-187): Creating them, and 186.1's rule that one leaving the Board stops existing |
 | `attach.ts` | Attachment (434-435, 716-719): the link, and `activeAbilities`, which is the one honest answer to what a Game Object can do |
@@ -802,6 +802,47 @@ The parser produces guards only through the state-predicate grammar it already
 had; the full "Choose X. If Y, A. Otherwise, B." sentence shape is left to the
 authored overlay, because it is a lot of grammar for a handful of cards and
 [the tail is flat](#turning-text-into-effects).
+
+### Counted targets
+
+`TargetCount` in `cards/effect.ts`, enumerated by `targetChoices` in
+`engine/legal.ts`.
+
+**A counted target is one choice of a *set*, and that is why `targets` is a
+list everywhere.** "Give two friendly units each +2 Might", "buff up to 2
+friendly units" — rule 355.6 makes each chosen object a Target in its own
+right, so the Action, the Chain item, the view and `EffectChoices` all carry
+`readonly EntityId[]` rather than one id. A card naming one target holds a list
+of one; a card naming none holds an empty list.
+
+One field rather than a single `target` plus an `extraTargets`, for the reason
+this codebase refuses second sources of truth everywhere else: two fields that
+can disagree eventually do.
+
+Four things are load-bearing:
+
+- **The executor already had the loop.** 355.5.a's criteria set and a counted
+  set reach the same place — a target-consuming step runs once per object while
+  a step that takes no target runs once — so `executeEffect` asks
+  `consumesTarget` and then walks whichever set it has. Nothing new executes.
+- **The bounds mean different things and both are printed.** `min` equal to
+  `max` is "**two** friendly units", which 355.8 makes unplayable when the
+  board cannot supply them; `min` below `max` is "**up to** 2", where choosing
+  fewer — or none — is itself a legal choice, and `legalActions` offers the
+  empty set as an action.
+- **Combinations, never permutations.** `legalTargets` fixes the order, so
+  `targetChoices` generates by ascending index and never reorders: two actions
+  naming the same two Units in different orders would be one choice offered
+  twice. `isValidTarget` rejects a repeat for the mirror reason — naming one
+  object twice would apply the effect to it twice from a single choice.
+- **An unbounded count is refused, not approximated.** "Any number of friendly
+  units" is 2^n actions, and the parser records it as a gap rather than
+  guessing a bound. Every printing of it in the corpus is blocked on something
+  else as well.
+
+The parser reads the count off the *article*, which is what makes "two **other**
+friendly units" one phrase rather than two captures: `unitTarget` already read
+"another", and "other" is the same word with a number in front of it.
 
 ### Keywords
 
@@ -1946,15 +1987,15 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 219 of the 468 cards that have text** — 211 parsed and 8 hand-authored, and the shape of what is
+**Coverage is 222 of the 468 cards that have text** — 214 parsed and 8 hand-authored, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 211 |
+| Fully parsed | 214 |
 | Hand-authored | 8 |
-| Blocked | 249 |
+| Blocked | 246 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 4 times, the next 2, and every one of
@@ -2083,7 +2124,6 @@ rows and they are all small:
 | Durations and delayed effects ("the next spell you play…") | +2 |
 | Effect-outcome predicates ("if this kills it", "unless its controller…") | +1 |
 | Statics beyond scope-plus-grant ("while I'm attacking alone") | +1 |
-| A count of targets ("up to 2 friendly units") | +1 |
 | Symmetric effects ("each player kills one of their gear") | +1 |
 | An optional first clause ("you may kill a gear. Draw 1.") | +1 |
 | Conditions about the source at death ("if I died alone") | +1 |
@@ -2131,6 +2171,7 @@ What each round actually delivered, for calibrating the next projection:
 | Signed Might with a printed floor (143.2) | +5 projected, **+5** delivered |
 | Static restrictions (rule 002) | +8 projected, **+6** delivered |
 | Guarded effect steps and four more authored entries | **+4** delivered |
+| Counted targets (355.6) | +2 projected, **+3** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic

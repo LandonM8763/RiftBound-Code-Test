@@ -37,6 +37,7 @@ import {
   type StaticAbility,
   type Condition,
   type StaticScope,
+  type TargetCount,
   type TargetSpec,
   type TriggerCondition,
   type TriggeredAbility,
@@ -427,16 +428,49 @@ function unitTarget(
 ): TargetSpec {
   const cardType = (noun ?? 'unit').trim().toLowerCase();
   const place = (where ?? '').trim().toLowerCase();
+  const many = articleCount(article);
   return {
     kind: 'unit',
     scope: unitScope(scope),
     ...(cardType === 'gear' ? { cardType: 'gear' as const } : {}),
     ...(place === 'at a battlefield' ? { atBattlefield: true } : {}),
     ...(place === 'here' ? { here: true } : {}),
-    // 355.9's "another": never the effect's own source.
-    ...(/^another$/i.test((article ?? '').trim()) ? { excludeSelf: true } : {}),
+    // 355.9's "another" — and "two **other** friendly units", which is the
+    // same word once a count is in front of it.
+    ...(/\b(?:another|other)\b/i.test(article ?? '') ? { excludeSelf: true } : {}),
     ...(maxMight === undefined ? {} : { maxMight }),
+    ...(many === undefined ? {} : { count: many }),
   };
+}
+
+/**
+ * The count an article states: "**two** friendly units", "**up to 2** units".
+ *
+ * `undefined` for the ordinary singular articles, which is what
+ * `targetCount` reads as exactly one. "Up to" is the only wording that makes
+ * `min` differ from `max` — a bare number is exact, so a board that cannot
+ * supply it makes the card unplayable (355.8) rather than doing less.
+ *
+ * "Any number of" is deliberately absent: an unbounded count would make
+ * `legalActions` enumerate 2^n sets, and the corpus prints it only alongside
+ * mechanics that are missing anyway.
+ */
+function articleCount(article: string | undefined): TargetCount | undefined {
+  const word = (article ?? '')
+    .replace(/\bother\b/i, '')
+    .trim()
+    .toLowerCase();
+  const upTo = /^up to (\d+|one|two|three|four)$/i.exec(word);
+  if (upTo !== null) {
+    const max = count(upTo[1] ?? '');
+    return max === undefined ? undefined : { min: 0, max };
+  }
+  const exact = /^(\d+|two|three|four)$/i.exec(word);
+  if (exact !== null) {
+    const n = count(exact[1] ?? '');
+    return n === undefined || n < 2 ? undefined : { min: n, max: n };
+  }
+  return undefined;
 }
 
 const CLAUSES: readonly ClauseRule[] = [
@@ -521,7 +555,7 @@ const CLAUSES: readonly ClauseRule[] = [
      * target's location and "to its base" is the Destination.
      */
     pattern:
-      /^move (an?|another) (friendly |enemy )?unit(?: (?:at|from) a battlefield)? (?:to|on) (?:its|your|their) base$/i,
+      /^move (an?|another|up to (?:\d+|one|two|three|four)|two|three|four) (friendly |enemy )?units?(?: (?:at|from) a battlefield)? (?:to|on) (?:its |your |their )?base$/i,
     build: (m) => ({
       effects: [{ kind: 'move' }],
       target: unitTarget(m[1], m[2], 'unit', 'at a battlefield'),
@@ -582,7 +616,7 @@ const CLAUSES: readonly ClauseRule[] = [
   },
   {
     pattern:
-      /^give (an?|another) (friendly |enemy )?unit( here| at a battlefield)? ([+-])(\d+) might this turn(?:, to a minimum of (\d+) might)?$/i,
+      /^give (an?|another|up to (?:\d+|one|two|three|four)|two|three|four) (friendly |enemy )?units?(?: each)?( here| at a battlefield)? ([+-])(\d+) might this turn(?:, to a minimum of (\d+) might)?$/i,
     build: (m) => {
       const grant = signedMight(m[4], m[5], m[6]);
       return grant === undefined
@@ -749,10 +783,13 @@ const CLAUSES: readonly ClauseRule[] = [
   {
     // One rule rather than three: the verbs differ and the target phrase does
     // not, which is the whole reason `unitTarget` exists.
-    pattern: /^(ready|buff|heal|exhaust) (an?|another) (friendly |enemy )?unit( at a battlefield| here)?$/i,
+    pattern:
+      /^(ready|buff|heal|exhaust) (an?|another|(?:up to )?(?:\d+|one|two|three|four))( other)? (friendly |enemy )?units?( at a battlefield| here)?$/i,
     build: (m) => ({
       effects: [{ kind: (m[1] ?? '').toLowerCase() as 'ready' | 'buff' | 'heal' | 'exhaust' }],
-      target: unitTarget(m[2], m[3], 'unit', m[4]),
+      // "buff **two other** friendly units": the count and the "other" are one
+      // article phrase, so `unitTarget` reads both from the same string.
+      target: unitTarget(`${m[2] ?? ''}${m[3] ?? ''}`, m[4], 'unit', m[5]),
     }),
   },
   {

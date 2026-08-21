@@ -14,7 +14,7 @@ import {
   totalRuneCost,
   type CardDefinition,
   type TargetSpec,
-} from '@riftbound/cards';
+} from "@riftbound/cards";
 import {
   makeBattlefield,
   makeGear,
@@ -22,22 +22,22 @@ import {
   makeRune,
   makeSpell,
   makeUnit,
-} from '@riftbound/cards/testing';
-import { describe, expect, it } from 'vitest';
+} from "@riftbound/cards/testing";
+import { describe, expect, it } from "vitest";
 
-import { activatableAbilities } from './abilities.js';
-import { attach, attachmentsOf, detach } from './attach.js';
-import { mightOf } from './combat.js';
-import { executeEffect } from './effects.js';
-import { totalCost } from './costs.js';
-import { legalActions } from './legal.js';
-import { canPay, payFrom, validUnitLocations } from './play.js';
-import { checkInvariants } from './invariants.js';
-import { moveEntity } from './mutate.js';
-import { reduce } from './reduce.js';
-import { createGame, type DeckList } from './setup.js';
-import { keywordsOf, unitKeywordValue } from './statics.js';
-import { sendToNonBoardZone } from './token.js';
+import { activatableAbilities } from "./abilities.js";
+import { attach, attachmentsOf, detach } from "./attach.js";
+import { mightOf } from "./combat.js";
+import { executeEffect } from "./effects.js";
+import { totalCost } from "./costs.js";
+import { legalActions } from "./legal.js";
+import { canPay, payFrom, validUnitLocations } from "./play.js";
+import { checkInvariants } from "./invariants.js";
+import { moveEntity } from "./mutate.js";
+import { reduce } from "./reduce.js";
+import { createGame, type DeckList } from "./setup.js";
+import { keywordsOf, unitKeywordValue } from "./statics.js";
+import { sendToNonBoardZone } from "./token.js";
 import {
   battlefieldLocation,
   isOver,
@@ -45,29 +45,33 @@ import {
   type EntityId,
   type GameState,
   type PlayerId,
-} from './state.js';
+} from "./state.js";
 
-const LEGEND = makeLegend(['fury'], { id: cardId('A-000') });
-const CHAMPION = makeUnit(3, ['fury'], { id: cardId('A-001'), champion: true });
-const PLAIN = makeUnit(2, ['fury'], { id: cardId('A-010'), name: 'Plain', cost: cost(1) });
+const LEGEND = makeLegend(["fury"], { id: cardId("A-000") });
+const CHAMPION = makeUnit(3, ["fury"], { id: cardId("A-001"), champion: true });
+const PLAIN = makeUnit(2, ["fury"], {
+  id: cardId("A-010"),
+  name: "Plain",
+  cost: cost(1),
+});
 
 /** "EQUIP Fury / ASSAULT 2 / Might +0" — a real Serrated Dirk. */
-const DIRK = makeGear(['fury'], {
-  id: cardId('A-020'),
-  name: 'Dirk',
+const DIRK = makeGear(["fury"], {
+  id: cardId("A-020"),
+  name: "Dirk",
   cost: cost(1),
-  attached: { mightBonus: 0, keywords: [{ kind: 'assault', value: 2 }] },
+  attached: { mightBonus: 0, keywords: [{ kind: "assault", value: 2 }] },
 });
 
 /** "Might +2" and nothing else — a Long Sword. */
-const SWORD = makeGear(['fury'], {
-  id: cardId('A-021'),
-  name: 'Sword',
+const SWORD = makeGear(["fury"], {
+  id: cardId("A-021"),
+  name: "Sword",
   cost: cost(1),
   attached: { mightBonus: 2 },
 });
 
-const RUNE = makeRune('fury', { id: cardId('A-100') });
+const RUNE = makeRune("fury", { id: cardId("A-100") });
 const BATTLEFIELDS = Array.from({ length: 3 }, (_, i) =>
   makeBattlefield({ id: cardId(`A-20${i}`) }),
 );
@@ -97,18 +101,25 @@ function deck(): DeckList {
 }
 
 function game(seed: string): GameState {
-  let state = createGame({ decks: [deck(), deck()], registry: REGISTRY, seed }).state;
-  while (state.phase === 'mulligan') {
-    state = reduce(state, { type: 'mulligan', cards: [] }).state;
+  let state = createGame({
+    decks: [deck(), deck()],
+    registry: REGISTRY,
+    seed,
+  }).state;
+  while (state.phase === "mulligan") {
+    state = reduce(state, { type: "mulligan", cards: [] }).state;
   }
-  while (state.phase !== 'main' && !isOver(state)) {
-    state = reduce(state, { type: 'resolvePhase' }).state;
+  while (state.phase !== "main" && !isOver(state)) {
+    state = reduce(state, { type: "resolvePhase" }).state;
   }
   return state;
 }
 
 /** Put a card of `id` onto the active player's Base. */
-function onBoard(state: GameState, id: CardDefinition['id']): [GameState, EntityId] {
+function onBoard(
+  state: GameState,
+  id: CardDefinition["id"],
+): [GameState, EntityId] {
   const player = state.activePlayer;
   const card = state.players[player]!.zones.mainDeck.find(
     (candidate) => state.entities[candidate]!.card === id,
@@ -116,12 +127,12 @@ function onBoard(state: GameState, id: CardDefinition['id']): [GameState, Entity
   if (card === undefined) {
     throw new Error(`No ${id} left`);
   }
-  return [moveEntity(state, card, playerLocation(player, 'base')), card];
+  return [moveEntity(state, card, playerLocation(player, "base")), card];
 }
 
-describe('attaching and detaching (434-435)', () => {
-  it('records the link in one direction only', () => {
-    let state = game('attach-link');
+describe("attaching and detaching (434-435)", () => {
+  it("records the link in one direction only", () => {
+    let state = game("attach-link");
     const [a, unit] = onBoard(state, PLAIN.id);
     const [b, gear] = onBoard(a, DIRK.id);
     state = attach(b, gear, unit);
@@ -134,8 +145,8 @@ describe('attaching and detaching (434-435)', () => {
     checkInvariants(state);
   });
 
-  it('434.1.f: attaching to a new Top-Most Card leaves the old one', () => {
-    let state = game('attach-move');
+  it("434.1.f: attaching to a new Top-Most Card leaves the old one", () => {
+    let state = game("attach-move");
     const [a, first] = onBoard(state, PLAIN.id);
     const [b, second] = onBoard(a, PLAIN.id);
     const [c, gear] = onBoard(b, DIRK.id);
@@ -147,8 +158,8 @@ describe('attaching and detaching (434-435)', () => {
     expect(attachmentsOf(state, second)).toEqual([gear]);
   });
 
-  it('434.1.g / 435.1.a.1: re-attaching and detaching nothing do nothing', () => {
-    let state = game('attach-noop');
+  it("434.1.g / 435.1.a.1: re-attaching and detaching nothing do nothing", () => {
+    let state = game("attach-noop");
     const [a, unit] = onBoard(state, PLAIN.id);
     const [b, gear] = onBoard(a, DIRK.id);
 
@@ -157,8 +168,8 @@ describe('attaching and detaching (434-435)', () => {
     expect(detach(b, gear)).toBe(b);
   });
 
-  it('refuses a link that would close a loop', () => {
-    let state = game('attach-cycle');
+  it("refuses a link that would close a loop", () => {
+    let state = game("attach-cycle");
     const [a, one] = onBoard(state, DIRK.id);
     const [b, two] = onBoard(a, SWORD.id);
     state = attach(b, one, two);
@@ -170,9 +181,9 @@ describe('attaching and detaching (434-435)', () => {
   });
 });
 
-describe('what a Top-Most Card gains (718.3-718.4)', () => {
-  it('718.4: the Might Bonus modulates the Top-Most Card`s Might', () => {
-    let state = game('attach-might');
+describe("what a Top-Most Card gains (718.3-718.4)", () => {
+  it("718.4: the Might Bonus modulates the Top-Most Card`s Might", () => {
+    let state = game("attach-might");
     const [a, unit] = onBoard(state, PLAIN.id);
     const [b, sword] = onBoard(a, SWORD.id);
 
@@ -185,8 +196,8 @@ describe('what a Top-Most Card gains (718.3-718.4)', () => {
     expect(mightOf(state, unit)).toBe(2);
   });
 
-  it('718.3: Effect Text keywords read as though printed on the Unit', () => {
-    let state = game('attach-keywords');
+  it("718.3: Effect Text keywords read as though printed on the Unit", () => {
+    let state = game("attach-keywords");
     const [a, unit] = onBoard(state, PLAIN.id);
     const [b, dirk] = onBoard(a, DIRK.id);
 
@@ -194,14 +205,14 @@ describe('what a Top-Most Card gains (718.3-718.4)', () => {
     state = attach(b, dirk, unit);
 
     // The Gear lends Assault to the Unit, not to itself.
-    expect(unitKeywordValue(state, unit, 'assault')).toBe(2);
-    expect(unitKeywordValue(state, dirk, 'assault')).toBe(0);
+    expect(unitKeywordValue(state, unit, "assault")).toBe(2);
+    expect(unitKeywordValue(state, dirk, "assault")).toBe(0);
     // 807.1.c: Assault is Might while attacking.
-    expect(mightOf(state, unit, 'attacker')).toBe(4);
+    expect(mightOf(state, unit, "attacker")).toBe(4);
   });
 
-  it('stacks two attachments (718.4, 807.2)', () => {
-    let state = game('attach-two');
+  it("stacks two attachments (718.4, 807.2)", () => {
+    let state = game("attach-two");
     const [a, unit] = onBoard(state, PLAIN.id);
     const [b, sword] = onBoard(a, SWORD.id);
     const [c, dirk] = onBoard(b, DIRK.id);
@@ -211,13 +222,13 @@ describe('what a Top-Most Card gains (718.3-718.4)', () => {
 
     expect(attachmentsOf(state, unit)).toHaveLength(2);
     expect(mightOf(state, unit)).toBe(4);
-    expect(unitKeywordValue(state, unit, 'assault')).toBe(2);
+    expect(unitKeywordValue(state, unit, "assault")).toBe(2);
   });
 });
 
-describe('attachments follow their Top-Most Card', () => {
-  it('719.3: attaching puts them at the same Location', () => {
-    let state = game('attach-location');
+describe("attachments follow their Top-Most Card", () => {
+  it("719.3: attaching puts them at the same Location", () => {
+    let state = game("attach-location");
     let [a, unit] = onBoard(state, PLAIN.id);
     a = moveEntity(a, unit, battlefieldLocation(0));
     const [b, gear] = onBoard(a, DIRK.id);
@@ -228,14 +239,14 @@ describe('attachments follow their Top-Most Card', () => {
     checkInvariants(state);
   });
 
-  it('719.5: they leave the Board with it', () => {
-    let state = game('attach-death');
+  it("719.5: they leave the Board with it", () => {
+    let state = game("attach-death");
     const [a, unit] = onBoard(state, PLAIN.id);
     const [b, gear] = onBoard(a, DIRK.id);
     state = attach(b, gear, unit);
 
     const owner = state.entities[unit]!.owner;
-    state = sendToNonBoardZone(state, unit, playerLocation(owner, 'trash'));
+    state = sendToNonBoardZone(state, unit, playerLocation(owner, "trash"));
 
     expect(state.players[owner]!.zones.trash).toContain(unit);
     expect(state.players[owner]!.zones.trash).toContain(gear);
@@ -252,20 +263,23 @@ describe('attachments follow their Top-Most Card', () => {
  * sweep, the activation sweep and the static sweep, and each of those reads a
  * card rather than a Game Object unless told otherwise.
  */
-describe('abilities move with the attachment (718.2-718.3)', () => {
-  const SELF: TargetSpec = { kind: 'self' };
+describe("abilities move with the attachment (718.2-718.3)", () => {
+  const SELF: TargetSpec = { kind: "self" };
 
   /** "EQUIP Fury" — an Activated Ability that Attaches this Gear. */
-  const EQUIPPER = makeGear(['fury'], {
-    id: cardId('A-030'),
-    name: 'Equipper',
+  const EQUIPPER = makeGear(["fury"], {
+    id: cardId("A-030"),
+    name: "Equipper",
     cost: cost(1),
     abilities: {
       activated: [
         {
           cost: cost(0),
           exhaustSelf: false,
-          effect: { target: { kind: 'unit', scope: 'friendly' }, effects: [{ kind: 'attach' }] },
+          effect: {
+            target: { kind: "unit", scope: "friendly" },
+            effects: [{ kind: "attach" }],
+          },
         },
       ],
     },
@@ -273,14 +287,22 @@ describe('abilities move with the attachment (718.2-718.3)', () => {
   });
 
   /** "When I conquer, draw 1" printed in the Effect Text, not the Rules Text. */
-  const LENDER = makeGear(['fury'], {
-    id: cardId('A-031'),
-    name: 'Lender',
+  const LENDER = makeGear(["fury"], {
+    id: cardId("A-031"),
+    name: "Lender",
     cost: cost(1),
     attached: {
       abilities: {
-        statics: [{ affects: { who: 'self' }, grant: { keywords: [{ kind: 'tank' }] } }],
-        activated: [{ cost: cost(0), exhaustSelf: true, effect: { target: SELF, effects: [{ kind: 'ready' }] } }],
+        statics: [
+          { affects: { who: "self" }, grant: { keywords: [{ kind: "tank" }] } },
+        ],
+        activated: [
+          {
+            cost: cost(0),
+            exhaustSelf: true,
+            effect: { target: SELF, effects: [{ kind: "ready" }] },
+          },
+        ],
       },
     },
   });
@@ -315,24 +337,26 @@ describe('abilities move with the attachment (718.2-718.3)', () => {
       registry: LENDER_REGISTRY,
       seed,
     }).state;
-    while (state.phase === 'mulligan') {
-      state = reduce(state, { type: 'mulligan', cards: [] }).state;
+    while (state.phase === "mulligan") {
+      state = reduce(state, { type: "mulligan", cards: [] }).state;
     }
-    while (state.phase !== 'main' && !isOver(state)) {
-      state = reduce(state, { type: 'resolvePhase' }).state;
+    while (state.phase !== "main" && !isOver(state)) {
+      state = reduce(state, { type: "resolvePhase" }).state;
     }
     return state;
   }
 
-  it('718.2: an Attached Gear stops offering its own Activated Ability', () => {
-    let state = lenderGame('attach-inactive');
+  it("718.2: an Attached Gear stops offering its own Activated Ability", () => {
+    let state = lenderGame("attach-inactive");
     const player = state.activePlayer;
     const [a, unit] = onBoard(state, PLAIN.id);
     const [b, gear] = onBoard(a, EQUIPPER.id);
     state = b;
 
     const mine = (): number =>
-      activatableAbilities(state, player).filter((entry) => entry.source === gear).length;
+      activatableAbilities(state, player).filter(
+        (entry) => entry.source === gear,
+      ).length;
     expect(mine()).toBe(1);
 
     // Once Equipped, its printed Rules Text is Inactive — otherwise it could
@@ -341,22 +365,24 @@ describe('abilities move with the attachment (718.2-718.3)', () => {
     expect(mine()).toBe(0);
   });
 
-  it('718.3: the Top-Most Card gains the Effect Text`s Activated Ability', () => {
-    let state = lenderGame('attach-activated');
+  it("718.3: the Top-Most Card gains the Effect Text`s Activated Ability", () => {
+    let state = lenderGame("attach-activated");
     const player = state.activePlayer;
     const [a, unit] = onBoard(state, PLAIN.id);
     const [b, gear] = onBoard(a, LENDER.id);
     state = attach(b, gear, unit);
 
-    const lent = activatableAbilities(state, player).filter((entry) => entry.source === unit);
+    const lent = activatableAbilities(state, player).filter(
+      (entry) => entry.source === unit,
+    );
     expect(lent).toHaveLength(1);
     // 377.3.a.1 keeps the text on the Gear, so the ability records where to
     // read it from while belonging to the Unit.
     expect(lent[0]!.ref.from).toBe(gear);
   });
 
-  it('718.3: and its Static, which reads as though printed on the Unit', () => {
-    let state = lenderGame('attach-static');
+  it("718.3: and its Static, which reads as though printed on the Unit", () => {
+    let state = lenderGame("attach-static");
     const [a, unit] = onBoard(state, PLAIN.id);
     const [b, gear] = onBoard(a, LENDER.id);
 
@@ -364,28 +390,30 @@ describe('abilities move with the attachment (718.2-718.3)', () => {
     state = attach(b, gear, unit);
     // `affects: self` on the Gear's Effect Text means the equipped Unit,
     // because 718.3 appends the ability to *that card's* Rules Text.
-    expect(keywordsOf(state, unit)).toEqual([{ kind: 'tank' }]);
+    expect(keywordsOf(state, unit)).toEqual([{ kind: "tank" }]);
     expect(keywordsOf(state, gear)).toEqual([]);
   });
 
-  it('818.1.c.2: activating Equip actually Attaches the Gear', () => {
-    let state = lenderGame('attach-equip');
+  it("818.1.c.2: activating Equip actually Attaches the Gear", () => {
+    let state = lenderGame("attach-equip");
     const player = state.activePlayer;
     const [a, unit] = onBoard(state, PLAIN.id);
     const [b, gear] = onBoard(a, EQUIPPER.id);
     state = { ...b, priority: player };
 
-    const equip = activatableAbilities(state, player).find((entry) => entry.source === gear);
+    const equip = activatableAbilities(state, player).find(
+      (entry) => entry.source === gear,
+    );
     expect(equip).toBeDefined();
     state = reduce(state, {
-      type: 'activateAbility',
+      type: "activateAbility",
       source: gear,
       index: equip!.index,
-      target: unit,
+      targets: [unit],
     }).state;
     // The ability is on the Chain; resolving it performs the Attach.
     while (state.chain.length > 0) {
-      state = reduce(state, { type: 'pass' }).state;
+      state = reduce(state, { type: "pass" }).state;
     }
 
     expect(state.entities[gear]!.attachedTo).toBe(unit);
@@ -418,8 +446,11 @@ function executeEffectFor(
 ): GameState {
   return executeEffect(
     state,
-    { controller: controller as never, source, choices: { target } },
-    { target: { kind: 'gear', scope: 'friendly' }, effects: [{ kind: 'equip', discountAnyPower: 1 }] },
+    { controller: controller as never, source, choices: { targets: [target] } },
+    {
+      target: { kind: "gear", scope: "friendly" },
+      effects: [{ kind: "equip", discountAnyPower: 1 }],
+    },
     [],
     {
       drawCards: (current) => current,
@@ -430,18 +461,21 @@ function executeEffectFor(
   );
 }
 
-describe('Weaponmaster (821)', () => {
+describe("Weaponmaster (821)", () => {
   /** "EQUIP Fury" — cost 1 Fury Power, so a pool of one Fury pip pays it. */
-  const SWORD_EQUIP = makeGear(['fury'], {
-    id: cardId('A-040'),
-    name: 'Equip Sword',
+  const SWORD_EQUIP = makeGear(["fury"], {
+    id: cardId("A-040"),
+    name: "Equip Sword",
     cost: cost(1),
     abilities: {
       activated: [
         {
-          cost: cost(0, 'fury'),
+          cost: cost(0, "fury"),
           exhaustSelf: false,
-          effect: { target: { kind: 'unit', scope: 'friendly' }, effects: [{ kind: 'attach' }] },
+          effect: {
+            target: { kind: "unit", scope: "friendly" },
+            effects: [{ kind: "attach" }],
+          },
         },
       ],
     },
@@ -449,20 +483,24 @@ describe('Weaponmaster (821)', () => {
   });
 
   /** A Gear with no Equip ability at all — 821.1.c.4's case. */
-  const INERT = makeGear(['fury'], { id: cardId('A-041'), name: 'Inert', cost: cost(1) });
+  const INERT = makeGear(["fury"], {
+    id: cardId("A-041"),
+    name: "Inert",
+    cost: cost(1),
+  });
 
-  const WEAPONMASTER = makeUnit(2, ['fury'], {
-    id: cardId('A-042'),
-    name: 'Weaponmaster',
+  const WEAPONMASTER = makeUnit(2, ["fury"], {
+    id: cardId("A-042"),
+    name: "Weaponmaster",
     cost: cost(1),
     abilities: {
       triggered: [
         {
-          condition: { event: 'played', subject: 'self' },
+          condition: { event: "played", subject: "self" },
           optional: true,
           effect: {
-            target: { kind: 'gear', scope: 'friendly' },
-            effects: [{ kind: 'equip', discountAnyPower: 1 }],
+            target: { kind: "gear", scope: "friendly" },
+            effects: [{ kind: "equip", discountAnyPower: 1 }],
           },
         },
       ],
@@ -493,12 +531,16 @@ describe('Weaponmaster (821)', () => {
       runes: Array.from({ length: 8 }, () => RUNE.id),
       battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
     };
-    let state = createGame({ decks: [list, list], registry: WM_REGISTRY, seed }).state;
-    while (state.phase === 'mulligan') {
-      state = reduce(state, { type: 'mulligan', cards: [] }).state;
+    let state = createGame({
+      decks: [list, list],
+      registry: WM_REGISTRY,
+      seed,
+    }).state;
+    while (state.phase === "mulligan") {
+      state = reduce(state, { type: "mulligan", cards: [] }).state;
     }
-    while (state.phase !== 'main' && !isOver(state)) {
-      state = reduce(state, { type: 'resolvePhase' }).state;
+    while (state.phase !== "main" && !isOver(state)) {
+      state = reduce(state, { type: "resolvePhase" }).state;
     }
     return state;
   }
@@ -510,14 +552,20 @@ describe('Weaponmaster (821)', () => {
       ...state,
       players: state.players.map((seat) =>
         seat.id === player
-          ? { ...seat, pool: { ...seat.pool, power: { ...seat.pool.power, fury: amount } } }
+          ? {
+              ...seat,
+              pool: {
+                ...seat.pool,
+                power: { ...seat.pool.power, fury: amount },
+              },
+            }
           : seat,
       ),
     };
   }
 
-  it('821.1.c: pays the chosen Equipment`s own Equip cost and Attaches it', () => {
-    let state = withFury(wmGame('wm-pay'), 1);
+  it("821.1.c: pays the chosen Equipment`s own Equip cost and Attaches it", () => {
+    let state = withFury(wmGame("wm-pay"), 1);
     const player = state.activePlayer;
     const [a, gear] = onBoard(state, SWORD_EQUIP.id);
     const [b, unit] = onBoard(a, WEAPONMASTER.id);
@@ -533,8 +581,8 @@ describe('Weaponmaster (821)', () => {
     checkInvariants(state);
   });
 
-  it('821.1.c.5: an unpayable cost leaves the Equipment exactly where it was', () => {
-    let state = withFury(wmGame('wm-broke'), 0);
+  it("821.1.c.5: an unpayable cost leaves the Equipment exactly where it was", () => {
+    let state = withFury(wmGame("wm-broke"), 0);
     const [a, gear] = onBoard(state, SWORD_EQUIP.id);
     const [b, unit] = onBoard(a, WEAPONMASTER.id);
     const before = b;
@@ -543,8 +591,8 @@ describe('Weaponmaster (821)', () => {
     expect(after.entities[gear]!.attachedTo).toBeUndefined();
   });
 
-  it('821.1.c.4: a chosen card with no Equip ability cannot pay one', () => {
-    let state = withFury(wmGame('wm-inert'), 5);
+  it("821.1.c.4: a chosen card with no Equip ability cannot pay one", () => {
+    let state = withFury(wmGame("wm-inert"), 5);
     const [a, gear] = onBoard(state, INERT.id);
     const [b, unit] = onBoard(a, WEAPONMASTER.id);
 
@@ -554,51 +602,62 @@ describe('Weaponmaster (821)', () => {
     expect(after.players[b.activePlayer]!.pool.power.fury).toBe(5);
   });
 
-  it('821.1.c.3: a cost with no [A] in it is not reduced', () => {
+  it("821.1.c.3: a cost with no [A] in it is not reduced", () => {
     // The Equip cost is 1 Fury Power, not `[A]`, so the discount removes
     // nothing and the Fury still has to be paid.
-    let state = withFury(wmGame('wm-noreduce'), 0);
+    let state = withFury(wmGame("wm-noreduce"), 0);
     const [a, gear] = onBoard(state, SWORD_EQUIP.id);
     const [b, unit] = onBoard(a, WEAPONMASTER.id);
-    expect(executeEffectFor(b, b.activePlayer, unit, gear).entities[gear]!.attachedTo).toBeUndefined();
+    expect(
+      executeEffectFor(b, b.activePlayer, unit, gear).entities[gear]!
+        .attachedTo,
+    ).toBeUndefined();
   });
 });
 
-describe('[A], Power of any Domain (135.2.e.5)', () => {
+describe("[A], Power of any Domain (135.2.e.5)", () => {
   const POOL = {
     energy: 2,
     power: { fury: 1, calm: 1, mind: 0, body: 0, chaos: 0, order: 0 },
     anyPower: 0,
   };
 
-  it('135.2.e.5.a: is paid by Power of any Domain', () => {
+  it("135.2.e.5.a: is paid by Power of any Domain", () => {
     expect(canPay(POOL, { energy: 0, power: [], anyPower: 2 })).toBe(true);
     expect(canPay(POOL, { energy: 0, power: [], anyPower: 3 })).toBe(false);
   });
 
-  it('does not let one pip pay both a named Domain and an [A]', () => {
+  it("does not let one pip pay both a named Domain and an [A]", () => {
     // One Fury and one Calm cannot cover "Fury plus two [A]"; asking each
     // Domain separately would say yes.
-    expect(canPay(POOL, { energy: 0, power: ['fury'], anyPower: 2 })).toBe(false);
-    expect(canPay(POOL, { energy: 0, power: ['fury'], anyPower: 1 })).toBe(true);
+    expect(canPay(POOL, { energy: 0, power: ["fury"], anyPower: 2 })).toBe(
+      false,
+    );
+    expect(canPay(POOL, { energy: 0, power: ["fury"], anyPower: 1 })).toBe(
+      true,
+    );
   });
 
-  it('spends real pips when paid', () => {
+  it("spends real pips when paid", () => {
     const after = payFrom(POOL, { energy: 0, power: [], anyPower: 2 });
     expect(after.power.fury + after.power.calm).toBe(0);
   });
 
-  it('counts toward the Rune cost of a card (137, 414, 416)', () => {
-    expect(totalRuneCost({ energy: 1, power: ['fury'], anyPower: 2 })).toBe(4);
+  it("counts toward the Rune cost of a card (137, 414, 416)", () => {
+    expect(totalRuneCost({ energy: 1, power: ["fury"], anyPower: 2 })).toBe(4);
   });
 
-  it('135.2.e.5.b: an [A] in the pool covers a Domain the player is short of', () => {
+  it("135.2.e.5.b: an [A] in the pool covers a Domain the player is short of", () => {
     const wild = { ...POOL, power: { ...POOL.power, calm: 0 }, anyPower: 1 };
-    expect(canPay(wild, { energy: 0, power: ['calm'], anyPower: 0 })).toBe(true);
-    expect(canPay(wild, { energy: 0, power: ['calm', 'mind'], anyPower: 0 })).toBe(false);
+    expect(canPay(wild, { energy: 0, power: ["calm"], anyPower: 0 })).toBe(
+      true,
+    );
+    expect(
+      canPay(wild, { energy: 0, power: ["calm", "mind"], anyPower: 0 }),
+    ).toBe(false);
   });
 
-  it('spends the wildcard last, keeping the more flexible pip', () => {
+  it("spends the wildcard last, keeping the more flexible pip", () => {
     const wild = { ...POOL, anyPower: 1 };
     // Two [A] owed against one Fury, one Calm and one wildcard: the real pips
     // go first because a wildcard can pay anything and they cannot.
@@ -616,32 +675,35 @@ describe('[A], Power of any Domain (135.2.e.5)', () => {
  * printed on, so the same card in the same hand has two Total Costs depending
  * on where it is pointed.
  */
-describe('Deflect (809)', () => {
+describe("Deflect (809)", () => {
   /** "DEFLECT 2" — opponents pay 2 more [A] to choose me. */
-  const DEFLECTOR = makeUnit(3, ['fury'], {
-    id: cardId('A-050'),
-    name: 'Deflector',
+  const DEFLECTOR = makeUnit(3, ["fury"], {
+    id: cardId("A-050"),
+    name: "Deflector",
     cost: cost(1),
     abilities: {
       costModifiers: [
         {
           applies: {
-            types: ['unit', 'spell', 'gear', 'ability'],
-            scope: 'opponent',
+            types: ["unit", "spell", "gear", "ability"],
+            scope: "opponent",
             choosesSource: true,
           },
-          change: { kind: 'increase', anyPower: 2 },
+          change: { kind: "increase", anyPower: 2 },
         },
       ],
     },
   });
 
-  const BOLT = makeSpell(['fury'], {
-    id: cardId('A-051'),
-    name: 'Bolt',
+  const BOLT = makeSpell(["fury"], {
+    id: cardId("A-051"),
+    name: "Bolt",
     cost: cost(1),
-    timing: 'action',
-    effect: { target: { kind: 'unit', scope: 'any' }, effects: [{ kind: 'dealDamage', amount: 1 }] },
+    timing: "action",
+    effect: {
+      target: { kind: "unit", scope: "any" },
+      effects: [{ kind: "dealDamage", amount: 1 }],
+    },
   });
 
   const D_REGISTRY = CardRegistry.from([
@@ -666,12 +728,16 @@ describe('Deflect (809)', () => {
       runes: Array.from({ length: 8 }, () => RUNE.id),
       battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
     };
-    let state = createGame({ decks: [list, list], registry: D_REGISTRY, seed }).state;
-    while (state.phase === 'mulligan') {
-      state = reduce(state, { type: 'mulligan', cards: [] }).state;
+    let state = createGame({
+      decks: [list, list],
+      registry: D_REGISTRY,
+      seed,
+    }).state;
+    while (state.phase === "mulligan") {
+      state = reduce(state, { type: "mulligan", cards: [] }).state;
     }
-    while (state.phase !== 'main' && !isOver(state)) {
-      state = reduce(state, { type: 'resolvePhase' }).state;
+    while (state.phase !== "main" && !isOver(state)) {
+      state = reduce(state, { type: "resolvePhase" }).state;
     }
     return state;
   }
@@ -680,7 +746,7 @@ describe('Deflect (809)', () => {
   function onBoardFor(
     state: GameState,
     player: number,
-    id: CardDefinition['id'],
+    id: CardDefinition["id"],
   ): [GameState, EntityId] {
     const card = state.players[player]!.zones.mainDeck.find(
       (candidate) => state.entities[candidate]!.card === id,
@@ -688,11 +754,14 @@ describe('Deflect (809)', () => {
     if (card === undefined) {
       throw new Error(`No ${id} left for ${player}`);
     }
-    return [moveEntity(state, card, playerLocation(player as never, 'base')), card];
+    return [
+      moveEntity(state, card, playerLocation(player as never, "base")),
+      card,
+    ];
   }
 
-  it('809.1.c: raises the cost only for the Unit that has it', () => {
-    let state = deflectGame('deflect-cost');
+  it("809.1.c: raises the cost only for the Unit that has it", () => {
+    let state = deflectGame("deflect-cost");
     const me = state.activePlayer;
     const them = me === 0 ? 1 : 0;
     const [a, guarded] = onBoardFor(state, them, DEFLECTOR.id);
@@ -706,30 +775,33 @@ describe('Deflect (809)', () => {
       power: [],
       anyPower: 2,
     });
-    expect(totalCost(state, me, BOLT, {}, plain)).toEqual({ energy: 1, power: [] });
+    expect(totalCost(state, me, BOLT, {}, plain)).toEqual({
+      energy: 1,
+      power: [],
+    });
   });
 
-  it('801.3.a: a Deflect granted by a static taxes exactly as a printed one', () => {
+  it("801.3.a: a Deflect granted by a static taxes exactly as a printed one", () => {
     // "Friendly units have DEFLECT" grants the cost increase 809.1.c desugars
     // into, so the *granted* Unit is the one that gets taxed — not the granter.
-    const BANNER_OF_GUARD = makeUnit(2, ['fury'], {
-      id: cardId('A-052'),
-      name: 'Banner of Guard',
+    const BANNER_OF_GUARD = makeUnit(2, ["fury"], {
+      id: cardId("A-052"),
+      name: "Banner of Guard",
       cost: cost(1),
       abilities: {
         statics: [
           {
-            affects: { who: 'friendly', excludeSelf: true },
+            affects: { who: "friendly", excludeSelf: true },
             grant: {
               abilities: {
                 costModifiers: [
                   {
                     applies: {
-                      types: ['unit', 'spell', 'gear', 'ability'],
-                      scope: 'opponent',
+                      types: ["unit", "spell", "gear", "ability"],
+                      scope: "opponent",
                       choosesSource: true,
                     },
-                    change: { kind: 'increase', anyPower: 1 },
+                    change: { kind: "increase", anyPower: 1 },
                   },
                 ],
               },
@@ -759,12 +831,16 @@ describe('Deflect (809)', () => {
       runes: Array.from({ length: 8 }, () => RUNE.id),
       battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
     };
-    let state = createGame({ decks: [list, list], registry, seed: 'granted-deflect' }).state;
-    while (state.phase === 'mulligan') {
-      state = reduce(state, { type: 'mulligan', cards: [] }).state;
+    let state = createGame({
+      decks: [list, list],
+      registry,
+      seed: "granted-deflect",
+    }).state;
+    while (state.phase === "mulligan") {
+      state = reduce(state, { type: "mulligan", cards: [] }).state;
     }
-    while (state.phase !== 'main' && !isOver(state)) {
-      state = reduce(state, { type: 'resolvePhase' }).state;
+    while (state.phase !== "main" && !isOver(state)) {
+      state = reduce(state, { type: "resolvePhase" }).state;
     }
     const me = state.activePlayer;
     const them = me === 0 ? 1 : 0;
@@ -778,19 +854,25 @@ describe('Deflect (809)', () => {
       anyPower: 1,
     });
     // "Other friendly units" — the granting card is not one of them.
-    expect(totalCost(state, me, BOLT, {}, banner)).toEqual({ energy: 1, power: [] });
+    expect(totalCost(state, me, BOLT, {}, banner)).toEqual({
+      energy: 1,
+      power: [],
+    });
   });
 
-  it('809.1.c: does not tax its own controller`s spells', () => {
-    let state = deflectGame('deflect-friendly');
+  it("809.1.c: does not tax its own controller`s spells", () => {
+    let state = deflectGame("deflect-friendly");
     const me = state.activePlayer;
     const [a, mine] = onBoardFor(state, me, DEFLECTOR.id);
     state = a;
-    expect(totalCost(state, me, BOLT, {}, mine)).toEqual({ energy: 1, power: [] });
+    expect(totalCost(state, me, BOLT, {}, mine)).toEqual({
+      energy: 1,
+      power: [],
+    });
   });
 
-  it('drops the play from `legalActions` when the tax cannot be paid', () => {
-    let state = deflectGame('deflect-legal');
+  it("drops the play from `legalActions` when the tax cannot be paid", () => {
+    let state = deflectGame("deflect-legal");
     const me = state.activePlayer;
     const them = me === 0 ? 1 : 0;
     const [a, guarded] = onBoardFor(state, them, DEFLECTOR.id);
@@ -799,7 +881,7 @@ describe('Deflect (809)', () => {
     const bolt = b.players[me]!.zones.mainDeck.find(
       (candidate) => b.entities[candidate]!.card === BOLT.id,
     )!;
-    state = moveEntity(b, bolt, playerLocation(me, 'hand'));
+    state = moveEntity(b, bolt, playerLocation(me, "hand"));
     state = {
       ...state,
       players: state.players.map((seat) =>
@@ -808,9 +890,11 @@ describe('Deflect (809)', () => {
     };
 
     const plays = legalActions(state, me).filter(
-      (action) => action.type === 'playCard' && action.card === bolt,
+      (action) => action.type === "playCard" && action.card === bolt,
     );
-    const chosen = plays.map((action) => (action as { target?: EntityId }).target);
+    const chosen = plays.map(
+      (action) => (action as { targets?: EntityId[] }).targets?.[0],
+    );
     expect(chosen).toContain(plain);
     // 809.1.c: no Power in the pool, so the Deflected target is unaffordable.
     expect(chosen).not.toContain(guarded);
@@ -823,18 +907,24 @@ describe('Deflect (809)', () => {
  * 355.2.a's default is the controller's Base or a Battlefield they Control, and
  * 170.11 names the two states cards widen it to.
  */
-describe('play-location permissions (355.2.b)', () => {
-  const SNEAK = makeUnit(2, ['fury'], {
-    id: cardId('A-060'),
-    name: 'Sneak',
+describe("play-location permissions (355.2.b)", () => {
+  const SNEAK = makeUnit(2, ["fury"], {
+    id: cardId("A-060"),
+    name: "Sneak",
     cost: cost(1),
-    abilities: { statics: [{ affects: { who: 'self' }, grant: { playTo: ['open'] } }] },
+    abilities: {
+      statics: [{ affects: { who: "self" }, grant: { playTo: ["open"] } }],
+    },
   });
-  const RAIDER = makeUnit(2, ['fury'], {
-    id: cardId('A-061'),
-    name: 'Raider',
+  const RAIDER = makeUnit(2, ["fury"], {
+    id: cardId("A-061"),
+    name: "Raider",
     cost: cost(1),
-    abilities: { statics: [{ affects: { who: 'self' }, grant: { playTo: ['occupiedEnemy'] } }] },
+    abilities: {
+      statics: [
+        { affects: { who: "self" }, grant: { playTo: ["occupiedEnemy"] } },
+      ],
+    },
   });
 
   const P_REGISTRY = CardRegistry.from([
@@ -859,40 +949,52 @@ describe('play-location permissions (355.2.b)', () => {
       runes: Array.from({ length: 8 }, () => RUNE.id),
       battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
     };
-    let state = createGame({ decks: [list, list], registry: P_REGISTRY, seed }).state;
-    while (state.phase === 'mulligan') {
-      state = reduce(state, { type: 'mulligan', cards: [] }).state;
+    let state = createGame({
+      decks: [list, list],
+      registry: P_REGISTRY,
+      seed,
+    }).state;
+    while (state.phase === "mulligan") {
+      state = reduce(state, { type: "mulligan", cards: [] }).state;
     }
-    while (state.phase !== 'main' && !isOver(state)) {
-      state = reduce(state, { type: 'resolvePhase' }).state;
+    while (state.phase !== "main" && !isOver(state)) {
+      state = reduce(state, { type: "resolvePhase" }).state;
     }
     return state;
   }
 
-  it('355.2.a: the default is the Base and Battlefields you Control', () => {
-    const state = permGame('perm-default');
+  it("355.2.a: the default is the Base and Battlefields you Control", () => {
+    const state = permGame("perm-default");
     const player = state.activePlayer;
     // Nothing is Controlled at the start, so a plain Unit has only its Base.
-    expect(validUnitLocations(state, player, PLAIN)).toEqual([playerLocation(player, 'base')]);
+    expect(validUnitLocations(state, player, PLAIN)).toEqual([
+      playerLocation(player, "base"),
+    ]);
   });
 
   it('170.11.c: "open" needs unoccupied *and* uncontrolled', () => {
-    let state = permGame('perm-open');
+    let state = permGame("perm-open");
     const player = state.activePlayer;
-    expect(validUnitLocations(state, player, SNEAK)).toHaveLength(1 + state.battlefields.length);
+    expect(validUnitLocations(state, player, SNEAK)).toHaveLength(
+      1 + state.battlefields.length,
+    );
 
     // A Unit standing there makes it occupied, so it stops being open — even
     // though nobody Controls it yet.
     const [occupied, unit] = onBoard(state, PLAIN.id);
     state = moveEntity(occupied, unit, battlefieldLocation(0));
-    expect(validUnitLocations(state, player, SNEAK)).toHaveLength(state.battlefields.length);
+    expect(validUnitLocations(state, player, SNEAK)).toHaveLength(
+      state.battlefields.length,
+    );
   });
 
   it('170.11.a: "occupied enemy" is the mirror — a Unit present and Controlled', () => {
-    let state = permGame('perm-occupied');
+    let state = permGame("perm-occupied");
     const player = state.activePlayer;
     // Open Battlefields do not qualify for this permission.
-    expect(validUnitLocations(state, player, RAIDER)).toEqual([playerLocation(player, 'base')]);
+    expect(validUnitLocations(state, player, RAIDER)).toEqual([
+      playerLocation(player, "base"),
+    ]);
 
     const them = player === 0 ? 1 : 0;
     const card = state.players[them]!.zones.mainDeck.find(
@@ -902,16 +1004,20 @@ describe('play-location permissions (355.2.b)', () => {
     state = {
       ...state,
       battlefields: state.battlefields.map((battlefield, index) =>
-        index === 0 ? { ...battlefield, controller: them as PlayerId } : battlefield,
+        index === 0
+          ? { ...battlefield, controller: them as PlayerId }
+          : battlefield,
       ),
     };
     expect(validUnitLocations(state, player, RAIDER)).toHaveLength(2);
   });
 
-  it('a permission never takes a Location away', () => {
+  it("a permission never takes a Location away", () => {
     // The Base is always valid, whatever a card grants.
-    const state = permGame('perm-union');
+    const state = permGame("perm-union");
     const player = state.activePlayer;
-    expect(validUnitLocations(state, player, RAIDER)).toContainEqual(playerLocation(player, 'base'));
+    expect(validUnitLocations(state, player, RAIDER)).toContainEqual(
+      playerLocation(player, "base"),
+    );
   });
 });

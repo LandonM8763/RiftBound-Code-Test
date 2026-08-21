@@ -187,7 +187,8 @@ function run(
   return {
     state: executeEffect(
       state,
-      { controller: state.activePlayer, source: source ?? target ?? (0 as EntityId), choices: { target, destination } },
+      { controller: state.activePlayer, source: source ?? target ?? (0 as EntityId),
+        choices: { targets: target === undefined ? [] : [target], destination } },
       effect,
       events,
       context,
@@ -240,7 +241,7 @@ describe('kill (rule 428)', () => {
     };
     executeEffect(
       state,
-      { controller: player, source: unit, choices: { target: unit } },
+      { controller: player, source: unit, choices: { targets: [unit]} },
       { target: { kind: 'unit', scope: 'any' }, effects: [{ kind: 'kill' }] },
       [],
       context,
@@ -592,7 +593,7 @@ describe('move (rules 420, 445-453)', () => {
       type: 'activateAbility',
       source,
       index: 0,
-      target: victim,
+      targets: [victim],
       destination: battlefieldLocation(0),
     }).state;
     let guard = 0;
@@ -795,7 +796,7 @@ describe('self-targeting', () => {
     const [placed, source] = mint(game('self-reject'), SELF_READY.id);
     const [state, other] = mint(placed, UNIT.id);
     expect(() =>
-      reduce(state, { type: 'activateAbility', source, index: 0, target: other }),
+      reduce(state, { type: 'activateAbility', source, index: 0, targets: [other]}),
     ).toThrow(IllegalActionError);
   });
 

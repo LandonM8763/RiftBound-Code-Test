@@ -17,18 +17,23 @@ import {
   tokenByName,
   tokenCardId,
   type CardDefinition,
-} from '@riftbound/cards';
-import { makeBattlefield, makeLegend, makeRune, makeUnit } from '@riftbound/cards/testing';
-import { describe, expect, it } from 'vitest';
+} from "@riftbound/cards";
+import {
+  makeBattlefield,
+  makeLegend,
+  makeRune,
+  makeUnit,
+} from "@riftbound/cards/testing";
+import { describe, expect, it } from "vitest";
 
-import { mightOf } from './combat.js';
-import { checkInvariants } from './invariants.js';
-import { legalActions } from './legal.js';
-import { canPay } from './play.js';
-import { moveEntity, withPlayer } from './mutate.js';
-import { reduce } from './reduce.js';
-import { createGame, type DeckList } from './setup.js';
-import { createTokens, isToken, sendToNonBoardZone } from './token.js';
+import { mightOf } from "./combat.js";
+import { checkInvariants } from "./invariants.js";
+import { legalActions } from "./legal.js";
+import { canPay } from "./play.js";
+import { moveEntity, withPlayer } from "./mutate.js";
+import { reduce } from "./reduce.js";
+import { createGame, type DeckList } from "./setup.js";
+import { createTokens, isToken, sendToNonBoardZone } from "./token.js";
 import {
   battlefieldLocation,
   entityCard,
@@ -36,68 +41,92 @@ import {
   playerLocation,
   type EntityId,
   type GameState,
-} from './state.js';
+} from "./state.js";
 
-const LEGEND = makeLegend(['fury'], { id: cardId('T-000') });
-const CHAMPION = makeUnit(3, ['fury'], { id: cardId('T-001'), champion: true });
-const PLAIN = makeUnit(2, ['fury'], { id: cardId('T-010'), name: 'Plain', cost: cost(1) });
+const LEGEND = makeLegend(["fury"], { id: cardId("T-000") });
+const CHAMPION = makeUnit(3, ["fury"], { id: cardId("T-001"), champion: true });
+const PLAIN = makeUnit(2, ["fury"], {
+  id: cardId("T-010"),
+  name: "Plain",
+  cost: cost(1),
+});
 
 /** "When you play me, play a 1 Might Recruit unit token here." */
-const DRUMMER = makeUnit(2, ['fury'], {
-  id: cardId('T-011'),
-  name: 'Drummer',
+const DRUMMER = makeUnit(2, ["fury"], {
+  id: cardId("T-011"),
+  name: "Drummer",
   cost: cost(1),
   effect: {
-    target: { kind: 'none' },
-    effects: [{ kind: 'createToken', token: 'recruit', count: 1, where: 'here' }],
+    target: { kind: "none" },
+    effects: [
+      { kind: "createToken", token: "recruit", count: 1, where: "here" },
+    ],
   },
 });
 
 /** Two at the Base, entering ready — 184.1's override of 359.2.c. */
-const MUSTER = makeUnit(2, ['fury'], {
-  id: cardId('T-012'),
-  name: 'Muster',
+const MUSTER = makeUnit(2, ["fury"], {
+  id: cardId("T-012"),
+  name: "Muster",
   cost: cost(1),
   effect: {
-    target: { kind: 'none' },
-    effects: [{ kind: 'createToken', token: 'recruit', count: 2, where: 'base', ready: true }],
+    target: { kind: "none" },
+    effects: [
+      {
+        kind: "createToken",
+        token: "recruit",
+        count: 2,
+        where: "base",
+        ready: true,
+      },
+    ],
   },
 });
 
 /** "When you play me, play a Gold gear token exhausted" — 187.5 with 184.1. */
-const PROSPECTOR = makeUnit(2, ['fury'], {
-  id: cardId('T-014'),
-  name: 'Prospector',
+const PROSPECTOR = makeUnit(2, ["fury"], {
+  id: cardId("T-014"),
+  name: "Prospector",
   cost: cost(1),
   effect: {
-    target: { kind: 'none' },
-    effects: [{ kind: 'createToken', token: 'gold', count: 1, where: 'base', ready: false }],
+    target: { kind: "none" },
+    effects: [
+      {
+        kind: "createToken",
+        token: "gold",
+        count: 1,
+        where: "base",
+        ready: false,
+      },
+    ],
   },
 });
 
 /** The same without the override, so 359.2.d's ready default applies. */
-const MINTER = makeUnit(2, ['fury'], {
-  id: cardId('T-015'),
-  name: 'Minter',
+const MINTER = makeUnit(2, ["fury"], {
+  id: cardId("T-015"),
+  name: "Minter",
   cost: cost(1),
   effect: {
-    target: { kind: 'none' },
-    effects: [{ kind: 'createToken', token: 'gold', count: 1, where: 'base' }],
+    target: { kind: "none" },
+    effects: [{ kind: "createToken", token: "gold", count: 1, where: "base" }],
   },
 });
 
 /** 187.2: a Sprite carries Temporary, so it kills itself in the Beginning Phase. */
-const SUMMONER = makeUnit(2, ['fury'], {
-  id: cardId('T-013'),
-  name: 'Summoner',
+const SUMMONER = makeUnit(2, ["fury"], {
+  id: cardId("T-013"),
+  name: "Summoner",
   cost: cost(1),
   effect: {
-    target: { kind: 'none' },
-    effects: [{ kind: 'createToken', token: 'sprite', count: 1, where: 'base' }],
+    target: { kind: "none" },
+    effects: [
+      { kind: "createToken", token: "sprite", count: 1, where: "base" },
+    ],
   },
 });
 
-const RUNE = makeRune('fury', { id: cardId('T-100') });
+const RUNE = makeRune("fury", { id: cardId("T-100") });
 const BATTLEFIELDS = Array.from({ length: 3 }, (_, i) =>
   makeBattlefield({ id: cardId(`T-20${i}`) }),
 );
@@ -132,13 +161,17 @@ function deck(): DeckList {
   };
 }
 
-function inMainPhase(seed = 'token', energy = 6): GameState {
-  let state = createGame({ decks: [deck(), deck()], registry: REGISTRY, seed }).state;
-  while (state.phase === 'mulligan') {
-    state = reduce(state, { type: 'mulligan', cards: [] }).state;
+function inMainPhase(seed = "token", energy = 6): GameState {
+  let state = createGame({
+    decks: [deck(), deck()],
+    registry: REGISTRY,
+    seed,
+  }).state;
+  while (state.phase === "mulligan") {
+    state = reduce(state, { type: "mulligan", cards: [] }).state;
   }
-  while (state.phase !== 'main' && !isOver(state)) {
-    state = reduce(state, { type: 'resolvePhase' }).state;
+  while (state.phase !== "main" && !isOver(state)) {
+    state = reduce(state, { type: "resolvePhase" }).state;
   }
   return withPlayer(state, state.activePlayer, (seat) => ({
     ...seat,
@@ -146,7 +179,10 @@ function inMainPhase(seed = 'token', energy = 6): GameState {
   }));
 }
 
-function inHand(state: GameState, id: CardDefinition['id']): [GameState, EntityId] {
+function inHand(
+  state: GameState,
+  id: CardDefinition["id"],
+): [GameState, EntityId] {
   const player = state.activePlayer;
   const held = state.players[player]!.zones.hand.find(
     (candidate) => state.entities[candidate]!.card === id,
@@ -160,35 +196,47 @@ function inHand(state: GameState, id: CardDefinition['id']): [GameState, EntityI
   if (card === undefined) {
     throw new Error(`No ${id} left in the deck`);
   }
-  return [moveEntity(state, card, playerLocation(player, 'hand')), card];
+  return [moveEntity(state, card, playerLocation(player, "hand")), card];
 }
 
-describe('rule 187: the tokens that exist', () => {
-  it('gives each one the characteristics the rulebook states', () => {
+describe("rule 187: the tokens that exist", () => {
+  it("gives each one the characteristics the rulebook states", () => {
     // 187.1, 187.2, 187.3, 187.4, 187.6, 187.10.
-    expect(STANDARD_TOKENS['recruit']).toMatchObject({ might: 1, tags: ['Recruit'] });
-    expect(STANDARD_TOKENS['sprite']).toMatchObject({ might: 3, tags: ['Fae'] });
-    expect(STANDARD_TOKENS['sand soldier']).toMatchObject({ might: 2, tags: ['Shurima'] });
-    expect(STANDARD_TOKENS['mech']).toMatchObject({ might: 3, tags: ['Mech'] });
-    expect(STANDARD_TOKENS['reflection']).toMatchObject({ might: 0, tags: [] });
-    expect(STANDARD_TOKENS['tentacle']).toMatchObject({ might: 1, tags: ['Bilgewater'] });
+    expect(STANDARD_TOKENS["recruit"]).toMatchObject({
+      might: 1,
+      tags: ["Recruit"],
+    });
+    expect(STANDARD_TOKENS["sprite"]).toMatchObject({
+      might: 3,
+      tags: ["Fae"],
+    });
+    expect(STANDARD_TOKENS["sand soldier"]).toMatchObject({
+      might: 2,
+      tags: ["Shurima"],
+    });
+    expect(STANDARD_TOKENS["mech"]).toMatchObject({ might: 3, tags: ["Mech"] });
+    expect(STANDARD_TOKENS["reflection"]).toMatchObject({ might: 0, tags: [] });
+    expect(STANDARD_TOKENS["tentacle"]).toMatchObject({
+      might: 1,
+      tags: ["Bilgewater"],
+    });
     // 187.5: a *gear* token, so it has no Might at all.
-    expect(STANDARD_TOKENS['gold']).toMatchObject({ type: 'gear', tags: [] });
-    expect(STANDARD_TOKENS['gold']?.might).toBeUndefined();
+    expect(STANDARD_TOKENS["gold"]).toMatchObject({ type: "gear", tags: [] });
+    expect(STANDARD_TOKENS["gold"]?.might).toBeUndefined();
     // 187.7: Deflect is 809.1.c's cost increase rather than a `Keyword`.
-    expect(STANDARD_TOKENS['bird']).toMatchObject({ might: 1, tags: ['Bird'] });
-    expect(STANDARD_TOKENS['bird']?.abilities?.costModifiers).toHaveLength(1);
+    expect(STANDARD_TOKENS["bird"]).toMatchObject({ might: 1, tags: ["Bird"] });
+    expect(STANDARD_TOKENS["bird"]?.abilities?.costModifiers).toHaveLength(1);
   });
 
-  it('185.3: leaves every token domainless', () => {
+  it("185.3: leaves every token domainless", () => {
     for (const key of Object.keys(STANDARD_TOKENS)) {
       expect(entityCardFor(key).domains).toEqual([]);
     }
   });
 
-  it('refuses a name rule 187 does not define', () => {
-    expect(tokenByName('Recruit')).toBeDefined();
-    expect(tokenByName('Dragon')).toBeUndefined();
+  it("refuses a name rule 187 does not define", () => {
+    expect(tokenByName("Recruit")).toBeDefined();
+    expect(tokenByName("Dragon")).toBeUndefined();
   });
 });
 
@@ -202,13 +250,13 @@ function entityCardFor(key: string): CardDefinition {
   return definition;
 }
 
-describe('rules 180-184: creating tokens', () => {
-  it('182-183: the creating effect\'s controller owns and controls it', () => {
-    const [state, card] = inHand(inMainPhase('create'), DRUMMER.id);
+describe("rules 180-184: creating tokens", () => {
+  it("182-183: the creating effect's controller owns and controls it", () => {
+    const [state, card] = inHand(inMainPhase("create"), DRUMMER.id);
     const player = state.activePlayer;
     const before = state.players[player]!.zones.base.length;
 
-    const played = reduce(state, { type: 'playCard', card }).state;
+    const played = reduce(state, { type: "playCard", card }).state;
     const base = played.players[player]!.zones.base;
 
     // The Drummer itself plus its Recruit.
@@ -220,17 +268,22 @@ describe('rules 180-184: creating tokens', () => {
     checkInvariants(played);
   });
 
-  it('359.2.c: a token enters exhausted unless 184.1 says otherwise', () => {
-    const [plain, drummer] = inHand(inMainPhase('exhausted'), DRUMMER.id);
+  it("359.2.c: a token enters exhausted unless 184.1 says otherwise", () => {
+    const [plain, drummer] = inHand(inMainPhase("exhausted"), DRUMMER.id);
     const player = plain.activePlayer;
-    const afterDrummer = reduce(plain, { type: 'playCard', card: drummer }).state;
-    const summoned = afterDrummer.players[player]!.zones.base.find((id) => isToken(afterDrummer, id));
+    const afterDrummer = reduce(plain, {
+      type: "playCard",
+      card: drummer,
+    }).state;
+    const summoned = afterDrummer.players[player]!.zones.base.find((id) =>
+      isToken(afterDrummer, id),
+    );
     expect(afterDrummer.entities[summoned!]!.exhausted).toBe(true);
 
-    const [ready, muster] = inHand(inMainPhase('ready'), MUSTER.id);
-    const afterMuster = reduce(ready, { type: 'playCard', card: muster }).state;
-    const tokens = afterMuster.players[ready.activePlayer]!.zones.base.filter((id) =>
-      isToken(afterMuster, id),
+    const [ready, muster] = inHand(inMainPhase("ready"), MUSTER.id);
+    const afterMuster = reduce(ready, { type: "playCard", card: muster }).state;
+    const tokens = afterMuster.players[ready.activePlayer]!.zones.base.filter(
+      (id) => isToken(afterMuster, id),
     );
     expect(tokens).toHaveLength(2);
     for (const id of tokens) {
@@ -238,31 +291,35 @@ describe('rules 180-184: creating tokens', () => {
     }
   });
 
-  it('185.2.b: a token unit has the Might rule 187 gives it', () => {
-    const [state, card] = inHand(inMainPhase('might'), DRUMMER.id);
-    const played = reduce(state, { type: 'playCard', card }).state;
-    const token = played.players[played.activePlayer]!.zones.base.find((id) => isToken(played, id));
+  it("185.2.b: a token unit has the Might rule 187 gives it", () => {
+    const [state, card] = inHand(inMainPhase("might"), DRUMMER.id);
+    const played = reduce(state, { type: "playCard", card }).state;
+    const token = played.players[played.activePlayer]!.zones.base.find((id) =>
+      isToken(played, id),
+    );
 
     expect(mightOf(played, token!)).toBe(1);
   });
 
-  it('185: a token is not a card, and a card is not a token', () => {
-    const [state, card] = inHand(inMainPhase('nature'), DRUMMER.id);
-    const played = reduce(state, { type: 'playCard', card }).state;
-    const token = played.players[played.activePlayer]!.zones.base.find((id) => isToken(played, id));
+  it("185: a token is not a card, and a card is not a token", () => {
+    const [state, card] = inHand(inMainPhase("nature"), DRUMMER.id);
+    const played = reduce(state, { type: "playCard", card }).state;
+    const token = played.players[played.activePlayer]!.zones.base.find((id) =>
+      isToken(played, id),
+    );
 
     expect(isTokenCard(entityCard(played, token!))).toBe(true);
     expect(isTokenCard(entityCard(played, card))).toBe(false);
   });
 
-  it('creates them at a Battlefield when the source is there', () => {
-    let state = inMainPhase('here');
+  it("creates them at a Battlefield when the source is there", () => {
+    let state = inMainPhase("here");
     const player = state.activePlayer;
     const events: never[] = [];
     const { state: withToken, created } = createTokens(
       state,
       player,
-      'recruit',
+      "recruit",
       1,
       battlefieldLocation(0),
       false,
@@ -274,49 +331,61 @@ describe('rules 180-184: creating tokens', () => {
     checkInvariants(state);
   });
 
-  it('throws for a token rule 187 does not define', () => {
-    const state = inMainPhase('unknown');
+  it("throws for a token rule 187 does not define", () => {
+    const state = inMainPhase("unknown");
     expect(() =>
-      createTokens(state, state.activePlayer, 'dragon', 1, playerLocation(state.activePlayer, 'base'), false, []),
+      createTokens(
+        state,
+        state.activePlayer,
+        "dragon",
+        1,
+        playerLocation(state.activePlayer, "base"),
+        false,
+        [],
+      ),
     ).toThrow(/Unknown token/);
   });
 });
 
-describe('the Gold token (187.5)', () => {
-  it('359.2.d: enters ready, because a Gear does', () => {
-    const [state, card] = inHand(inMainPhase('gold-ready'), MINTER.id);
+describe("the Gold token (187.5)", () => {
+  it("359.2.d: enters ready, because a Gear does", () => {
+    const [state, card] = inHand(inMainPhase("gold-ready"), MINTER.id);
     const player = state.activePlayer;
-    const played = reduce(state, { type: 'playCard', card }).state;
+    const played = reduce(state, { type: "playCard", card }).state;
 
     const gold = played.players[player]!.zones.base.find(
-      (id) => played.entities[id]!.card === tokenCardId('gold'),
+      (id) => played.entities[id]!.card === tokenCardId("gold"),
     );
     expect(gold).toBeDefined();
     expect(played.entities[gold!]!.exhausted).toBe(false);
   });
 
   it('184.1: "exhausted" overrides that default, which is why cards print it', () => {
-    const [state, card] = inHand(inMainPhase('gold-exhausted'), PROSPECTOR.id);
+    const [state, card] = inHand(inMainPhase("gold-exhausted"), PROSPECTOR.id);
     const player = state.activePlayer;
-    const played = reduce(state, { type: 'playCard', card }).state;
+    const played = reduce(state, { type: "playCard", card }).state;
 
     const gold = played.players[player]!.zones.base.find(
-      (id) => played.entities[id]!.card === tokenCardId('gold'),
+      (id) => played.entities[id]!.card === tokenCardId("gold"),
     );
     expect(played.entities[gold!]!.exhausted).toBe(true);
   });
 
-  it('adds [A] and kills itself, and the [A] pays a Power cost of any Domain', () => {
-    const [state, card] = inHand(inMainPhase('gold-spend'), MINTER.id);
+  it("adds [A] and kills itself, and the [A] pays a Power cost of any Domain", () => {
+    const [state, card] = inHand(inMainPhase("gold-spend"), MINTER.id);
     const player = state.activePlayer;
-    let next = reduce(state, { type: 'playCard', card }).state;
+    let next = reduce(state, { type: "playCard", card }).state;
     const gold = next.players[player]!.zones.base.find(
-      (id) => next.entities[id]!.card === tokenCardId('gold'),
+      (id) => next.entities[id]!.card === tokenCardId("gold"),
     )!;
 
-    next = reduce(next, { type: 'activateAbility', source: gold, index: 0 }).state;
+    next = reduce(next, {
+      type: "activateAbility",
+      source: gold,
+      index: 0,
+    }).state;
     while (next.chain.length > 0) {
-      next = reduce(next, { type: 'pass' }).state;
+      next = reduce(next, { type: "pass" }).state;
     }
 
     expect(next.players[player]!.pool.anyPower).toBe(1);
@@ -324,48 +393,68 @@ describe('the Gold token (187.5)', () => {
     // this" cost banishes it rather than filling the trash.
     expect(next.players[player]!.zones.base).not.toContain(gold);
     // 135.2.e.5.b: spendable as a Power cost of any Domain.
-    expect(canPay(next.players[player]!.pool, { energy: 0, power: ['calm'], anyPower: 0 })).toBe(
-      true,
-    );
+    expect(
+      canPay(next.players[player]!.pool, {
+        energy: 0,
+        power: ["calm"],
+        anyPower: 0,
+      }),
+    ).toBe(true);
     checkInvariants(next);
   });
 });
 
-describe('rule 186.1: a token that leaves the Board stops existing', () => {
-  it('goes to Banishment rather than the trash when killed', () => {
-    const [state, card] = inHand(inMainPhase('death'), DRUMMER.id);
+describe("rule 186.1: a token that leaves the Board stops existing", () => {
+  it("goes to Banishment rather than the trash when killed", () => {
+    const [state, card] = inHand(inMainPhase("death"), DRUMMER.id);
     const player = state.activePlayer;
-    const played = reduce(state, { type: 'playCard', card }).state;
-    const token = played.players[player]!.zones.base.find((id) => isToken(played, id))!;
+    const played = reduce(state, { type: "playCard", card }).state;
+    const token = played.players[player]!.zones.base.find((id) =>
+      isToken(played, id),
+    )!;
     const trashBefore = played.players[player]!.zones.trash.length;
 
-    const gone = sendToNonBoardZone(played, token, playerLocation(player, 'trash'));
+    const gone = sendToNonBoardZone(
+      played,
+      token,
+      playerLocation(player, "trash"),
+    );
 
     expect(gone.players[player]!.zones.trash.length).toBe(trashBefore);
     expect(gone.players[player]!.zones.banishment).toContain(token);
     checkInvariants(gone);
   });
 
-  it('leaves a card alone: it still reaches the trash', () => {
-    const [state, card] = inHand(inMainPhase('card-death'), PLAIN.id);
+  it("leaves a card alone: it still reaches the trash", () => {
+    const [state, card] = inHand(inMainPhase("card-death"), PLAIN.id);
     const player = state.activePlayer;
-    const onBoard = moveEntity(state, card, playerLocation(player, 'base'));
+    const onBoard = moveEntity(state, card, playerLocation(player, "base"));
 
-    const dead = sendToNonBoardZone(onBoard, card, playerLocation(player, 'trash'));
+    const dead = sendToNonBoardZone(
+      onBoard,
+      card,
+      playerLocation(player, "trash"),
+    );
 
     expect(dead.players[player]!.zones.trash).toContain(card);
     expect(dead.players[player]!.zones.banishment).not.toContain(card);
   });
 
-  it('187.2: a Sprite carries Temporary and kills itself in the Beginning Phase', () => {
-    const [state, card] = inHand(inMainPhase('sprite'), SUMMONER.id);
+  it("187.2: a Sprite carries Temporary and kills itself in the Beginning Phase", () => {
+    const [state, card] = inHand(inMainPhase("sprite"), SUMMONER.id);
     const player = state.activePlayer;
-    let next = reduce(state, { type: 'playCard', card }).state;
-    const sprite = next.players[player]!.zones.base.find((id) => isToken(next, id))!;
+    let next = reduce(state, { type: "playCard", card }).state;
+    const sprite = next.players[player]!.zones.base.find((id) =>
+      isToken(next, id),
+    )!;
 
     // Run to this player's next Beginning Phase, where 816.1.b fires.
     let guard = 0;
-    while (next.players[player]!.zones.banishment.length === 0 && !isOver(next) && guard < 400) {
+    while (
+      next.players[player]!.zones.banishment.length === 0 &&
+      !isOver(next) &&
+      guard < 400
+    ) {
       const actions = legalFor(next);
       const action = actions[0];
       if (action === undefined) {
@@ -382,14 +471,16 @@ describe('rule 186.1: a token that leaves the Board stops existing', () => {
 });
 
 /** Whatever the engine will accept next, preferring to advance the turn. */
-function legalFor(state: GameState): { type: 'resolvePhase' | 'endTurn' | 'pass' }[] {
-  const actions: { type: 'resolvePhase' | 'endTurn' | 'pass' }[] = [];
+function legalFor(
+  state: GameState,
+): { type: "resolvePhase" | "endTurn" | "pass" }[] {
+  const actions: { type: "resolvePhase" | "endTurn" | "pass" }[] = [];
   if (state.chain.length > 0) {
-    actions.push({ type: 'pass' });
-  } else if (state.phase === 'main') {
-    actions.push({ type: 'endTurn' });
+    actions.push({ type: "pass" });
+  } else if (state.phase === "main") {
+    actions.push({ type: "endTurn" });
   } else {
-    actions.push({ type: 'resolvePhase' });
+    actions.push({ type: "resolvePhase" });
   }
   return actions;
 }
@@ -402,13 +493,13 @@ function legalFor(state: GameState): { type: 'resolvePhase' | 'endTurn' | 'pass'
  * `BattlefieldState` held only a card id, so ingest dropped every one of them
  * rather than ship a card the engine would silently never run.
  */
-describe('Battlefields as Game Objects (rules 169-172)', () => {
+describe("Battlefields as Game Objects (rules 169-172)", () => {
   /** "Units here have +1 Might." — 170.8, and a property of the Location. */
   const WAR_CAMP = makeBattlefield({
-    id: cardId('T-210'),
-    name: 'War Camp',
+    id: cardId("T-210"),
+    name: "War Camp",
     abilities: {
-      statics: [{ affects: { who: 'any', here: true }, grant: { might: 1 } }],
+      statics: [{ affects: { who: "any", here: true }, grant: { might: 1 } }],
     },
   });
 
@@ -430,18 +521,22 @@ describe('Battlefields as Game Objects (rules 169-172)', () => {
       // Every choice is the War Camp, so 485.5's random pick lands on it.
       battlefields: [WAR_CAMP.id, WAR_CAMP.id, WAR_CAMP.id],
     };
-    let state = createGame({ decks: [list, list], registry: REGISTRY, seed }).state;
-    while (state.phase === 'mulligan') {
-      state = reduce(state, { type: 'mulligan', cards: [] }).state;
+    let state = createGame({
+      decks: [list, list],
+      registry: REGISTRY,
+      seed,
+    }).state;
+    while (state.phase === "mulligan") {
+      state = reduce(state, { type: "mulligan", cards: [] }).state;
     }
-    while (state.phase !== 'main' && !isOver(state)) {
-      state = reduce(state, { type: 'resolvePhase' }).state;
+    while (state.phase !== "main" && !isOver(state)) {
+      state = reduce(state, { type: "resolvePhase" }).state;
     }
     return state;
   }
 
-  it('170: each Battlefield has its own Game Object', () => {
-    const state = game('bf-entity');
+  it("170: each Battlefield has its own Game Object", () => {
+    const state = game("bf-entity");
     for (const battlefield of state.battlefields) {
       expect(state.entities[battlefield.entity]).toBeDefined();
     }
@@ -453,20 +548,22 @@ describe('Battlefields as Game Objects (rules 169-172)', () => {
     checkInvariants(state);
   });
 
-  it('170.6: it is not among the Units present at itself', () => {
-    const state = game('bf-not-unit');
-    expect(state.battlefields[0]!.units).not.toContain(state.battlefields[0]!.entity);
+  it("170.6: it is not among the Units present at itself", () => {
+    const state = game("bf-not-unit");
+    expect(state.battlefields[0]!.units).not.toContain(
+      state.battlefields[0]!.entity,
+    );
   });
 
-  it('170.8: its Passive reaches the Units at it', () => {
-    let state = game('bf-static');
+  it("170.8: its Passive reaches the Units at it", () => {
+    let state = game("bf-static");
     const player = state.activePlayer;
     const unit = state.players[player]!.zones.mainDeck.find(
       (id) => state.entities[id]!.card === PLAIN.id,
     )!;
 
     // At a Base, out of the Battlefield's reach.
-    state = moveEntity(state, unit, playerLocation(player, 'base'));
+    state = moveEntity(state, unit, playerLocation(player, "base"));
     expect(mightOf(state, unit)).toBe(2);
 
     // 355.9's "here" resolves to the Battlefield's own Location, so the +1
@@ -476,10 +573,10 @@ describe('Battlefields as Game Objects (rules 169-172)', () => {
     checkInvariants(state);
   });
 
-  it('its Passive applies regardless of who Controls it', () => {
+  it("its Passive applies regardless of who Controls it", () => {
     // A Passive is a property of the Location (170.5), not of Control — unlike
     // a Triggered ability, which speaks of holding or conquering.
-    let state = game('bf-uncontrolled');
+    let state = game("bf-uncontrolled");
     const player = state.activePlayer;
     const unit = state.players[player]!.zones.mainDeck.find(
       (id) => state.entities[id]!.card === PLAIN.id,
@@ -490,10 +587,10 @@ describe('Battlefields as Game Objects (rules 169-172)', () => {
     expect(mightOf(state, unit)).toBe(3);
   });
 
-  it('170.4 / 170.3: it is never moved and never killed', () => {
+  it("170.4 / 170.3: it is never moved and never killed", () => {
     // Nothing in the engine relocates a Battlefield's object, so it stays at
     // its own index for the whole game.
-    let state = game('bf-fixed');
+    let state = game("bf-fixed");
     const entity = state.battlefields[0]!.entity;
     let guard = 0;
     while (!isOver(state) && guard < 200) {

@@ -121,7 +121,7 @@ export function reduce(state: GameState, action: Action): ReduceResult {
         state,
         action.card,
         action.location,
-        action.target,
+        action.targets,
         action.destination,
         action.payAdditional === true,
       );
@@ -139,11 +139,11 @@ export function reduce(state: GameState, action: Action): ReduceResult {
         action.source,
         action.index,
         action.from,
-        action.target,
+        action.targets,
         action.destination,
       );
     case 'resolveTrigger':
-      return resolveTrigger(state, action.perform, action.target, action.destination);
+      return resolveTrigger(state, action.perform, action.targets, action.destination);
     default: {
       const exhaustive: never = action;
       throw new IllegalActionError(`Unknown action: ${JSON.stringify(exhaustive)}`);
@@ -280,7 +280,7 @@ function playCard(
   state: GameState,
   card: EntityId,
   location: Location | undefined,
-  target: EntityId | undefined,
+  targets: readonly EntityId[] | undefined,
   destination: Location | undefined,
   payAdditional: boolean,
 ): ReduceResult {
@@ -344,13 +344,13 @@ function playCard(
   // floor.
   const cost =
     fromFacedown === undefined
-      ? totalCost(state, player, definition, { paidAdditionalCost: payAdditional }, target)
+      ? totalCost(state, player, definition, { paidAdditionalCost: payAdditional }, targets?.[0])
       : totalCost(
           state,
           player,
           { ...definition, cost: FREE } as CardDefinition,
           { paidAdditionalCost: payAdditional },
-          target,
+          targets?.[0],
         );
   if (cost === undefined) {
     throw new IllegalActionError(`${definition.name} is not a playable card`);
@@ -361,18 +361,18 @@ function playCard(
 
   // Step 2 (355.6): targets are chosen now, and step 5 (358.1) checks them.
   const effect = effectOf(definition);
-  if (effect !== undefined && !isValidTarget(state, player, effect.target, target, card)) {
-    throw new IllegalActionError(`${definition.name} has no valid target ${String(target)}`);
+  if (effect !== undefined && !isValidTarget(state, player, effect.target, targets, card)) {
+    throw new IllegalActionError(`${definition.name} has no valid target ${String(targets)}`);
   }
-  if (effect === undefined && target !== undefined) {
+  if (effect === undefined && targets !== undefined && targets.length > 0) {
     throw new IllegalActionError(`${definition.name} does not target`);
   }
   // 811.1.d.2: what a card played from facedown chooses must be at the
   // Battlefield it was hidden at.
   if (
     fromFacedown !== undefined &&
-    target !== undefined &&
-    !allowedFromFacedown(state, fromFacedown, target)
+    targets !== undefined &&
+    targets.some((one) => !allowedFromFacedown(state, fromFacedown, one))
   ) {
     throw new IllegalActionError(
       `${definition.name} was played from facedown and may only choose at that battlefield`,
@@ -430,7 +430,7 @@ function playCard(
           entity: card,
           controller: player,
           pending: false,
-          target: target ?? null,
+          targets: targets ?? [],
           destination: destination ?? null,
           // 808.1.d.3's note is for a source that leaves the Board before its
           // ability resolves; a played card is on the Chain and has not.
@@ -485,7 +485,7 @@ function playCard(
       {
         controller: player,
         source: card,
-        choices: { target, destination },
+        choices: { targets, destination },
         paidAdditionalCost: payAdditional,
       },
       effect,
@@ -519,7 +519,7 @@ function activateAbility(
   source: EntityId,
   index: number,
   from: EntityId | undefined,
-  target: EntityId | undefined,
+  targets: readonly EntityId[] | undefined,
   destination: Location | undefined,
 ): ReduceResult {
   const player = requirePriority(state);
@@ -534,8 +534,10 @@ function activateAbility(
       `Ability ${index} of ${source} cannot be activated by player ${player} now`,
     );
   }
-  if (!isValidTarget(state, player, chosen.ability.effect.target, target, source)) {
-    throw new IllegalActionError(`Ability ${index} of ${source} has no valid target ${String(target)}`);
+  if (!isValidTarget(state, player, chosen.ability.effect.target, targets, source)) {
+    throw new IllegalActionError(
+      `Ability ${index} of ${source} has no valid target ${String(targets)}`,
+    );
   }
 
   const events: GameEvent[] = [];
@@ -566,7 +568,7 @@ function activateAbility(
         controller: player,
         pending: false,
         noted: null,
-        target: target ?? null,
+        targets: targets ?? [],
         destination: destination ?? null,
         ability: { ...chosen.ref, kind: 'activated', index },
       },
@@ -598,7 +600,7 @@ function activateAbility(
 function resolveTrigger(
   state: GameState,
   perform: boolean,
-  target: EntityId | undefined,
+  targets: readonly EntityId[] | undefined,
   destination: Location | undefined,
 ): ReduceResult {
   const player = requirePriority(state);
@@ -634,7 +636,7 @@ function resolveTrigger(
 
   // 402.2: the choices are made now, and 358.1's legality check applies to them
   // exactly as it does to a played card's.
-  if (!isValidTarget(state, player, ability.effect.target, target, top.entity)) {
+  if (!isValidTarget(state, player, ability.effect.target, targets, top.entity)) {
     throw new IllegalActionError('Invalid target for the Triggered Ability');
   }
   if (!triggerCostPayable(state, player, ability, top.entity)) {
@@ -650,7 +652,7 @@ function resolveTrigger(
   const finalized: ChainItem = {
     ...top,
     pending: false,
-    target: target ?? null,
+    targets: targets ?? [],
     destination: destination ?? null,
   };
   return {
@@ -797,7 +799,7 @@ function queueTriggers(
           // One with neither has nothing to do at step 2 and goes straight on.
           pending: optional || choosesTarget,
           // 402.2 chooses these; until then there is nothing to carry.
-          target: null,
+          targets: [],
           destination: null,
           ability: trigger.ability,
           // 808.1.d.3: note where the source was, so a Deathknell reading "my
@@ -1123,7 +1125,7 @@ function pass(state: GameState): ReduceResult {
           // 377.3.a.1: the ability has no card on the Chain, so "me" is the
           // Game Object the ability is printed on.
           source: top.entity,
-          choices: { target: top.target ?? undefined, destination: top.destination ?? undefined },
+          choices: { targets: top.targets, destination: top.destination ?? undefined },
           // 808.1.d.3: the Battlefield noted when this trigger was queued, so
           // "at my battlefield" still names one after the source has died.
           ...(top.noted === null ? {} : { noted: top.noted }),
@@ -1151,7 +1153,7 @@ function pass(state: GameState): ReduceResult {
         {
           controller: top.controller,
           source: top.entity,
-          choices: { target: top.target ?? undefined, destination: top.destination ?? undefined },
+          choices: { targets: top.targets, destination: top.destination ?? undefined },
           // 356.2.b: the declaration was made when the Spell was played, and
           // rode the Chain to here.
           paidAdditionalCost: top.paidAdditionalCost === true,
