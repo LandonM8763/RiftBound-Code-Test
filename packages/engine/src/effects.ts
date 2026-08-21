@@ -1068,7 +1068,9 @@ export function legalDestinations(
   if (spec.kind === 'base') {
     return [playerLocation(controller, 'base')];
   }
-  return state.battlefields.map((_battlefield, index) => battlefieldLocation(index));
+  const battlefields = state.battlefields.map((_battlefield, index) => battlefieldLocation(index));
+  // 449.1: an unstated Destination is any of them, Base included.
+  return spec.kind === 'any' ? [playerLocation(controller, 'base'), ...battlefields] : battlefields;
 }
 
 /**

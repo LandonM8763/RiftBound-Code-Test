@@ -2287,3 +2287,76 @@ describe("dynamic amounts (rules 143, 807)", () => {
     expect(parseCardText("I have +1 Might for each my Might.").unparsed).not.toEqual([]);
   });
 });
+
+describe("shapes the grammar reads once rather than per card", () => {
+  it("383.2: a two-condition clause is two abilities sharing an effect", () => {
+    const parsed = parseCardText("When I attack or defend, deal 2 to an enemy unit here.");
+    expect(parsed.unparsed).toEqual([]);
+    const triggered = parsed.abilities?.triggered ?? [];
+    expect(triggered.map((one) => one.condition)).toEqual([
+      { event: "attack", subject: "self" },
+      { event: "defend", subject: "self" },
+    ]);
+    // One effect, not two readings of it.
+    expect(triggered[0]?.effect).toEqual(triggered[1]?.effect);
+  });
+
+  it("carries the subject into a half that prints none", () => {
+    const parsed = parseCardText("When I conquer or hold, draw 1.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.triggered).toHaveLength(2);
+  });
+
+  it("tries the whole clause before splitting, so a condition may contain the word", () => {
+    // "a unit or gear" is one condition. The split is a fallback, never a
+    // rewrite, so a clause that reads whole is never cut in half.
+    const whole = parseCardText("When you play a spell or ability, draw 1.");
+    const split = parseCardText("When I attack or defend, draw 1.");
+    expect(split.abilities?.triggered).toHaveLength(2);
+    // Whichever way the first reads, it must not become two mismatched halves.
+    expect(whole.abilities?.triggered?.length ?? 0).not.toBe(2);
+  });
+
+  it("splits a trigger with no printed comma", () => {
+    const parsed = parseCardText("When I conquer play a Gold gear token exhausted.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.triggered?.[0]?.effect.effects).toEqual([
+      { kind: "createToken", token: "gold", count: 1, where: "base", ready: false },
+    ]);
+  });
+
+  it('reads "you may <verb> a <thing>" as a choice of zero or one', () => {
+    const parsed = parseCardText("You may kill a gear. Draw 1.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.effect?.target).toEqual({
+      kind: "unit",
+      scope: "any",
+      cardType: "gear",
+      count: { min: 0, max: 1 },
+    });
+    // The draw is not optional — it is a separate sentence.
+    expect(parsed.effect?.effects).toEqual([{ kind: "kill" }, { kind: "draw", count: 1 }]);
+  });
+
+  it('refuses "you may" on a clause that chooses nothing', () => {
+    // Read as a bare draw it would be mandatory, which is a stronger card.
+    expect(parseCardText("You may draw 1.").unparsed).not.toEqual([]);
+  });
+
+  it("449.1: a Move with no printed Destination lets the controller pick any", () => {
+    const parsed = parseCardText("Move a friendly unit and ready it.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.effect?.destination).toEqual({ kind: "any" });
+    expect(parsed.effect?.effects).toEqual([{ kind: "move" }, { kind: "ready" }]);
+  });
+
+  it("refuses a pronoun with nothing to refer back to", () => {
+    // An untargeted `ready` does nothing, so the card would parse and be wrong.
+    expect(parseCardText("Ready it.").unparsed).not.toEqual([]);
+  });
+
+  it("359.2.c: a Unit already enters exhausted, so printing it grants nothing", () => {
+    expect(parseCardText("This enters exhausted.").unparsed).toEqual([]);
+    expect(parseCardText("This enters exhausted.").abilities).toBeUndefined();
+  });
+});

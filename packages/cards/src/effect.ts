@@ -200,7 +200,16 @@ export type DestinationSpec =
   /** Any Battlefield the Unit may legally reach. */
   | { readonly kind: 'battlefield' }
   /** The controller's own Base. */
-  | { readonly kind: 'base' };
+  | { readonly kind: 'base' }
+  /**
+   * "Move a friendly unit" with no destination printed — 449.1 still needs
+   * one, so the controller picks any Location the Move could reach.
+   *
+   * Its own variant rather than an absent `destination`, because absent means
+   * *no* Move: `needsDestination` is what tells `legalActions` to enumerate,
+   * and a Move with nothing to enumerate would resolve into nothing.
+   */
+  | { readonly kind: 'any' };
 
 /** A single thing a card does. */
 /**
@@ -538,5 +547,5 @@ export function targetCount(spec: TargetSpec | undefined): TargetCount {
 
 /** True when playing this card requires the player to choose a Destination. */
 export function needsDestination(effect: CardEffect | undefined): boolean {
-  return effect?.destination?.kind === 'battlefield';
+  return effect?.destination?.kind === 'battlefield' || effect?.destination?.kind === 'any';
 }

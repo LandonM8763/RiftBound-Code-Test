@@ -37,6 +37,7 @@ import {
   type StaticAbility,
   type Condition,
   type StaticScope,
+  targetCount,
   type TargetCount,
   type TargetSpec,
   type TriggerCondition,
@@ -182,6 +183,10 @@ const MODELLED_KEYWORDS: readonly {
 const RULES_RESTATEMENTS: readonly RegExp[] = [
   // 702.3: "Only one buff counter may be on a unit at a time."
   /^a unit may have no more than one buff at a time$/i,
+  // 359.2.c: a Unit enters the Board exhausted already. Printed as a reminder
+  // on a Unit, it grants nothing — and it is *not* 184.1's token override,
+  // which is about a state contrary to the type's default.
+  /^(?:this|i) enters? exhausted$/i,
 ];
 
 /**
@@ -378,6 +383,16 @@ interface ClauseRule {
 interface ClauseResult {
   readonly effects: Effect[];
   readonly target: TargetSpec;
+  /**
+   * "Move a friendly unit **and ready it**" — the clause names no target of
+   * its own and inherits the run's.
+   *
+   * Flagged rather than silently carrying `NO_TARGET`, because a run whose
+   * *only* clause is a pronoun has nothing to inherit: "ready it" alone would
+   * become an untargeted `ready` that does nothing, which is a card that
+   * parses and is wrong. `parseEffects` refuses that.
+   */
+  readonly pronoun?: boolean | undefined;
   /** 449.1's Destination, for a clause whose verb is a Move. */
   readonly destination?: DestinationSpec | undefined;
 }
@@ -815,6 +830,30 @@ const CLAUSES: readonly ClauseRule[] = [
     // only the verb differs.
     pattern: /^stun (an?|another) (friendly |enemy )?unit( at a battlefield| here)?$/i,
     build: (m) => ({ effects: [{ kind: 'stun' }], target: unitTarget(m[1], m[2], 'unit', m[3]) }),
+  },
+  {
+    /**
+     * "Move a friendly unit" with no Destination printed (449.1).
+     *
+     * Ordered after the destination-bearing Move rules, so "move a unit to
+     * base" still reads its printed Destination rather than becoming a free
+     * choice — `matchClause` takes the first rule that consumes the line whole.
+     */
+    pattern: /^move (an?|another) (friendly |enemy )?unit$/i,
+    build: (m) => ({
+      effects: [{ kind: 'move' }],
+      target: unitTarget(m[1], m[2], 'unit', undefined),
+      destination: { kind: 'any' as const },
+    }),
+  },
+  {
+    // "…**and ready it**": the pronoun is the run's target, named once.
+    pattern: /^(ready|buff|heal|exhaust|kill|stun|recall) it$/i,
+    build: (m) => ({
+      effects: [{ kind: (m[1] ?? '').toLowerCase() } as Effect],
+      target: NO_TARGET,
+      pronoun: true,
+    }),
   },
   {
     // One rule rather than three: the verbs differ and the target phrase does
@@ -1923,9 +1962,17 @@ function buildStatic(
   };
 }
 
-/** A trigger condition together with any per-turn limit its wording implies. */
+/**
+ * The conditions a clause names, together with any per-turn limit its wording
+ * implies.
+ *
+ * A list because 383.2 gives one Triggered Ability exactly one condition, so
+ * "When I attack **or** defend, …" is two abilities sharing an effect rather
+ * than one ability with a disjunction. Reading it as a disjunction would need
+ * a `TriggerCondition` shape that no rule describes.
+ */
 interface ParsedCondition {
-  readonly condition: TriggerCondition;
+  readonly conditions: readonly TriggerCondition[];
   readonly limitPerTurn?: number | undefined;
 }
 
@@ -1946,23 +1993,60 @@ export function parseCondition(head: string): ParsedCondition | undefined {
     // which never happens today and should not pass silently if it starts to.
     return inner === undefined || inner.limitPerTurn !== undefined
       ? undefined
-      : { condition: inner.condition, limitPerTurn: 1 };
+      : { conditions: inner.conditions, limitPerTurn: 1 };
   }
 
   const when = phrase.match(/^(?:when|whenever)\s+(.+)$/i);
   if (when === null) {
     const phase = PHASE_CONDITIONS.find((entry) => entry.pattern.test(phrase));
-    return phase === undefined ? undefined : { condition: phase.condition };
+    return phase === undefined ? undefined : { conditions: [phase.condition] };
   }
 
   const body = when[1] ?? '';
+  const one = matchCondition(body);
+  if (one !== undefined) {
+    return { conditions: [one] };
+  }
+
+  // "When I attack **or** defend", "When I'm played **and when** I conquer" —
+  // two conditions sharing one effect. Tried only after the whole clause has
+  // failed, because a condition may contain the word itself: "when you play a
+  // unit or gear" is one condition, and splitting it would lose the card.
+  //
+  // Each half is re-read as a whole clause, so "when I attack or defend" needs
+  // the subject carried over — the second half prints none.
+  const split = body.split(/\s+(?:and when|or when|or)\s+/i);
+  if (split.length < 2) {
+    return undefined;
+  }
+  // "when I attack or defend" prints the subject once, so a later half that
+  // does not parse alone is retried with the first half's subject in front.
+  // Only on failure: a half that already reads as a condition is left alone.
+  const subject = /^((?:i'm|i|you)\b)/i.exec(split[0] ?? '')?.[1] ?? '';
+  const conditions: TriggerCondition[] = [];
+  for (const half of split) {
+    const text = half.trim();
+    const parsed =
+      matchCondition(text) ??
+      (subject === '' ? undefined : matchCondition(`${subject} ${text}`));
+    if (parsed === undefined) {
+      return undefined;
+    }
+    conditions.push(parsed);
+  }
+  return { conditions };
+}
+
+/** One condition clause, with the "when" already stripped. */
+function matchCondition(body: string): TriggerCondition | undefined {
   for (const rule of CONDITIONS) {
     const match = body.match(rule.pattern);
-    if (match === null) {
-      continue;
+    if (match !== null) {
+      const condition = rule.build(match);
+      if (condition !== undefined) {
+        return condition;
+      }
     }
-    const condition = rule.build(match);
-    return condition === undefined ? undefined : { condition };
   }
   return undefined;
 }
@@ -1975,12 +2059,30 @@ export function parseCondition(head: string): ParsedCondition | undefined {
  * a card that damages one Unit and buffs another cannot be represented.
  */
 export function parseEffects(body: string): CardEffect | undefined {
+  // "**You may** kill a gear." — an optional instruction with a chosen target
+  // is a choice of *zero or one*, which `TargetCount` already states. Refused
+  // when the clause chooses nothing: "you may draw 1" read as a bare draw
+  // would be mandatory, which is a different and stronger card.
+  const may = /^you may\s+(.+)$/i.exec(body.trim());
+  if (may !== null) {
+    const inner = parseEffects(may[1] ?? '');
+    if (inner === undefined || inner.target.kind !== 'unit') {
+      return undefined;
+    }
+    const { min, max } = targetCount(inner.target);
+    return min === 0
+      ? inner
+      : { ...inner, target: { ...inner.target, count: { min: 0, max } } };
+  }
+
   // A whole-line match wins over the split, because "and" is both a sequence
   // joiner and part of single clauses — "give a unit SHIELD 3 and TANK this
   // turn" is one grant, not two halves. Every clause pattern is anchored, so
   // a whole-line match can only be the clause it names.
   const asOne = matchClause(body.replace(/[.]+$/, '').trim());
-  if (asOne !== undefined) {
+  // A pronoun clause alone has nothing to refer back to, so the whole-line
+  // path refuses it for the same reason the split path does.
+  if (asOne !== undefined && asOne.pronoun !== true) {
     return {
       target: asOne.target,
       effects: asOne.effects,
@@ -2000,12 +2102,14 @@ export function parseEffects(body: string): CardEffect | undefined {
   const effects: Effect[] = [];
   let target: TargetSpec = NO_TARGET;
   let destination: DestinationSpec | undefined;
+  let pronoun = false;
 
   for (const part of parts) {
     const built = matchClause(part);
     if (built === undefined) {
       return undefined;
     }
+    pronoun = pronoun || built.pronoun === true;
     // One Destination for the whole card, as `CardEffect` says; two different
     // ones would need a choice per Move, which nothing here can carry.
     if (built.destination !== undefined) {
@@ -2021,6 +2125,12 @@ export function parseEffects(body: string): CardEffect | undefined {
       target = built.target;
     }
     effects.push(...built.effects);
+  }
+
+  // A pronoun with nothing to refer back to is an untargeted effect that does
+  // nothing — a card that parses and is wrong, so the run is refused instead.
+  if (pronoun && target.kind === 'none') {
+    return undefined;
   }
 
   return { target, effects, ...(destination === undefined ? {} : { destination }) };
@@ -2062,7 +2172,12 @@ function splitOnColon(line: string): [string, string] | undefined {
  */
 function parseLine(line: string): {
   effect?: CardEffect;
-  triggered?: TriggeredAbility;
+  /**
+   * A list because 383.2 gives an ability exactly one condition, so "When I
+   * attack **or** defend, …" is two abilities sharing an effect — and a card
+   * printing two trigger *sentences* is two as well.
+   */
+  triggered?: readonly TriggeredAbility[];
   activated?: NonNullable<CardAbilities['activated']>[number];
   costModifier?: CostModifier;
   static?: StaticAbility;
@@ -2206,15 +2321,41 @@ function parseLine(line: string): {
     if (effect === undefined) {
       return undefined;
     }
+    const body_ = split.condition === undefined ? effect : { ...effect, condition: split.condition };
     return {
-      triggered: {
-        condition: parsed.condition,
+      triggered: parsed.conditions.map((condition) => ({
+        condition,
         ...(optional ? { optional } : {}),
         ...(parsed.limitPerTurn === undefined ? {} : { limitPerTurn: parsed.limitPerTurn }),
         ...(price ?? {}),
-        effect: split.condition === undefined ? effect : { ...effect, condition: split.condition },
-      },
+        effect: body_,
+      })),
     };
+  }
+
+  // "When I conquer play a Gold gear token exhausted." — the comma the split
+  // relies on is simply not printed. Tried only when the line has no comma at
+  // all, and only for a line that opens with the trigger wording, so the
+  // ordinary path is untouched: each word boundary is offered as the split and
+  // the first that yields *both* a condition and an effect wins.
+  if (!line.includes(',') && /^(?:when|whenever)\s/i.test(line)) {
+    for (const boundary of [...line.matchAll(/\s+/g)].map((m) => m.index ?? -1)) {
+      const parsed = parseCondition(line.slice(0, boundary).trim());
+      if (parsed === undefined) {
+        continue;
+      }
+      const effect = parseEffects(line.slice(boundary).trim());
+      if (effect === undefined) {
+        continue;
+      }
+      return {
+        triggered: parsed.conditions.map((condition) => ({
+          condition,
+          ...(parsed.limitPerTurn === undefined ? {} : { limitPerTurn: parsed.limitPerTurn }),
+          effect,
+        })),
+      };
+    }
   }
 
   // Otherwise the whole line is the card's own rules text — possibly gated,
@@ -2385,7 +2526,7 @@ function parseSentences(line: string): ReturnType<typeof parseLine> {
 
   const merged: {
     effect?: CardEffect;
-    triggered?: TriggeredAbility;
+    triggered?: readonly TriggeredAbility[];
     activated?: NonNullable<CardAbilities['activated']>[number];
     costModifier?: CostModifier;
     static?: StaticAbility;
@@ -2397,7 +2538,13 @@ function parseSentences(line: string): ReturnType<typeof parseLine> {
     if (parsed === undefined) {
       return undefined;
     }
-    const { effect, ...rest } = parsed;
+    const { effect, triggered, ...rest } = parsed;
+
+    // Triggered Abilities accumulate: two sentences each printing one are two
+    // abilities, not a conflict. Every other kind stays exclusive.
+    if (triggered !== undefined) {
+      merged.triggered = [...(merged.triggered ?? []), ...triggered];
+    }
 
     // Rules text is the one kind that *concatenates* across sentences; every
     // other kind is a distinct ability, so a second one of the same kind would
@@ -2762,7 +2909,9 @@ export function parseCardText(text: string, card: CardFacts = {}): ParsedText {
         continue;
       }
       if (parsed.triggered !== undefined) {
-        triggered.push({ ...parsed.triggered, dependsOn: { kind: 'legion' } });
+        triggered.push(
+          ...parsed.triggered.map((one) => ({ ...one, dependsOn: { kind: 'legion' as const } })),
+        );
       }
       if (parsed.activated !== undefined) {
         activated.push({ ...parsed.activated, dependsOn: { kind: 'legion' } });
@@ -2810,7 +2959,7 @@ export function parseCardText(text: string, card: CardFacts = {}): ParsedText {
       effects.push(...parsed.effect.effects);
     }
     if (parsed.triggered !== undefined) {
-      triggered.push(parsed.triggered);
+      triggered.push(...parsed.triggered);
     }
     if (parsed.activated !== undefined) {
       activated.push(parsed.activated);

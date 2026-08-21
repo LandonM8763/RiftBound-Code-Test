@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 225 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 232 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -599,6 +599,26 @@ are unaffected and only a "when I attack" on a latecomer is missed.
 ordinal picks *which* occurrence fires ("your second card in a turn"), the limit
 caps *how often* the ability may ("the first time … each turn").
 
+**A clause naming two conditions is two abilities, not one disjunction.** 383.2
+gives a Triggered Ability exactly one condition, so "When I attack **or**
+defend, …" parses into two abilities sharing one effect — and a card printing
+two trigger *sentences* is two as well, which is why `parseLine` returns a list.
+Reading it as a disjunction would need a `TriggerCondition` shape no rule
+describes.
+
+Three things keep that split from eating cards it should not:
+
+- **The whole clause is tried first.** "When you play a unit or gear" is one
+  condition, and splitting it would lose the card. The split is a fallback,
+  never a rewrite.
+- **The subject is carried over.** "When I attack or defend" prints it once, so
+  a half that does not parse alone is retried with the first half's subject in
+  front — and only on failure, so a half that already reads is left alone.
+- **A missing comma is a last resort.** "When I conquer play a Gold gear token
+  exhausted" prints none, so a line that opens with the trigger wording and
+  contains no comma at all offers each word boundary as the split, taking the
+  first that yields *both* a condition and an effect.
+
 ### Static and passive abilities
 
 Rules 363-365, data in `cards/static.ts`, engine in `engine/statics.ts`.
@@ -858,6 +878,12 @@ Four things are load-bearing:
 The parser reads the count off the *article*, which is what makes "two **other**
 friendly units" one phrase rather than two captures: `unitTarget` already read
 "another", and "other" is the same word with a number in front of it.
+
+**"You may kill a gear" is the same mechanic.** An optional instruction with a
+chosen target is a choice of *zero or one*, which `TargetCount` already states —
+so the wording needed no `optional` flag on a step. It is refused on a clause
+that chooses nothing: "you may draw 1" read as a bare draw would be mandatory,
+which is a different and stronger card than the one printed.
 
 ### Keywords
 
@@ -2002,15 +2028,15 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 225 of the 468 cards that have text** — 217 parsed and 8 hand-authored, and the shape of what is
+**Coverage is 232 of the 468 cards that have text** — 224 parsed and 8 hand-authored, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 217 |
+| Fully parsed | 224 |
 | Hand-authored | 8 |
-| Blocked | 243 |
+| Blocked | 236 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 4 times, the next 2, and every one of
@@ -2188,6 +2214,7 @@ What each round actually delivered, for calibrating the next projection:
 | Guarded effect steps and four more authored entries | **+4** delivered |
 | Counted targets (355.6) | +2 projected, **+3** delivered |
 | Dynamic amounts off the source (143, 807) | **+3** delivered |
+| Seven shared clause shapes, read once rather than per card | **+7** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic
