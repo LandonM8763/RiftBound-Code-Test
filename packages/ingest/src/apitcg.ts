@@ -261,7 +261,13 @@ function normalizeCard(
     // whose other clause is unreadable keeps neither: half a card is the
     // failure mode this design exists to avoid, and Assault without the
     // Deathknell next to it is still the wrong card.
-    ...(parsedWhole && parsed.keywords !== undefined ? { keywords: parsed.keywords } : {}),
+    ...(parsedWhole
+      ? parsed.keywords === undefined
+        ? {}
+        : { keywords: parsed.keywords }
+      : model?.keywords === undefined
+        ? {}
+        : { keywords: model.keywords }),
   };
   const cardEffect = parsedWhole ? parsed.effect : model?.effect;
 

@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 195 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 204 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -1845,14 +1845,15 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 195 of the 468 cards that have text**, and the shape of what is
+**Coverage is 204 of the 468 cards that have text** — 200 parsed and 4 hand-authored, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 195 |
-| Blocked | 273 |
+| Fully parsed | 200 |
+| Hand-authored | 4 |
+| Blocked | 264 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 4 times, the next 2, and every one of
@@ -2024,6 +2025,8 @@ What each round actually delivered, for calibrating the next projection:
 | Statics granting a desugaring keyword (801.3.a) | +4 projected, **+4** delivered |
 | Counter (425) | +2 projected, **+2** delivered |
 | Triggered abilities with a price (403, 356.7) | +4 projected, **+5** delivered |
+| Might bounds, bare plurals, Base destinations | **+5** delivered |
+| The first authored entries | **+4** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic

@@ -18,7 +18,7 @@ import { mightOf } from './combat.js';
 import { legalTargets } from './effects.js';
 import { checkInvariants } from './invariants.js';
 import { currentLegalActions } from './legal.js';
-import { moveEntity } from './mutate.js';
+import { moveEntity, withEntity } from './mutate.js';
 import { reduce } from './reduce.js';
 import { createGame, type DeckList } from './setup.js';
 import {
@@ -345,6 +345,21 @@ describe('targeting (rule 355.9)', () => {
     // A source in a Base names no Battlefield, so 355.8 makes the card
     // unplayable rather than letting it reach the whole Board.
     expect(legalTargets(state, me, { kind: 'unit', scope: 'any', here: true }, atBase)).toEqual([]);
+  });
+
+  it('143: bounds by effective Might, not printed Might', () => {
+    let state = inMainPhase();
+    const me = state.activePlayer;
+    const [a, small] = onBoard(state, me, PLAIN, 'base');
+    state = a;
+    const [b, buffed] = onBoard(state, me, PLAIN, 'base');
+    state = withEntity(b, buffed, (current) => ({ ...current, mightBonus: 5 }));
+
+    // PLAIN is 4 Might; the buffed one is 9.
+    const targets = legalTargets(state, me, { kind: 'unit', scope: 'any', maxMight: 4 });
+
+    expect(targets).toContain(small);
+    expect(targets).not.toContain(buffed);
   });
 
   it('excludes the source itself for "another"', () => {

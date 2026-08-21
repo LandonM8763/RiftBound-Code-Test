@@ -1492,6 +1492,40 @@ describe('the target phrase, shared by every clause that takes one', () => {
   });
 });
 
+describe('bounds and destinations on a target', () => {
+  it('143: reads "with 3 Might or less" as a bound on effective Might', () => {
+    const parsed = parseCardText('When you play me, kill an enemy unit with 3 Might or less.');
+    expect(parsed.unparsed).toHaveLength(0);
+    expect(parsed.abilities?.triggered?.[0]?.effect.target).toEqual({
+      kind: 'unit',
+      scope: 'enemy',
+      maxMight: 3,
+    });
+  });
+
+  it('449.1: reads "move a unit from a battlefield to its base"', () => {
+    const parsed = parseCardText('Move a unit from a battlefield to its base.');
+    expect(parsed.unparsed).toHaveLength(0);
+    expect(parsed.effect).toEqual({
+      target: { kind: 'unit', scope: 'any', atBattlefield: true },
+      destination: { kind: 'base' },
+      effects: [{ kind: 'move' }],
+    });
+  });
+
+  it('355.5.a: reads a bare plural as a criterion, not a choice', () => {
+    expect(parseCardText('Give friendly units +5 Might this turn.').effect?.target).toEqual({
+      kind: 'all',
+      scope: 'friendly',
+    });
+    // The singular still names one chosen Unit.
+    expect(parseCardText('Give a friendly unit +5 Might this turn.').effect?.target).toEqual({
+      kind: 'unit',
+      scope: 'friendly',
+    });
+  });
+});
+
 describe('a Triggered Ability with a price (403, 356.7)', () => {
   it('reads "you may pay 1 to ready me"', () => {
     const parsed = parseCardText('When I conquer, you may pay 1 to ready me.');

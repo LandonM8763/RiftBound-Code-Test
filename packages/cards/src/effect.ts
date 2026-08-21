@@ -63,6 +63,15 @@ export type TargetSpec =
        */
       readonly excludeSelf?: boolean | undefined;
       /**
+       * "an enemy unit **with 3 Might or less**" — an upper bound on effective
+       * Might (143), not on printed Might.
+       *
+       * Effective because that is what the card asks about at the moment it is
+       * chosen: a Unit buffed past the bound is not a legal choice, and 358.1
+       * re-checks it when the effect resolves.
+       */
+      readonly maxMight?: number | undefined;
+      /**
        * "Kill a gear", "return a gear to its owner's hand".
        *
        * Defaults to `unit`. A Gear is a Permanent like a Unit (428 kills either

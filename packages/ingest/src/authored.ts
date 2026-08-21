@@ -29,7 +29,7 @@
  * reuses collector numbers across printings — so the name is the stable key and
  * the id is not.
  */
-import type { CardAbilities, CardEffect } from '@riftbound/cards';
+import type { CardAbilities, CardEffect, Keyword } from '@riftbound/cards';
 
 /** One card's hand-authored model, with the text it was written against. */
 export interface AuthoredCard {
@@ -45,6 +45,15 @@ export interface AuthoredCard {
   /** Rules text that runs when the card itself resolves (359.2.b, 359.3.d). */
   readonly effect?: CardEffect | undefined;
   readonly abilities?: CardAbilities | undefined;
+  /**
+   * Printed keywords (800-828), for a keyword *line* the grammar cannot read.
+   *
+   * "ASSAULT 2, SHIELD 2" is two keywords the model states perfectly and the
+   * grammar splits wrongly, so the fix belongs here rather than in a regex.
+   * Same all-or-nothing rule as everything else: an authored entry replaces the
+   * card's whole reading, keywords included.
+   */
+  readonly keywords?: readonly Keyword[] | undefined;
   /** Why this card needs authoring rather than a parser rule. */
   readonly note?: string | undefined;
 }
@@ -56,7 +65,79 @@ export interface AuthoredCard {
  * one card's printed text, and the reading is the work. Entries are added in
  * batches and every one is covered by the round-trip check in `authored.test.ts`.
  */
-export const AUTHORED_CARDS: Readonly<Record<string, AuthoredCard>> = {};
+export const AUTHORED_CARDS: Readonly<Record<string, AuthoredCard>> = {
+  // 807.2 / 814.2: two printed keywords on one line. The model states this
+  // exactly; only the keyword-line grammar, which reads one keyword per line,
+  // cannot — so the reading belongs here rather than in a looser regex that
+  // would start splitting real sentences.
+  'Garen - Rugged': {
+    text: 'ASSAULT 2, SHIELD 2',
+    keywords: [
+      { kind: 'assault', value: 2 },
+      { kind: 'shield', value: 2 },
+    ],
+    note: 'Two keywords on one printed line (807.2, 814.2).',
+  },
+
+  // Three trigger conditions, one effect (383.2). Each is its own ability:
+  // `TriggerCondition` is one event, and a card that fires on three writes
+  // three. The grammar has no rule for a condition list.
+  Scrapheap: {
+    text: 'When this is played, discarded, or killed, draw 1.',
+    abilities: {
+      triggered: [
+        {
+          condition: { event: 'played', subject: 'self' },
+          effect: { target: { kind: 'none' }, effects: [{ kind: 'draw', count: 1 }] },
+        },
+        {
+          condition: { event: 'discard', subject: 'self' },
+          effect: { target: { kind: 'none' }, effects: [{ kind: 'draw', count: 1 }] },
+        },
+        {
+          condition: { event: 'dies', subject: 'self' },
+          effect: { target: { kind: 'none' }, effects: [{ kind: 'draw', count: 1 }] },
+        },
+      ],
+    },
+    note: 'Three conditions sharing one effect; TriggerCondition holds one event each.',
+  },
+
+  // 383.1's `minEnergy` filter states this; the effect clause is a typo in the
+  // export ("draw a 1") that no grammar should be taught to read.
+  'Lux - Lady of Luminosity': {
+    text: 'When you play a spell that costs 5 or more, draw a 1.',
+    abilities: {
+      triggered: [
+        {
+          condition: {
+            event: 'played',
+            subject: 'you',
+            filter: { cardType: 'spell', minEnergy: 5 },
+          },
+          effect: { target: { kind: 'none' }, effects: [{ kind: 'draw', count: 1 }] },
+        },
+      ],
+    },
+    note: 'Printed "draw a 1" — a typo in the source, not a wording to parse.',
+  },
+
+  // 423.1.a.1's stun event with an enemy subject. "one or more" is a plural the
+  // grammar has no rule for; the event fires once per stun either way.
+  'Leona - Radiant Dawn': {
+    text: 'When you stun one or more enemy units, buff a friendly unit.',
+    abilities: {
+      triggered: [
+        {
+          condition: { event: 'stun', subject: 'enemy' },
+          effect: { target: { kind: 'unit', scope: 'friendly' }, effects: [{ kind: 'buff' }] },
+        },
+      ],
+    },
+    note: '"one or more" plural on a per-object event (383.2).',
+  },
+
+};
 
 /**
  * Normalise printed text for comparison.

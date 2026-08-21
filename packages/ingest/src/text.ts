@@ -28,6 +28,7 @@ import {
   type Count,
   type Domain,
   type CardEffect,
+  type DestinationSpec,
   type AdditionalCost,
   type CostModifier,
   type CostPayment,
@@ -352,7 +353,15 @@ function parseCount(phrase: string): Count | undefined {
 /** A clause that consumes the whole line, mapping to zero or more effects. */
 interface ClauseRule {
   readonly pattern: RegExp;
-  readonly build: (match: RegExpMatchArray) => { effects: Effect[]; target: TargetSpec } | undefined;
+  readonly build: (match: RegExpMatchArray) => ClauseResult | undefined;
+}
+
+/** What one clause contributes: its effects, its target, and any Destination. */
+interface ClauseResult {
+  readonly effects: Effect[];
+  readonly target: TargetSpec;
+  /** 449.1's Destination, for a clause whose verb is a Move. */
+  readonly destination?: DestinationSpec | undefined;
 }
 
 const SELF: TargetSpec = { kind: 'self' };
@@ -375,6 +384,8 @@ function unitTarget(
   scope: string | undefined,
   noun: string | undefined,
   where: string | undefined,
+  /** "with 3 Might or less" (143), an upper bound on effective Might. */
+  maxMight?: number | undefined,
 ): TargetSpec {
   const cardType = (noun ?? 'unit').trim().toLowerCase();
   const place = (where ?? '').trim().toLowerCase();
@@ -386,6 +397,7 @@ function unitTarget(
     ...(place === 'here' ? { here: true } : {}),
     // 355.9's "another": never the effect's own source.
     ...(/^another$/i.test((article ?? '').trim()) ? { excludeSelf: true } : {}),
+    ...(maxMight === undefined ? {} : { maxMight }),
   };
 }
 
@@ -463,6 +475,22 @@ const CLAUSES: readonly ClauseRule[] = [
     },
   },
   {
+    /**
+     * "Move a unit from a battlefield to its base" (449.1).
+     *
+     * The origin is what makes this readable: a Unit at a Battlefield is the
+     * only one with a Base to be sent to, so "from a battlefield" is the
+     * target's location and "to its base" is the Destination.
+     */
+    pattern:
+      /^move (an?|another) (friendly |enemy )?unit(?: (?:at|from) a battlefield)? (?:to|on) (?:its|your|their) base$/i,
+    build: (m) => ({
+      effects: [{ kind: 'move' }],
+      target: unitTarget(m[1], m[2], 'unit', 'at a battlefield'),
+      destination: { kind: 'base' as const },
+    }),
+  },
+  {
     /** "Kill all gear", "Buff all friendly units" — the same `all` spec. */
     pattern: /^(kill|buff) all (friendly |enemy )?(unit|gear)s?(?: (here|at my battlefield|at battlefields))?$/i,
     build: (m) => {
@@ -496,6 +524,23 @@ const CLAUSES: readonly ClauseRule[] = [
         : {
             effects: [{ kind: 'dealDamage', amount: n }],
             target: unitTarget(m[2], m[3], 'unit', m[4]),
+          };
+    },
+  },
+  {
+    /**
+     * "Give friendly units +5 Might this turn" — a bare plural, which 355.5.a
+     * makes a criterion rather than a choice. Listed before the singular so
+     * "units" is never read as "a unit".
+     */
+    pattern: /^give (friendly |enemy )?units \+(\d+) might this turn$/i,
+    build: (m) => {
+      const n = count(m[2] ?? '');
+      return n === undefined
+        ? undefined
+        : {
+            effects: [{ kind: 'giveMight', amount: n }],
+            target: { kind: 'all', scope: unitScope(m[1]) },
           };
     },
   },
@@ -652,8 +697,14 @@ const CLAUSES: readonly ClauseRule[] = [
   {
     // 428 kills any Permanent, so "kill a gear" is the same clause with a
     // different noun — the sweep narrows and the effect does not change.
-    pattern: /^kill (an?|another) (friendly |enemy )?(unit|gear)( at a battlefield| here)?$/i,
-    build: (m) => ({ effects: [{ kind: 'kill' }], target: unitTarget(m[1], m[2], m[3], m[4]) }),
+    pattern:
+      /^kill (an?|another) (friendly |enemy )?(unit|gear)( at a battlefield| here)?(?: with (\d+) might or less)?$/i,
+    build: (m) => {
+      const bound = m[5] === undefined ? undefined : count(m[5]);
+      return m[5] !== undefined && bound === undefined
+        ? undefined
+        : { effects: [{ kind: 'kill' }], target: unitTarget(m[1], m[2], m[3], m[4], bound) };
+    },
   },
   {
     // Rule 423. Same shape as `kill` above, because the wording is the same and
@@ -1685,7 +1736,11 @@ export function parseEffects(body: string): CardEffect | undefined {
   // a whole-line match can only be the clause it names.
   const asOne = matchClause(body.replace(/[.]+$/, '').trim());
   if (asOne !== undefined) {
-    return { target: asOne.target, effects: asOne.effects };
+    return {
+      target: asOne.target,
+      effects: asOne.effects,
+      ...(asOne.destination === undefined ? {} : { destination: asOne.destination }),
+    };
   }
 
   const parts = body
@@ -1699,11 +1754,20 @@ export function parseEffects(body: string): CardEffect | undefined {
 
   const effects: Effect[] = [];
   let target: TargetSpec = NO_TARGET;
+  let destination: DestinationSpec | undefined;
 
   for (const part of parts) {
     const built = matchClause(part);
     if (built === undefined) {
       return undefined;
+    }
+    // One Destination for the whole card, as `CardEffect` says; two different
+    // ones would need a choice per Move, which nothing here can carry.
+    if (built.destination !== undefined) {
+      if (destination !== undefined && JSON.stringify(destination) !== JSON.stringify(built.destination)) {
+        return undefined;
+      }
+      destination = built.destination;
     }
     if (built.target.kind !== 'none') {
       if (target.kind !== 'none' && JSON.stringify(target) !== JSON.stringify(built.target)) {
@@ -1714,7 +1778,7 @@ export function parseEffects(body: string): CardEffect | undefined {
     effects.push(...built.effects);
   }
 
-  return { target, effects };
+  return { target, effects, ...(destination === undefined ? {} : { destination }) };
 }
 
 /**
@@ -1726,7 +1790,7 @@ export function parseEffects(body: string): CardEffect | undefined {
  * invitation to try something else. Falling through would turn a deliberate
  * refusal into a different reading.
  */
-function matchClause(part: string): { effects: Effect[]; target: TargetSpec } | undefined {
+function matchClause(part: string): ClauseResult | undefined {
   for (const candidate of CLAUSES) {
     if (candidate.pattern.test(part)) {
       const match = part.match(candidate.pattern);
@@ -2278,6 +2342,7 @@ export function parseCardText(text: string, card: CardFacts = {}): ParsedText {
   const unparsed: string[] = [];
   const effects: Effect[] = [];
   let target: TargetSpec = NO_TARGET;
+  let destination: DestinationSpec | undefined;
   let condition: Condition | undefined;
   const triggered: TriggeredAbility[] = [];
   const activated: NonNullable<CardAbilities['activated']>[number][] = [];
@@ -2484,6 +2549,19 @@ export function parseCardText(text: string, card: CardFacts = {}): ParsedText {
         }
         condition = parsed.effect.condition;
       }
+      // 449.1's Destination rides with the effects, and `CardEffect` carries
+      // one for the whole card — so two lines naming different ones cannot be
+      // merged any more than two conditions can.
+      if (parsed.effect.destination !== undefined) {
+        if (
+          destination !== undefined &&
+          JSON.stringify(destination) !== JSON.stringify(parsed.effect.destination)
+        ) {
+          unparsed.push(line);
+          continue;
+        }
+        destination = parsed.effect.destination;
+      }
       effects.push(...parsed.effect.effects);
     }
     if (parsed.triggered !== undefined) {
@@ -2513,7 +2591,14 @@ export function parseCardText(text: string, card: CardFacts = {}): ParsedText {
 
   return {
     ...(effects.length > 0
-      ? { effect: { target, effects, ...(condition === undefined ? {} : { condition }) } }
+      ? {
+          effect: {
+            target,
+            effects,
+            ...(destination === undefined ? {} : { destination }),
+            ...(condition === undefined ? {} : { condition }),
+          },
+        }
       : {}),
     ...(Object.keys(abilities).length > 0 ? { abilities } : {}),
     ...(keywords.length > 0 ? { keywords } : {}),

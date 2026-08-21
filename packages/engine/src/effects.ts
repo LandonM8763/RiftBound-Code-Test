@@ -239,6 +239,11 @@ export function legalTargets(
       if (spec.excludeSelf === true && unit === source) {
         return false;
       }
+      // 143: the bound is on *effective* Might, which is what the card asks
+      // about when the choice is made. 358.1 re-checks it on resolution.
+      if (spec.maxMight !== undefined && mightOf(state, unit) > spec.maxMight) {
+        return false;
+      }
       const owner = getEntity(state, unit).controller;
       if (spec.scope === 'friendly' && owner !== controller) {
         return false;
