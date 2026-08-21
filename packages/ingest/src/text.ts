@@ -1876,6 +1876,18 @@ function parseLine(line: string): {
     if (optional) {
       body = body.replace(/^you may\s+/i, '');
     }
+    // 403 with 356.7: "you may **pay 1 and exhaust me** to ready it" prices the
+    // ability. Only after a "you may" — a mandatory price would have to strand
+    // the game when it could not be paid, and the corpus prints none.
+    let price: TriggerPrice | undefined;
+    if (optional) {
+      const priced = splitTriggerPrice(body);
+      if (priced === undefined) {
+        return undefined;
+      }
+      price = priced.price;
+      body = priced.rest;
+    }
     // "When you play me, **if you control a Poro**, buff me and draw 1."
     const split = splitCondition(body);
     if (split === undefined) {
@@ -1890,6 +1902,7 @@ function parseLine(line: string): {
         condition: parsed.condition,
         ...(optional ? { optional } : {}),
         ...(parsed.limitPerTurn === undefined ? {} : { limitPerTurn: parsed.limitPerTurn }),
+        ...(price ?? {}),
         effect: split.condition === undefined ? effect : { ...effect, condition: split.condition },
       },
     };
@@ -1907,6 +1920,104 @@ function parseLine(line: string): {
   }
   return {
     effect: gated.condition === undefined ? effect : { ...effect, condition: gated.condition },
+  };
+}
+
+/** The priced half of "you may <price> to <effect>" (403, 356.7). */
+interface TriggerPrice {
+  readonly cost?: Cost | undefined;
+  readonly exhaustSelf?: boolean | undefined;
+  readonly payments?: readonly CostPayment[] | undefined;
+}
+
+/**
+ * Split "pay 1 and exhaust me to ready it" into its price and its effect.
+ *
+ * Anchored on " to " after a price-shaped lead, because "to" is also an
+ * ordinary preposition — "move a friendly unit to base" must not be read as a
+ * price of "move a friendly unit". The lead has to parse *entirely* as a
+ * payment for the split to happen at all, which is what makes that safe.
+ *
+ * A line with no price is returned unchanged, so every caller can use this.
+ */
+function splitTriggerPrice(
+  body: string,
+): { readonly price?: TriggerPrice; readonly rest: string } | undefined {
+  // Only a lead that starts like a price is considered, and only when there is
+  // a " to " for it to precede. Every one of these verbs is also an ordinary
+  // effect — "you may kill a gear" is not a price — so without the split there
+  // is nothing here to read.
+  if (!/^(?:pay|exhaust|spend|recycle|kill)\b/i.test(body) || !/ to /i.test(body)) {
+    return { rest: body };
+  }
+  // Try each " to " from the left: the first split whose lead is entirely a
+  // price is the right one, since a price cannot contain the word.
+  for (let at = body.toLowerCase().indexOf(' to '); at !== -1; at = body.toLowerCase().indexOf(' to ', at + 1)) {
+    const price = parseTriggerPrice(body.slice(0, at).trim());
+    if (price !== undefined) {
+      return { price, rest: body.slice(at + 4).trim() };
+    }
+  }
+  // No split read as a price, so this is an ordinary effect that happens to
+  // start with one of those verbs — "you may move a friendly unit to base".
+  return { rest: body };
+}
+
+/** Read "1 and Fury", "exhaust me", "spend a buff", or a comma-joined mix. */
+function parseTriggerPrice(lead: string): TriggerPrice | undefined {
+  let exhaustSelf = false;
+  let anyPower = 0;
+  const payments: CostPayment[] = [];
+  const resourceWords: string[] = [];
+
+  for (const raw of lead.split(/,|\s+and\s+/i)) {
+    let part = raw.trim().replace(/^pay\s+/i, '').trim();
+    if (part === '') {
+      continue;
+    }
+    // 414: "exhaust me"/"exhaust this" is the exhaust symbol spelled out.
+    if (/^exhaust (?:me|this)$/i.test(part)) {
+      exhaustSelf = true;
+      continue;
+    }
+    const payment = parseAbilityPayment(part);
+    if (payment !== undefined) {
+      payments.push(payment);
+      continue;
+    }
+    // 135.2.e.5: the export renders `[A]` as the word "Rune", and repeats it
+    // per pip — "pay Rune Rune" is two Power of any Domain.
+    part = part
+      .replace(/\brunes?\b/gi, () => {
+        anyPower += 1;
+        return '';
+      })
+      .trim();
+    if (part === '') {
+      continue;
+    }
+    resourceWords.push(part);
+  }
+
+  const named = resourceWords.length === 0 ? undefined : parseResourceCost(resourceWords.join(' '));
+  if (resourceWords.length > 0 && named === undefined) {
+    return undefined;
+  }
+  const cost: Cost | undefined =
+    named === undefined && anyPower === 0
+      ? undefined
+      : {
+          energy: named?.energy ?? 0,
+          power: named?.power ?? [],
+          ...(anyPower === 0 ? {} : { anyPower }),
+        };
+  if (cost === undefined && !exhaustSelf && payments.length === 0) {
+    return undefined;
+  }
+  return {
+    ...(cost === undefined ? {} : { cost }),
+    ...(exhaustSelf ? { exhaustSelf } : {}),
+    ...(payments.length === 0 ? {} : { payments }),
   };
 }
 

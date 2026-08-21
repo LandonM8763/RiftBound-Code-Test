@@ -293,6 +293,28 @@ const SEER = makeUnit(2, ['fury'], {
   },
 });
 
+/**
+ * "When you play me, you may pay 1 to draw 1." (403, 356.7)
+ *
+ * No exhaust in the price: 359.2.c enters a Unit exhausted, so a Play Effect
+ * that cost one could never be paid — which the engine correctly refuses.
+ */
+const TOLLKEEPER = makeUnit(2, ['fury'], {
+  id: cardId('A-060'),
+  name: 'Tollkeeper',
+  cost: cost(1),
+  abilities: {
+    triggered: [
+      {
+        condition: { event: 'played', subject: 'self' },
+        optional: true,
+        cost: cost(1),
+        effect: DRAW_ONE,
+      },
+    ],
+  },
+});
+
 const REGISTRY = CardRegistry.from([
   LEGEND,
   CHAMPION,
@@ -317,6 +339,7 @@ const REGISTRY = CardRegistry.from([
   CANTRIP,
   CAUSTIC,
   SEER,
+  TOLLKEEPER,
   EXECUTE,
   RUNE,
   ...BATTLEFIELDS,
@@ -744,6 +767,50 @@ describe('abilities granted by a static (801.3.a)', () => {
     expect(
       triggersFor(withSeer, { event: 'played', actor: withSeer.activePlayer, objects: [seer] }),
     ).toEqual([]);
+  });
+});
+
+describe('a Triggered Ability with a price (403, 356.7)', () => {
+  it('pays at 402.2, the step where its other choices are settled', () => {
+    const [state, card] = withHandCard(inMainPhase('trigger-cost', 3), TOLLKEEPER.id);
+    const player = state.activePlayer;
+    const played = reduce(state, { type: 'playCard', card }).state;
+    const before = getPlayer(played, player).pool.energy;
+
+    const finalized = reduce(played, { type: 'resolveTrigger', perform: true }).state;
+
+    // Taken at step 2 rather than on resolution — the item is on the Chain and
+    // already paid for.
+    expect(getPlayer(finalized, player).pool.energy).toBe(before - 1);
+    checkInvariants(resolveChain(finalized));
+  });
+
+  it('offers only the decline when the price cannot be met', () => {
+    const [empty, card] = withHandCard(inMainPhase('trigger-broke', 0), TOLLKEEPER.id);
+    // Enough to play the Unit, nothing left for the trigger.
+    const funded = withPlayer(empty, empty.activePlayer, (seat) => ({
+      ...seat,
+      pool: { ...seat.pool, energy: 1 },
+    }));
+    const played = reduce(funded, { type: 'playCard', card }).state;
+
+    const offered = currentLegalActions(played).filter(
+      (action) => action.type === 'resolveTrigger',
+    );
+    expect(offered).toEqual([{ type: 'resolveTrigger', perform: false }]);
+    expect(() => reduce(played, { type: 'resolveTrigger', perform: true })).toThrow(/cost/i);
+  });
+
+  it('takes nothing when the controller declines', () => {
+    const [state, card] = withHandCard(inMainPhase('trigger-decline', 3), TOLLKEEPER.id);
+    const player = state.activePlayer;
+    const played = reduce(state, { type: 'playCard', card }).state;
+    const before = getPlayer(played, player).pool.energy;
+
+    const declined = reduce(played, { type: 'resolveTrigger', perform: false }).state;
+
+    expect(getPlayer(declined, player).pool.energy).toBe(before);
+    expect(declined.chain).toHaveLength(0);
   });
 });
 

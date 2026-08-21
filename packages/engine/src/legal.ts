@@ -1,7 +1,7 @@
 import type { Action } from './actions.js';
 import { effectOf, needsTargetChoice, type CardEffect, type TargetSpec } from '@riftbound/cards';
 
-import { abilityFor, activatableAbilities } from './abilities.js';
+import { abilityFor, activatableAbilities, triggerCostPayable } from './abilities.js';
 import { legalDestinations, legalTargets } from './effects.js';
 import { standardMoves } from './move.js';
 import {
@@ -62,7 +62,11 @@ export function legalActions(state: GameState, player: PlayerId): readonly Actio
       ? legalTargets(state, player, spec, top.entity)
       : [undefined];
     const pendingActions: Action[] = [];
-    for (const target of targets) {
+    // 403 with 356.7: an ability whose price cannot be met is not performable,
+    // so only the decline is offered. 402.4.b then makes that mandatory rather
+    // than a choice — which is right, since there is nothing else to do.
+    const affordablePrice = triggerCostPayable(state, player, ability, top.entity);
+    for (const target of affordablePrice ? targets : []) {
       for (const destination of choicesOfDestination(state, player, ability.effect)) {
         pendingActions.push({
           type: 'resolveTrigger',

@@ -4,7 +4,10 @@ import {
   isMandatory,
   needsTargetChoice,
   type AdditionalCost,
+  type ActivatedAbility,
   type CardDefinition,
+  type CostPayment,
+  type TriggeredAbility,
   type Cost,
 } from '@riftbound/cards';
 
@@ -28,6 +31,7 @@ import {
 import {
   abilityFor,
   activatableAbilities,
+  triggerCostPayable,
   triggerKey,
   triggersFor,
   type PendingTrigger,
@@ -633,6 +637,13 @@ function resolveTrigger(
   if (!isValidTarget(state, player, ability.effect.target, target, top.entity)) {
     throw new IllegalActionError('Invalid target for the Triggered Ability');
   }
+  if (!triggerCostPayable(state, player, ability, top.entity)) {
+    throw new IllegalActionError('The Triggered Ability`s cost cannot be paid');
+  }
+
+  // 403: an ability's cost is paid when the ability is played, and 402.2 is the
+  // step of playing where this one is settled — the same place its target is.
+  let next = payTriggerCost(state, player, ability, top.entity, events);
 
   // Finalized: it stops being pending and waits on the Chain like any item,
   // now carrying the choices its controller just made.
@@ -644,13 +655,40 @@ function resolveTrigger(
   };
   return {
     state: {
-      ...state,
+      ...next,
       chain: [...chain, finalized],
       passes: 0,
       priority: state.activePlayer,
     },
     events,
   };
+}
+
+/** Pay it. Assumes `triggerCostPayable`. */
+function payTriggerCost(
+  state: GameState,
+  player: PlayerId,
+  ability: ActivatedAbility | TriggeredAbility,
+  source: EntityId,
+  events: GameEvent[],
+): GameState {
+  if (!('condition' in ability)) {
+    return state;
+  }
+  let next = state;
+  if (ability.cost !== undefined) {
+    const cost = ability.cost;
+    next = withPlayer(next, player, (current) => ({ ...current, pool: payFrom(current.pool, cost) }));
+  }
+  if (ability.exhaustSelf === true) {
+    next = withEntity(next, source, (current) => ({ ...current, exhausted: true }));
+  }
+  // 357.2 puts the non-resource parts after the resources, so a payment that
+  // also spends from the pool draws on what is left.
+  for (const payment of ability.payments ?? []) {
+    next = payAdditionalCost(next, player, payment as CostPayment, source, events);
+  }
+  return next;
 }
 
 /** Priority after an item leaves the Chain (rule 312.2.a, 312.2.c). */

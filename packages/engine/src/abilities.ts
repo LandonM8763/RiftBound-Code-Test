@@ -133,6 +133,34 @@ function abilitySets(
 
 
 /**
+ * Can this Triggered Ability's price be met (403, 356.7)?
+ *
+ * The same three checks an Activated Ability gets — the pool, 414's exhaust,
+ * and 416.3/422.3's rule that a non-resource cost must be *completable* — asked
+ * at 402.2 rather than at activation, because that is the step of playing where
+ * a Triggered Ability settles its choices.
+ */
+export function triggerCostPayable(
+  state: GameState,
+  player: PlayerId,
+  ability: ActivatedAbility | TriggeredAbility,
+  source: EntityId,
+): boolean {
+  if (!('condition' in ability)) {
+    return true;
+  }
+  if (ability.cost !== undefined && !canPay(getPlayer(state, player).pool, ability.cost)) {
+    return false;
+  }
+  if (ability.exhaustSelf === true && getEntity(state, source).exhausted) {
+    return false;
+  }
+  return (ability.payments ?? []).every((payment) =>
+    canPayAdditional(state, player, payment, source),
+  );
+}
+
+/**
  * Every Activated Ability `player` may use right now (rules 376-381).
  *
  * Four gates, all from the rules rather than convenience:

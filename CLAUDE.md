@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 190 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 195 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -959,6 +959,35 @@ Four things are load-bearing:
   from hand available at its printed cost and timing, so nothing about this
   takes an option away.
 
+### A Triggered Ability can cost something
+
+Rule 403 with 356.7. "When I conquer, **you may pay 1 to** ready me", "When a
+friendly unit dies, **you may exhaust me to** draw 1" — the most-printed shape
+left in the corpus once the keywords were spent, and it needed no new
+vocabulary: `TriggeredAbility` gained the same `cost` / `exhaustSelf` /
+`payments` an `ActivatedAbility` has always carried.
+
+**What differs is *when* it is paid.** An Activated Ability pays at activation;
+a Triggered one has no activation, so the price is settled at **402.2**, the
+same step that settles its target. That is the one place a Triggered Ability
+makes choices, so putting the payment anywhere else would need a second
+decision point that does not exist.
+
+Three things follow:
+
+- **A price is always paired with `optional`.** A mandatory one would have to
+  strand the game when it could not be paid; the corpus prints none, and
+  `legalActions` offers only the decline when an optional one is unaffordable.
+  402.4.b then makes declining the only move, which is right — there is nothing
+  else to do.
+- **Every price verb is also an effect verb**, so the parser splits only on a
+  " to " whose lead parses *entirely* as a payment. "You may kill a gear" is an
+  effect and "you may kill me to move an attacking unit" is a price; without
+  that rule the first became an unreadable card, which is how it was caught.
+- **A Play Effect cannot cost an exhaust.** 359.2.c enters a Unit exhausted, so
+  the price is unpayable the moment it would be paid. The engine refuses it
+  rather than waiving it, which is the same direction every other refusal takes.
+
 ### Non-resource ability costs
 
 Rule 356.7 and 377.1, with the payments in `cards/additional-cost.ts` and the
@@ -1816,14 +1845,14 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 190 of the 468 cards that have text**, and the shape of what is
+**Coverage is 195 of the 468 cards that have text**, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 190 |
-| Blocked | 278 |
+| Fully parsed | 195 |
+| Blocked | 273 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 4 times, the next 2, and every one of
@@ -1994,6 +2023,7 @@ What each round actually delivered, for calibrating the next projection:
 | Shared target phrase, attack/defend events, trailing `here` | +12 projected, **+11** delivered |
 | Statics granting a desugaring keyword (801.3.a) | +4 projected, **+4** delivered |
 | Counter (425) | +2 projected, **+2** delivered |
+| Triggered abilities with a price (403, 356.7) | +4 projected, **+5** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic

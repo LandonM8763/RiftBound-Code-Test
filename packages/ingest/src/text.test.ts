@@ -1492,6 +1492,53 @@ describe('the target phrase, shared by every clause that takes one', () => {
   });
 });
 
+describe('a Triggered Ability with a price (403, 356.7)', () => {
+  it('reads "you may pay 1 to ready me"', () => {
+    const parsed = parseCardText('When I conquer, you may pay 1 to ready me.');
+    expect(parsed.unparsed).toHaveLength(0);
+    const ability = parsed.abilities?.triggered?.[0];
+    expect(ability?.optional).toBe(true);
+    expect(ability?.cost).toEqual({ energy: 1, power: [] });
+    expect(ability?.effect.effects).toEqual([{ kind: 'ready' }]);
+  });
+
+  it('414: reads "you may exhaust me to …"', () => {
+    const ability = parseCardText('When a friendly unit dies, you may exhaust me to draw 1.')
+      .abilities?.triggered?.[0];
+    expect(ability?.exhaustSelf).toBe(true);
+    expect(ability?.cost).toBeUndefined();
+  });
+
+  it('135.2.e.5: reads the export`s "Rune" as `[A]`', () => {
+    expect(
+      parseCardText('When you conquer here, you may pay Rune Rune to draw 1.').abilities
+        ?.triggered?.[0]?.cost,
+    ).toEqual({ energy: 0, power: [], anyPower: 2 });
+  });
+
+  it('356.7: reads a non-resource price', () => {
+    expect(
+      parseCardText('When you conquer here, you may spend a buff to draw 1.').abilities
+        ?.triggered?.[0]?.payments,
+    ).toEqual([{ kind: 'spendBuff' }]);
+  });
+
+  it('does not read an ordinary effect as a price', () => {
+    // Every price verb is also an effect verb, so "kill a gear" must stay one.
+    const ability = parseCardText('When you play me, you may kill a gear.').abilities
+      ?.triggered?.[0];
+    expect(ability?.cost).toBeUndefined();
+    expect(ability?.effect.effects).toEqual([{ kind: 'kill' }]);
+  });
+
+  it('does not read a destination as a price', () => {
+    const ability = parseCardText('When you defend here, you may move a friendly unit here to base.')
+      .abilities?.triggered?.[0];
+    // Whether or not the move parses, the "to base" is not a price.
+    expect(ability?.cost).toBeUndefined();
+  });
+});
+
 describe('Counter (425)', () => {
   it('425.3: reads the plain form', () => {
     const parsed = parseCardText('Counter a spell.');

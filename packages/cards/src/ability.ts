@@ -204,6 +204,25 @@ export interface TriggeredAbility {
   readonly limitPerTurn?: number | undefined;
   /** A Dependent Keyword gating this ability (801.1) — "Legion > When ...". */
   readonly dependsOn?: AbilityDependency | undefined;
+  /**
+   * A price the controller pays to perform this — "When I conquer, you may pay
+   * 1 to ready me", "When a friendly unit dies, you may exhaust me to draw 1".
+   *
+   * The same three fields an `ActivatedAbility` carries, because they are the
+   * same thing: 403 runs an ability's cost through rule 356 whatever put the
+   * ability on the Chain. What differs is *when* it is paid — 402.2 is the step
+   * that settles "all choices required for this ability", so this is paid there
+   * rather than at activation.
+   *
+   * Always paired with `optional`. A mandatory cost on a trigger would have to
+   * strand the game when it could not be paid, and the corpus prints none;
+   * an unpayable optional one simply leaves declining as the only choice.
+   */
+  readonly cost?: Cost | undefined;
+  /** 414: exhausting the source is part of the price. */
+  readonly exhaustSelf?: boolean | undefined;
+  /** 356.7: the non-resource parts — "spend a buff", "kill me", "recycle 1". */
+  readonly payments?: readonly CostPayment[] | undefined;
   readonly effect: CardEffect;
 }
 
