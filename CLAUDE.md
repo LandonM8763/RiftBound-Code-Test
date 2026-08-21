@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 222 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 225 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -713,6 +713,21 @@ Four things are load-bearing:
 - **"You or allies" reads as "you".** The engine models no teams and no
   sanctioned Mode of Play has any (485 is the 1v1 Duel), so a player's allies
   are nobody and the two readings coincide everywhere this engine can be played.
+- **The source is a count too, and that is what "deal damage equal to my Might"
+  needs.** `sourceMight`, `sourceKeyword` and `points` read off the effect's own
+  source and its controller rather than off a Board sweep — the same arithmetic
+  in a different place, so `dealDamage` and `giveMight` took the `per` field
+  `draw` already had rather than each growing an amount type.
+
+  `readsMight` answers for `sourceKeyword` as well as `sourceMight`, because
+  `keywordsOf` consults statics exactly as `mightOf` does: a static granting a
+  keyword whose value counts a keyword would recurse the same way. `points` is
+  safe in a grant — it sits on `PlayerState` and touches neither.
+- **`COUNTS` is first-match-wins, and its last rule reads any unknown noun as a
+  tag.** So a new count has to be ordered *before* that one: "your points"
+  added at the end became a count of Units tagged "point", which parses, looks
+  right, and is always 0. That is the plausible-and-wrong card the gap model
+  exists to prevent, produced by rule order rather than by a missing mechanic.
 
 ### State predicates
 
@@ -1987,15 +2002,15 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 222 of the 468 cards that have text** — 214 parsed and 8 hand-authored, and the shape of what is
+**Coverage is 225 of the 468 cards that have text** — 217 parsed and 8 hand-authored, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 214 |
+| Fully parsed | 217 |
 | Hand-authored | 8 |
-| Blocked | 246 |
+| Blocked | 243 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 4 times, the next 2, and every one of
@@ -2172,6 +2187,7 @@ What each round actually delivered, for calibrating the next projection:
 | Static restrictions (rule 002) | +8 projected, **+6** delivered |
 | Guarded effect steps and four more authored entries | **+4** delivered |
 | Counted targets (355.6) | +2 projected, **+3** delivered |
+| Dynamic amounts off the source (143, 807) | **+3** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic

@@ -229,7 +229,14 @@ export type Effect =
    */
   | { readonly kind: 'draw'; readonly count: number; readonly per?: Count | undefined }
   /** Rule 417: mark damage on the target. */
-  | { readonly kind: 'dealDamage'; readonly amount: number }
+  /**
+   * Rule 417: mark damage on the target.
+   *
+   * `per` makes the amount dynamic the way `draw`'s does — "deal damage equal
+   * to my Might" is `amount: 1` scaled by the source's Might, which is the
+   * same arithmetic as "+1 for each …". See `Count`.
+   */
+  | { readonly kind: 'dealDamage'; readonly amount: number; readonly per?: Count | undefined }
   /** Rule 418: clear marked damage from the target. */
   | { readonly kind: 'heal' }
   /**
@@ -251,6 +258,11 @@ export type Effect =
       readonly kind: 'giveMight';
       readonly amount: number;
       readonly minimum?: number | undefined;
+      /**
+       * "+Might equal to my Might this turn" — the same dynamic amount `draw`
+       * and `dealDamage` take, scaling the printed number.
+       */
+      readonly per?: Count | undefined;
     }
   /** Rule 429: Add resources to the controller's Rune Pool. */
   | { readonly kind: 'addEnergy'; readonly count: number }

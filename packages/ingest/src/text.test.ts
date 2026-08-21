@@ -1120,12 +1120,26 @@ describe("static abilities (rules 363-365)", () => {
     ).toHaveLength(1);
   });
 
+  it("reads a Might stated the other way round as the same dynamic grant", () => {
+    // "My Might is increased by X" and "I have +1 Might for each X" are one
+    // statement written two ways, so the second's `readsMight` guard covers
+    // both rather than each having its own builder.
+    const parsed = parseCardText("My Might is increased by your points.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.statics?.[0]).toEqual({
+      affects: { who: "self" },
+      grant: { might: 1, per: { kind: "points", who: "you" } },
+    });
+  });
+
   it("refuses the static clauses that want a mechanic instead", () => {
-    // Each is a real card. A dynamic Might, a duration, a scope the model
-    // cannot name, or a rule change — none is a scope-plus-grant, so each is
-    // refused rather than bent into one.
+    // Each is a real card. A duration, a scope the model cannot name, or a
+    // rule change — none is a scope-plus-grant, so each is refused rather than
+    // bent into one. A *dynamic* Might is no longer here: "increased by your
+    // points" is now the same statement as "+1 Might for each …".
     const beyond = [
-      "My Might is increased by your points.",
+      // "on your trash" is not "in your trash", and a near miss is refused
+      // rather than read as the rule it nearly is.
       "My Might is increased by the number of cards on your trash.",
       "Units you play this turn enter ready.",
       "I can have any number of buffs.",
@@ -2234,5 +2248,42 @@ describe("counted targets (rule 355.6)", () => {
     // than printed is the wrong direction for a *permission*.
     const parsed = parseCardText("Move any number of friendly units to base.");
     expect(parsed.unparsed).not.toEqual([]);
+  });
+});
+
+describe("dynamic amounts (rules 143, 807)", () => {
+  it("reads \"equal to my Might\" as a count that scales the printed number", () => {
+    const parsed = parseCardText(
+      "When I attack, deal damage equal to my Might to an enemy unit here.",
+    );
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.triggered?.[0]?.effect.effects).toEqual([
+      { kind: "dealDamage", amount: 1, per: { kind: "sourceMight" } },
+    ]);
+  });
+
+  it("807: a keyword's value is the same kind of count", () => {
+    const parsed = parseCardText(
+      "When I attack, deal damage equal to my ASSAULT to an enemy unit here.",
+    );
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.triggered?.[0]?.effect.effects).toEqual([
+      { kind: "dealDamage", amount: 1, per: { kind: "sourceKeyword", keyword: "assault" } },
+    ]);
+  });
+
+  it("reads a player's score before the generic tag sweep, which would match nothing", () => {
+    // COUNTS is first-match-wins, and "your <noun>" reads an unknown noun as a
+    // tag. Ordered after it, "your points" became a count of Units tagged
+    // "point" — a card that parses, looks right, and is always 0.
+    const parsed = parseCardText("I have +1 Might for each of your points.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.statics?.[0]?.grant.per).toEqual({ kind: "points", who: "you" });
+  });
+
+  it("refuses a count in a static's grant that would recurse through Might", () => {
+    // `mightOf` consults statics, so a grant counting Might would ask the
+    // static that is asking. Refused rather than allowed to read 0.
+    expect(parseCardText("I have +1 Might for each my Might.").unparsed).not.toEqual([]);
   });
 });

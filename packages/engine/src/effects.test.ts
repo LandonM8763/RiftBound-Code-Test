@@ -202,6 +202,30 @@ const BLESSING = makeSpell(['fury'], {
   },
 });
 
+/** "Deal damage equal to my Might to a unit." — a dynamic amount (143). */
+const REPRISAL = makeSpell(['fury'], {
+  id: cardId('E-042'),
+  name: 'Reprisal',
+  cost: cost(1),
+  timing: 'action',
+  effect: {
+    target: { kind: 'unit', scope: 'enemy' },
+    effects: [{ kind: 'dealDamage', amount: 1, per: { kind: 'sourceMight' } }],
+  },
+});
+
+/** "Deal damage equal to your points to a unit." — a count off the player. */
+const TRIUMPH = makeSpell(['fury'], {
+  id: cardId('E-043'),
+  name: 'Triumph',
+  cost: cost(1),
+  timing: 'action',
+  effect: {
+    target: { kind: 'unit', scope: 'enemy' },
+    effects: [{ kind: 'dealDamage', amount: 1, per: { kind: 'points', who: 'you' } }],
+  },
+});
+
 const FURY_RUNE = makeRune('fury', { id: cardId('E-100') });
 const BATTLEFIELDS = Array.from({ length: 3 }, (_, i) =>
   makeBattlefield({ id: cardId(`E-20${i}`) }),
@@ -225,6 +249,8 @@ const REGISTRY = CardRegistry.from([
   RECKONING,
   WAR_CRY,
   BLESSING,
+  REPRISAL,
+  TRIUMPH,
   FURY_RUNE,
   ...BATTLEFIELDS,
 ] as CardDefinition[]);
@@ -249,6 +275,8 @@ function deck(): DeckList {
       ...Array.from({ length: 3 }, () => RECKONING.id),
       ...Array.from({ length: 2 }, () => WAR_CRY.id),
       ...Array.from({ length: 2 }, () => BLESSING.id),
+      ...Array.from({ length: 2 }, () => REPRISAL.id),
+      ...Array.from({ length: 2 }, () => TRIUMPH.id),
     ],
     runes: Array.from({ length: 8 }, () => FURY_RUNE.id),
     battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
@@ -914,9 +942,9 @@ describe('effects and Combat', () => {
 describe('counted targets (rule 355.6)', () => {
   it('applies the effect to every chosen object', () => {
     let state = withEnergy(inMainPhase('counted'), 1);
-    const [a, first] = onBoard(state, 0, PLAIN, 'base');
+    const [a, first] = onBoard(state, state.activePlayer, PLAIN, 'base');
     state = a;
-    const [b, second] = onBoard(state, 0, PLAIN, 'base');
+    const [b, second] = onBoard(state, state.activePlayer, PLAIN, 'base');
     state = b;
     const [c, cry] = toHand(state, WAR_CRY);
     state = c;
@@ -932,7 +960,7 @@ describe('counted targets (rule 355.6)', () => {
   it('offers one action per combination, and never the same set twice', () => {
     let state = withEnergy(inMainPhase('combinations'), 1);
     for (let i = 0; i < 3; i += 1) {
-      const [next] = onBoard(state, 0, PLAIN, 'base');
+      const [next] = onBoard(state, state.activePlayer, PLAIN, 'base');
       state = next;
     }
     const [withCry, cry] = toHand(state, WAR_CRY);
@@ -951,7 +979,7 @@ describe('counted targets (rule 355.6)', () => {
 
   it('355.6: refuses a set naming the same object twice', () => {
     let state = withEnergy(inMainPhase('duplicate'), 1);
-    const [a, only] = onBoard(state, 0, PLAIN, 'base');
+    const [a, only] = onBoard(state, state.activePlayer, PLAIN, 'base');
     state = a;
     const [b, cry] = toHand(state, WAR_CRY);
     state = b;
@@ -963,11 +991,11 @@ describe('counted targets (rule 355.6)', () => {
 
   it('refuses a set outside the spec\'s bounds', () => {
     let state = withEnergy(inMainPhase('bounds'), 1);
-    const [a, first] = onBoard(state, 0, PLAIN, 'base');
+    const [a, first] = onBoard(state, state.activePlayer, PLAIN, 'base');
     state = a;
-    const [b, second] = onBoard(state, 0, PLAIN, 'base');
+    const [b, second] = onBoard(state, state.activePlayer, PLAIN, 'base');
     state = b;
-    const [c, third] = onBoard(state, 0, PLAIN, 'base');
+    const [c, third] = onBoard(state, state.activePlayer, PLAIN, 'base');
     state = c;
     const [d, cry] = toHand(state, WAR_CRY);
     state = d;
@@ -983,7 +1011,7 @@ describe('counted targets (rule 355.6)', () => {
 
   it('"up to" makes choosing fewer — or none — a legal choice', () => {
     let state = withEnergy(inMainPhase('uptoN'), 1);
-    const [a, only] = onBoard(state, 0, PLAIN, 'base');
+    const [a, only] = onBoard(state, state.activePlayer, PLAIN, 'base');
     state = a;
     const [b, blessing] = toHand(state, BLESSING);
     state = b;
@@ -1000,5 +1028,57 @@ describe('counted targets (rule 355.6)', () => {
     const settled = reduce(reduce(none, { type: 'pass' }).state, { type: 'pass' }).state;
     expect(getEntity(settled, only).buffs).toBe(0);
     checkInvariants(settled);
+  });
+});
+
+describe('dynamic amounts (rules 143, 807)', () => {
+  it('scales the printed number by what the count reads', () => {
+    let state = withEnergy(inMainPhase('dynamic'), 1);
+    const them = state.activePlayer === playerId(0) ? playerId(1) : playerId(0);
+    const [a, mine] = onBoard(state, state.activePlayer, PLAIN, 'base');
+    state = a;
+    const [b, theirs] = onBoard(state, them, PLAIN, 'base');
+    state = b;
+    const [c, reprisal] = toHand(state, REPRISAL);
+    state = c;
+
+    // The source of a Spell's effect is the Spell itself, which has no Might —
+    // 143 is a Unit's stat — so this reads 0 and deals no Valid Damage (417.1.e).
+    state = castSpell(state, reprisal, theirs);
+    expect(getEntity(state, theirs).damage).toBe(0);
+    expect(mightOf(state, mine)).toBe(PLAIN.might);
+    checkInvariants(state);
+  });
+
+  it('reads a count off the player, not the board', () => {
+    let state = withEnergy(inMainPhase('points'), 1);
+    const them = state.activePlayer === playerId(0) ? playerId(1) : playerId(0);
+    const [a, theirs] = onBoard(state, them, PLAIN, 'base');
+    state = a;
+    const [b, triumph] = toHand(state, TRIUMPH);
+    state = b;
+    state = {
+      ...state,
+      players: state.players.map((seat) =>
+        seat.id === state.activePlayer ? { ...seat, points: 3 } : seat,
+      ) as typeof state.players,
+    };
+
+    state = castSpell(state, triumph, theirs);
+    expect(getEntity(state, theirs).damage).toBe(3);
+    checkInvariants(state);
+  });
+
+  it('417.1.e: a count of zero deals nothing rather than negative damage', () => {
+    let state = withEnergy(inMainPhase('zero'), 1);
+    const them = state.activePlayer === playerId(0) ? playerId(1) : playerId(0);
+    const [a, theirs] = onBoard(state, them, PLAIN, 'base');
+    state = a;
+    const [b, triumph] = toHand(state, TRIUMPH);
+    state = b;
+
+    state = castSpell(state, triumph, theirs);
+    expect(getEntity(state, theirs).damage).toBe(0);
+    checkInvariants(state);
   });
 });

@@ -9,7 +9,7 @@
  * sweep asked for a yes/no instead of a number, and one implementation is what
  * stops the two drifting.
  */
-import { type Count } from '@riftbound/cards';
+import { type Count, type ValuedKeywordKind } from '@riftbound/cards';
 
 import {
   entityCard,
@@ -42,6 +42,11 @@ export function countOf(
   source: EntityId | undefined,
   count: Count,
   might?: (state: GameState, unit: EntityId) => number,
+  /**
+   * Injected for the same reason `might` is: a keyword's value is computed by
+   * consulting statics, and this module sits below them.
+   */
+  keywordValue?: (state: GameState, unit: EntityId, keyword: ValuedKeywordKind) => number,
 ): number {
   switch (count.kind) {
     case 'cardsInTrash':
@@ -60,6 +65,29 @@ export function countOf(
         total += countControlled(state, seat, count, source, might);
       }
       return total;
+    }
+
+    // A source-relative count with no source, or one asked where Might cannot
+    // safely be computed, reads 0 — the same answer `here` and `excludeSelf`
+    // already give, and the belt to the parser's braces.
+    case 'sourceMight':
+      return source === undefined || might === undefined ? 0 : might(state, source);
+
+    case 'sourceKeyword':
+      return source === undefined || keywordValue === undefined
+        ? 0
+        : keywordValue(state, source, count.keyword);
+
+    case 'points': {
+      if (count.who === 'you') {
+        return state.players[player]?.points ?? 0;
+      }
+      // 194.2's "any opponent": the one who is doing best, since that is what
+      // every printed wording is measuring against.
+      return Math.max(
+        0,
+        ...state.players.filter((seat) => seat.id !== player).map((seat) => seat.points),
+      );
     }
 
     default: {

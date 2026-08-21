@@ -219,6 +219,23 @@ const COUNTS: readonly {
       ...(m[2] === undefined ? {} : { here: true }),
     }),
   },
+  { pattern: /^my might$/i, build: () => ({ kind: 'sourceMight' }) },
+  {
+    pattern: /^my (assault|shield|legion|level)$/i,
+    build: (m) => {
+      const kind = (m[1] ?? '').toLowerCase();
+      return kind === 'assault' || kind === 'shield'
+        ? { kind: 'sourceKeyword', keyword: kind }
+        : undefined;
+    },
+  },
+  {
+    pattern: /^(your|an opponent's|your opponents') points$/i,
+    build: (m) => ({
+      kind: 'points',
+      who: (m[1] ?? '').toLowerCase() === 'your' ? 'you' : 'opponent',
+    }),
+  },
   {
     pattern: /^(friendly|enemy|your) ([A-Za-z'-]+?)s?(?: (here))?$/i,
     build: (m) => {
@@ -761,6 +778,25 @@ const CLAUSES: readonly ClauseRule[] = [
       effects: [{ kind: 'toHand' }],
       target: { kind: 'trashCard', cardType: (m[1] ?? 'unit').toLowerCase() as CardType },
     }),
+  },
+  {
+    /**
+     * "Deal damage equal to my Might to an enemy unit here."
+     *
+     * The amount is a `Count`, so the arithmetic is the one `draw ... for
+     * each` already uses: a printed 1 scaled by what the count reads.
+     */
+    pattern:
+      /^deal damage equal to (.+?) to (an?|another) (friendly |enemy )?unit( at a battlefield| here)?$/i,
+    build: (m) => {
+      const per = parseCount(m[1] ?? '');
+      return per === undefined
+        ? undefined
+        : {
+            effects: [{ kind: 'dealDamage', amount: 1, per }],
+            target: unitTarget(m[2], m[3], 'unit', m[4]),
+          };
+    },
   },
   {
     // 428 kills any Permanent, so "kill a gear" is the same clause with a
@@ -1780,6 +1816,20 @@ export function parseStatic(line: string): StaticAbility | undefined {
     };
   }
 
+  // "My Might is increased by your points" — the same dynamic Might as "I have
+  // +1 Might for each …", written the other way round. Normalised rather than
+  // given its own builder, so the count still goes through `readsMight`.
+  const increased = text.match(/^(.+?)(?:'s)? might is (increased|reduced) by (.+)$/i);
+  if (increased !== null) {
+    const sign = /^increased$/i.test(increased[2] ?? '') ? '+' : '-';
+    const whose = (increased[1] ?? '').trim();
+    return buildStatic(
+      /^my$/i.test(whose) ? 'I' : whose,
+      `${sign}1 might for each ${increased[3] ?? ''}`,
+      condition,
+    );
+  }
+
   // "<scope> have/has <+N Might | KEYWORD…>". "an additional +1 Might" is the
   // same statement with a word of emphasis in it.
   const have = text.match(/^(.+?) (?:have|has|gets?) (?:an additional )?(.+)$/i);
@@ -1821,7 +1871,7 @@ function buildStatic(
   // the number of enemy units here**". The count multiplies whatever the grant
   // gives, so it is peeled off first and the rest parses as an ordinary grant.
   let per: Count | undefined;
-  const dynamic = body.match(/^(.+?) (?:for each|equal to) (.+)$/i);
+  const dynamic = body.match(/^(.+?) (?:for each|equal to) (?:of )?(.+)$/i);
   if (dynamic !== null) {
     per = parseCount(dynamic[2] ?? '');
     if (per === undefined) {

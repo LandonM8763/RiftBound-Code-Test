@@ -1,4 +1,5 @@
 import type { ControlledKind } from './condition.js';
+import type { ValuedKeywordKind } from './keyword.js';
 
 /**
  * A number read off the game state.
@@ -56,9 +57,45 @@ export type Count =
       readonly mighty?: boolean | undefined;
       /** "each buffed friendly unit" (702) — carries a Buff counter. */
       readonly buffed?: boolean | undefined;
-    };
+    }
+  /**
+   * "deal damage equal to **my Might**" (143) — the source's own effective
+   * Might, statics and Buffs included.
+   *
+   * **Never legal inside a `StaticGrant`**, for the same reason `mighty` is
+   * not: `mightOf` consults statics, so a static granting Might equal to a
+   * Might would recurse straight back through it.
+   */
+  | { readonly kind: 'sourceMight' }
+  /**
+   * "deal damage equal to **my ASSAULT**" (807) — the value of a keyword on
+   * the source.
+   *
+   * Also refused inside a `StaticGrant`: `keywordsOf` consults statics, so a
+   * static granting a keyword whose value counts a keyword would recurse the
+   * same way Might does. `readsMight` answers for both because it is asked at
+   * exactly one place — whether this count may appear in a grant.
+   *
+   * A *kind* rather than a `Keyword`, because only a valued keyword has a
+   * number to read: "equal to my TANK" is not a quantity.
+   */
+  | { readonly kind: 'sourceKeyword'; readonly keyword: ValuedKeywordKind }
+  /**
+   * "My Might is increased by **your points**" — the controller's score.
+   *
+   * Safe in a `StaticGrant`: points sit on `PlayerState` and reading them
+   * touches neither `mightOf` nor `keywordsOf`.
+   */
+  | { readonly kind: 'points'; readonly who: 'you' | 'opponent' };
 
-/** Does evaluating this count require reading Might (and so `mightOf`)? */
+/**
+ * Does evaluating this count require reading Might or keywords — and so
+ * recursing back through the statics that are asking?
+ */
 export function readsMight(count: Count): boolean {
-  return count.kind === 'controlled' && count.mighty === true;
+  return (
+    (count.kind === 'controlled' && count.mighty === true) ||
+    count.kind === 'sourceMight' ||
+    count.kind === 'sourceKeyword'
+  );
 }

@@ -14,7 +14,7 @@ import {
   type Cost,
   type GuardedEffect,
 } from '@riftbound/cards';
-import type { CardEffect, DestinationSpec, Effect, TargetSpec } from '@riftbound/cards';
+import type { CardEffect, Count, DestinationSpec, Effect, TargetSpec } from '@riftbound/cards';
 
 import type { TriggerEventInstance } from './abilities.js';
 import { attach, detach, equipAbilityOf } from './attach.js';
@@ -25,7 +25,7 @@ import { countOf } from './count.js';
 import type { GameEvent } from './events.js';
 import { moveEntity, withEntity, withPlayer } from './mutate.js';
 import { canPay, payFrom } from './play.js';
-import { entersReady, objectForbidden, playerForbidden } from './statics.js';
+import { entersReady, objectForbidden, playerForbidden, unitKeywordValue } from './statics.js';
 import { createTokens, sendToNonBoardZone } from './token.js';
 import type { EntityId, GameState, Location, PlayerId } from './state.js';
 import {
@@ -533,6 +533,26 @@ export function executeEffect(
   return next;
 }
 
+/**
+ * What a dynamic amount multiplies by (see `Count`).
+ *
+ * `mightOf` and `unitKeywordValue` are safe to consult from here: an effect
+ * *executes*, and neither of them consults an executing effect back. That is
+ * exactly the asymmetry that keeps the same counts out of a static's grant.
+ */
+function scale(
+  state: GameState,
+  controller: PlayerId,
+  source: EntityId | undefined,
+  per: Count | undefined,
+): number {
+  return per === undefined
+    ? 1
+    : countOf(state, controller, source, per, mightOf, (at, unit, keyword) =>
+        unitKeywordValue(at, unit, keyword),
+      );
+}
+
 function applyEffect(
   state: GameState,
   controller: PlayerId,
@@ -550,8 +570,7 @@ function applyEffect(
       // "Draw 1 for each of your MIGHTY units": the printed number is per-unit,
       // so the count multiplies it. `mightOf` is safe to consult here — an
       // effect executes, it is not something `mightOf` consults back.
-      const times =
-        effect.per === undefined ? 1 : countOf(state, controller, source, effect.per, mightOf);
+      const times = scale(state, controller, source, effect.per);
       return context.drawCards(state, controller, effect.count * times, events);
     }
 
@@ -559,15 +578,18 @@ function applyEffect(
       if (target === undefined || !onBoard(state, target)) {
         return state;
       }
+      // "Deal damage equal to my Might": the printed number is per-thing and
+      // the count scales it, exactly as `draw`'s does.
+      const dealt = effect.amount * scale(state, controller, source, effect.per);
       // 417.1.e: only a positive amount is Valid Damage, and only Valid Damage
       // is Dealt.
-      if (effect.amount < 1) {
+      if (dealt < 1) {
         return state;
       }
-      events.push({ type: 'damageDealt', unit: target, amount: effect.amount });
+      events.push({ type: 'damageDealt', unit: target, amount: dealt });
       return withEntity(state, target, (current) => ({
         ...current,
-        damage: current.damage + effect.amount,
+        damage: current.damage + dealt,
       }));
     }
 
@@ -587,7 +609,7 @@ function applyEffect(
       // continuing past it. 143.2.b.1 makes that a comparison against the
       // *actual* Might — a Unit already below the floor keeps its value rather
       // than being raised to it, which is what clamping to `>= 0` would do.
-      let amount = effect.amount;
+      let amount = effect.amount * scale(state, controller, source, effect.per);
       if (effect.minimum !== undefined && amount < 0) {
         const room = actualMightOf(state, target) - effect.minimum;
         amount = Math.min(0, Math.max(amount, -Math.max(0, room)));
