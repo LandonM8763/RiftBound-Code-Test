@@ -21,6 +21,7 @@ import {
 } from "@riftbound/cards/testing";
 import { describe, expect, it } from "vitest";
 
+import { activatableAbilities } from "./abilities.js";
 import { assignDamage, combatResult, mightOf, sumMight } from "./combat.js";
 import { keywordsOf, playerForbidden, unitKeywordValue } from "./statics.js";
 import type { GameEvent } from "./events.js";
@@ -772,6 +773,31 @@ describe("static abilities (rules 363-365)", () => {
     },
   });
 
+  /** "Exhaust: Draw 1. Use my abilities only while I'm at a battlefield." */
+  const SENTRY = makeUnit(2, ["fury"], {
+    id: cardId("C-028"),
+    name: "Sentry",
+    cost: cost(1),
+    abilities: {
+      activated: [
+        {
+          cost: cost(0),
+          exhaustSelf: true,
+          effect: { target: { kind: "none" }, effects: [{ kind: "draw", count: 1 }] },
+        },
+      ],
+      statics: [
+        {
+          affects: { who: "self" },
+          grant: { forbid: [{ kind: "activateAbility" }] },
+          // The printed "only while X" is the negation of a restriction's
+          // "while X", which is what `Condition.not` supplies.
+          condition: { kind: "not", condition: { kind: "atBattlefield" } },
+        },
+      ],
+    },
+  });
+
   /** "Your Mechs have +1 Might" — a scope narrowed to a tag (133.8). */
   const FOREMAN = makeUnit(2, ["fury"], {
     id: cardId("C-023"),
@@ -809,6 +835,7 @@ describe("static abilities (rules 363-365)", () => {
     WARDEN_OF_THE_LINE,
     SCORE_DENIER,
     UNTOUCHABLE,
+    SENTRY,
     FURY_RUNE,
     ...BATTLEFIELDS,
   ] as CardDefinition[]);
@@ -828,6 +855,7 @@ describe("static abilities (rules 363-365)", () => {
         ...Array.from({ length: 3 }, () => WARDEN_OF_THE_LINE.id),
         ...Array.from({ length: 3 }, () => SCORE_DENIER.id),
         ...Array.from({ length: 3 }, () => UNTOUCHABLE.id),
+        ...Array.from({ length: 3 }, () => SENTRY.id),
       ],
       runes: Array.from({ length: 8 }, () => FURY_RUNE.id),
       battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
@@ -880,6 +908,25 @@ describe("static abilities (rules 363-365)", () => {
     const [b] = place(state, me, WARDEN_OF_THE_LINE, 0);
     state = b;
     expect(standardMoveDestinations(state, mover)).toEqual([]);
+  });
+
+
+  it("002 with 377: an ability-use restriction removes the activation, not the ability", () => {
+    let state = staticGame("forbid-activate");
+    const me = state.activePlayer;
+
+    // At a Base the condition holds, so nothing is offered.
+    const [a, atBase] = place(state, me, SENTRY, 0);
+    state = moveEntity(a, atBase, playerLocation(me, "base"));
+    const offered = (at: GameState, source: EntityId): number =>
+      activatableAbilities(at, me).filter((one) => one.source === source).length;
+    expect(offered(state, atBase)).toBe(0);
+
+    // The same Unit at a Battlefield can use it: the card removes a permission
+    // while something holds, it does not change what the ability does.
+    const [b, atField] = place(state, me, SENTRY, 0);
+    state = b;
+    expect(offered(state, atField)).toBe(1);
   });
 
   it('002: "opponents can\'t score points" binds the opponent, not the printer', () => {

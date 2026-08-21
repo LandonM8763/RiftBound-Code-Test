@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 232 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 238 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -885,6 +885,39 @@ so the wording needed no `optional` flag on a step. It is refused on a clause
 that chooses nothing: "you may draw 1" read as a bare draw would be mandatory,
 which is a different and stronger card than the one printed.
 
+### Object filters
+
+`ObjectFilter` in `cards/effect.ts`, applied by `matchesFilter` in
+`engine/effects.ts`.
+
+**Both Board sweeps narrow the same way, and that is the whole point.** "Buff an
+**exhausted** friendly unit" is a choice (355.6) and "kill all **damaged** enemy
+units here" is a criterion (355.5.a), so `unit` and `all` ask at different
+moments — but a filter that meant two things would be two sweeps drifting apart,
+so there is one shape and one implementation.
+
+Three things are load-bearing:
+
+- **Every field is a state stored on the entity, never a computed one.**
+  `mightOf` is deliberately absent, so a filter can be asked from anywhere —
+  including places a Might read would recurse. `maxMight` stays on `unit` alone
+  for that reason: it is asked only at play time.
+- **The parser reads the adjectives out of the scope capture**, so every clause
+  that already names a scope gained the narrowing without a pattern change. An
+  adjective the table does not know **refuses the phrase**: read as noise it
+  would widen the card past what it prints.
+- **A capitalised noun that is not a card type is a tag** (133.8), which is how
+  the corpus prints one. A *lowercase* unknown noun is a shape the grammar has
+  not read rather than a tag it should invent, so only the capital qualifies.
+  The tag matches nothing while the export carries none — see
+  [Card data](#card-data) — and `apitcg.ts` records the gap.
+
+This landed with a real bug of exactly the kind it exists to prevent: three
+clause rules assembled the `all` spec inline, and none of them honoured the
+adjective, so "kill all damaged enemy units here" parsed cleanly as "kill all
+enemy units here". `allTarget` is now the single builder, the counterpart to
+`unitTarget` and there for the same reason.
+
 ### Keywords
 
 Rules 800-828, with the data in `cards/keyword.ts`. Rule 801 says a Keyword is
@@ -1230,6 +1263,7 @@ check at the one place that rule lives:
 | `score` | 467 | `conquer`, the Scoring Step, and the `score` effect |
 | `readyByEffect` | 419 | the `ready` effect |
 | `playAwayFromBase` | 355.2 | `validUnitLocations` |
+| `activateAbility` | 377, 380 | `activatableAbilities` |
 
 Three things are load-bearing:
 
@@ -2028,15 +2062,15 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 232 of the 468 cards that have text** — 224 parsed and 8 hand-authored, and the shape of what is
+**Coverage is 238 of the 468 cards that have text** — 230 parsed and 8 hand-authored, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 224 |
+| Fully parsed | 230 |
 | Hand-authored | 8 |
-| Blocked | 236 |
+| Blocked | 230 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 4 times, the next 2, and every one of
@@ -2215,6 +2249,7 @@ What each round actually delivered, for calibrating the next projection:
 | Counted targets (355.6) | +2 projected, **+3** delivered |
 | Dynamic amounts off the source (143, 807) | **+3** delivered |
 | Seven shared clause shapes, read once rather than per card | **+7** delivered |
+| Object filters and ability-use restrictions (002, 377) | **+6** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic

@@ -2360,3 +2360,60 @@ describe("shapes the grammar reads once rather than per card", () => {
     expect(parseCardText("This enters exhausted.").abilities).toBeUndefined();
   });
 });
+
+describe("object filters and ability-use restrictions", () => {
+  it("reads a state adjective out of the scope phrase", () => {
+    const parsed = parseCardText("Buff an exhausted friendly unit.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.effect?.target).toEqual({
+      kind: "unit",
+      scope: "friendly",
+      filter: { exhausted: true },
+    });
+  });
+
+  it("carries the filter into an `all` sweep as well", () => {
+    // Three clause rules assembled this spec inline and none honoured the
+    // adjective, so "kill all damaged enemy units here" silently became "kill
+    // all enemy units here" — a card that parses and is wrong.
+    const parsed = parseCardText("Kill all damaged enemy units here.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.effect?.target).toEqual({
+      kind: "all",
+      scope: "enemy",
+      filter: { damaged: true },
+      here: true,
+    });
+  });
+
+  it("refuses an adjective it does not know rather than reading it as noise", () => {
+    expect(parseCardText("Buff a legendary friendly unit.").unparsed).not.toEqual([]);
+  });
+
+  it("133.8: a capitalised noun that is not a card type is a tag", () => {
+    const parsed = parseCardText("When you play me, ready another friendly Mech.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.triggered?.[0]?.effect.target).toEqual({
+      kind: "unit",
+      scope: "friendly",
+      excludeSelf: true,
+      filter: { tag: "Mech" },
+    });
+  });
+
+  it("002 with 377: \"only while X\" is a restriction gated by not-X", () => {
+    const parsed = parseCardText("Use my abilities only while I'm at a battlefield.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.statics?.[0]).toEqual({
+      affects: { who: "self" },
+      grant: { forbid: [{ kind: "activateAbility" }] },
+      condition: { kind: "not", condition: { kind: "atBattlefield" } },
+    });
+  });
+
+  it("refuses an ability restriction whose predicate it cannot read", () => {
+    expect(
+      parseCardText("Use my abilities only while the moon is full.").unparsed,
+    ).not.toEqual([]);
+  });
+});

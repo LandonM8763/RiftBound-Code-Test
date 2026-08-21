@@ -14,7 +14,14 @@ import {
   type Cost,
   type GuardedEffect,
 } from '@riftbound/cards';
-import type { CardEffect, Count, DestinationSpec, Effect, TargetSpec } from '@riftbound/cards';
+import type {
+  CardEffect,
+  Count,
+  DestinationSpec,
+  Effect,
+  ObjectFilter,
+  TargetSpec,
+} from '@riftbound/cards';
 
 import type { TriggerEventInstance } from './abilities.js';
 import { attach, detach, equipAbilityOf } from './attach.js';
@@ -270,9 +277,45 @@ export function legalTargets(
       if (owner !== controller && objectForbidden(state, unit, 'chosenByOpponent')) {
         return false;
       }
-      return true;
+      return matchesFilter(state, unit, spec.filter);
     })
     .map(({ unit }) => unit);
+}
+
+/**
+ * Does this Game Object match the spec's narrowing (see `ObjectFilter`)?
+ *
+ * One implementation for both sweeps: `legalTargets` asks it when the choice
+ * is made (355.6) and `allTargets` when the effect resolves (355.5.a), and the
+ * two must never disagree about what "damaged" means.
+ */
+function matchesFilter(
+  state: GameState,
+  id: EntityId,
+  filter: ObjectFilter | undefined,
+): boolean {
+  if (filter === undefined) {
+    return true;
+  }
+  const entity = getEntity(state, id);
+  if (filter.damaged !== undefined && entity.damage > 0 !== filter.damaged) {
+    return false;
+  }
+  if (filter.exhausted !== undefined && entity.exhausted !== filter.exhausted) {
+    return false;
+  }
+  if (filter.stunned !== undefined && entity.stunned !== filter.stunned) {
+    return false;
+  }
+  if (filter.buffed !== undefined && entity.buffs > 0 !== filter.buffed) {
+    return false;
+  }
+  // 133.8. The export carries no tags, so this matches nothing today and the
+  // shortfall is recorded as a gap rather than hidden by refusing the clause.
+  if (filter.tag !== undefined && !entityCard(state, id).tags.includes(filter.tag)) {
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -317,6 +360,9 @@ export function allTargets(
       return;
     }
     if (spec.scope === 'enemy' && owner === controller) {
+      return;
+    }
+    if (!matchesFilter(state, id, spec.filter)) {
       return;
     }
     found.push(id);

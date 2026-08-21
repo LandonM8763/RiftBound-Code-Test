@@ -47,6 +47,7 @@ export type {
   DestinationSpec,
   Effect,
   GuardedEffect,
+  ObjectFilter,
   TargetCount,
   TargetSpec,
 } from './effect.js';

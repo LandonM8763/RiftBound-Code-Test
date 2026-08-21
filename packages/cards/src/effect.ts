@@ -21,6 +21,39 @@ import type { Keyword } from './keyword.js';
  * the Check Legality step (358.1).
  */
 /**
+ * Which Game Objects a Board sweep admits, beyond who controls them.
+ *
+ * Shared by `unit` and `all` because they ask the same question at different
+ * moments — one when the card is played (355.6), one when it resolves
+ * (355.5.a) — and a filter that meant two things would be the start of two
+ * sweeps drifting apart.
+ *
+ * Every field is a *state* read off the entity, never a computed one:
+ * `mightOf` is deliberately absent so a filter can be asked from anywhere,
+ * including places a Might read would recurse. `maxMight` stays on `unit`
+ * alone for that reason — it is asked only at play time.
+ */
+export interface ObjectFilter {
+  /** "kill all **damaged** enemy units here" — carries marked damage (417). */
+  readonly damaged?: boolean | undefined;
+  /** "buff an **exhausted** friendly unit" (414). `false` reads as "ready". */
+  readonly exhausted?: boolean | undefined;
+  /** 423: "kill a **stunned** enemy unit". */
+  readonly stunned?: boolean | undefined;
+  /** 702: "**buffed** friendly units". */
+  readonly buffed?: boolean | undefined;
+  /**
+   * 133.8: "ready another friendly **Mech**".
+   *
+   * Answerable by the engine and not by today's data — the export publishes no
+   * tag field, so such a card plays weaker than printed and `apitcg.ts`
+   * records the gap. Refusing the clause instead would hardcode one source's
+   * shortfall into a parser shared across sources.
+   */
+  readonly tag?: string | undefined;
+}
+
+/**
  * How many objects one target spec chooses (rule 355.6).
  *
  * `min` below `max` is the "**up to** 2" wording, where choosing fewer — or
@@ -92,6 +125,8 @@ export type TargetSpec =
        * does not exist to be read wrong.
        */
       readonly cardType?: 'unit' | 'gear' | undefined;
+      /** Narrowing beyond the controller — see `ObjectFilter`. */
+      readonly filter?: ObjectFilter | undefined;
       /**
        * "**up to 2** friendly units", "give **two** friendly units each +1
        * Might" — one choice of several objects rather than several choices.
@@ -127,6 +162,8 @@ export type TargetSpec =
       readonly cardType?: 'unit' | 'gear' | undefined;
       readonly atBattlefield?: boolean | undefined;
       readonly inCombat?: boolean | undefined;
+      /** Narrowing beyond the controller — see `ObjectFilter`. */
+      readonly filter?: ObjectFilter | undefined;
       /**
        * "all units at **my** battlefield" — 355.9's "here", the same
        * source-relative scope `StaticScope.here` uses.

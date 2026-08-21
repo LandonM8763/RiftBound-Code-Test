@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest';
 import { IllegalActionError } from './actions.js';
 import { mightOf } from './combat.js';
 import { conditionMet } from './condition.js';
-import { legalTargets } from './effects.js';
+import { allTargets, legalTargets } from './effects.js';
 import { checkInvariants } from './invariants.js';
 import { currentLegalActions, legalActions } from './legal.js';
 import { moveEntity, withEntity } from './mutate.js';
@@ -1080,5 +1080,51 @@ describe('dynamic amounts (rules 143, 807)', () => {
     state = castSpell(state, triumph, theirs);
     expect(getEntity(state, theirs).damage).toBe(0);
     checkInvariants(state);
+  });
+});
+
+describe('object filters (417, 414, 423, 702, 133.8)', () => {
+  it('narrows a chosen target to the state the card names', () => {
+    let state = withEnergy(inMainPhase('filter'), 1);
+    const [a, ready] = onBoard(state, state.activePlayer, PLAIN, 'base');
+    state = a;
+    const [b, tired] = onBoard(state, state.activePlayer, PLAIN, 'base');
+    state = withEntity(b, tired, (current) => ({ ...current, exhausted: true }));
+
+    const spec = { kind: 'unit', scope: 'friendly', filter: { exhausted: true } } as const;
+    const legal = legalTargets(state, state.activePlayer, spec);
+    expect(legal).toContain(tired);
+    expect(legal).not.toContain(ready);
+  });
+
+  it('narrows an `all` sweep the same way, so the two never disagree', () => {
+    let state = inMainPhase('allfilter');
+    const [a, hurt] = onBoard(state, state.activePlayer, PLAIN, 0);
+    state = withEntity(a, hurt, (current) => ({ ...current, damage: 1 }));
+    const [b, whole] = onBoard(state, state.activePlayer, PLAIN, 0);
+    state = b;
+
+    const every = allTargets(state, state.activePlayer, {
+      kind: 'all',
+      scope: 'friendly',
+      filter: { damaged: true },
+    });
+    expect(every).toContain(hurt);
+    expect(every).not.toContain(whole);
+  });
+
+  it('133.8: a tag filter matches nothing while the data carries no tags', () => {
+    // The engine answers this; today's export does not supply it, so the gap
+    // is recorded rather than the clause refused.
+    let state = inMainPhase('tagfilter');
+    const [a] = onBoard(state, state.activePlayer, PLAIN, 'base');
+    state = a;
+    expect(
+      legalTargets(state, state.activePlayer, {
+        kind: 'unit',
+        scope: 'friendly',
+        filter: { tag: 'Mech' },
+      }),
+    ).toEqual([]);
   });
 });

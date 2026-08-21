@@ -104,7 +104,21 @@ export type Restriction =
    * The inverse of `playTo`: that widens 355.2.a's default, this narrows it to
    * the Base alone.
    */
-  | { readonly kind: 'playAwayFromBase' };
+  | { readonly kind: 'playAwayFromBase' }
+  /**
+   * "Use my abilities only while I'm at a battlefield" (377, 380). Object-facing.
+   *
+   * Stated as a restriction gated by a `StaticAbility.condition` rather than as
+   * a condition on the ability itself, because that is what the card says: a
+   * permission removed while something holds. `Condition.not` is what turns the
+   * printed "only while X" into the "while not X" a restriction wants.
+   *
+   * It reaches *every* ability on its scope. "Use **this** ability only …" is
+   * printed as a separate sentence with nothing tying it to one ability, and no
+   * card in the corpus has two Activated Abilities with only one gated — so
+   * narrowing it would need an index the text does not supply.
+   */
+  | { readonly kind: 'activateAbility' };
 
 /** What a static does to the objects in its scope. */
 export interface StaticGrant {

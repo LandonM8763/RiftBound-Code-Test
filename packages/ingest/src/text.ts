@@ -38,6 +38,7 @@ import {
   type Condition,
   type StaticScope,
   targetCount,
+  type ObjectFilter,
   type TargetCount,
   type TargetSpec,
   type TriggerCondition,
@@ -382,7 +383,13 @@ interface ClauseRule {
 /** What one clause contributes: its effects, its target, and any Destination. */
 interface ClauseResult {
   readonly effects: Effect[];
-  readonly target: TargetSpec;
+  /**
+   * `undefined` means the phrase was refused — `unitTarget` returns it for an
+   * adjective it does not know, and `matchClause` turns that into a refusal of
+   * the whole clause. Distinct from `NO_TARGET`, which is a clause that
+   * legitimately chooses nothing.
+   */
+  readonly target: TargetSpec | undefined;
   /**
    * "Move a friendly unit **and ready it**" — the clause names no target of
    * its own and inherits the run's.
@@ -402,7 +409,43 @@ const SELF: TargetSpec = { kind: 'self' };
 /** The "friendly "/"enemy " prefix a target phrase may carry, or "any". */
 function unitScope(prefix: string | undefined): 'any' | 'friendly' | 'enemy' {
   const word = (prefix ?? '').trim().toLowerCase();
-  return word === 'friendly' ? 'friendly' : word === 'enemy' ? 'enemy' : 'any';
+  return /\bfriendly\b/.test(word) ? 'friendly' : /\benemy\b/.test(word) ? 'enemy' : 'any';
+}
+
+/**
+ * The adjectives a target phrase may carry alongside its scope — "an
+ * **exhausted** friendly unit", "all **damaged** enemy units here".
+ *
+ * Read out of the same capture as the scope rather than given its own group,
+ * so every clause that already names a scope gains the narrowing without a
+ * pattern change. A word that is neither a scope nor a known state refuses the
+ * phrase: an adjective read as noise would widen the card past what it prints.
+ */
+function objectFilter(prefix: string | undefined): ObjectFilter | undefined | 'refused' {
+  const words = (prefix ?? '')
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((word) => word !== '' && word !== 'friendly' && word !== 'enemy' && word !== 'other');
+  if (words.length === 0) {
+    return undefined;
+  }
+  const STATES: Readonly<Record<string, ObjectFilter>> = {
+    damaged: { damaged: true },
+    exhausted: { exhausted: true },
+    ready: { exhausted: false },
+    stunned: { stunned: true },
+    buffed: { buffed: true },
+  };
+  let filter: ObjectFilter = {};
+  for (const word of words) {
+    const state = STATES[word];
+    if (state === undefined) {
+      return 'refused';
+    }
+    filter = { ...filter, ...state };
+  }
+  return filter;
 }
 
 /**
@@ -457,13 +500,20 @@ function unitTarget(
   where: string | undefined,
   /** "with 3 Might or less" (143), an upper bound on effective Might. */
   maxMight?: number | undefined,
-): TargetSpec {
+  /** 133.8's tag, when the noun named one rather than a card type. */
+  tag?: string | undefined,
+): TargetSpec | undefined {
   const cardType = (noun ?? 'unit').trim().toLowerCase();
   const place = (where ?? '').trim().toLowerCase();
   const many = articleCount(article);
+  const filter = objectFilter(scope);
+  if (filter === 'refused') {
+    return undefined;
+  }
   return {
     kind: 'unit',
     scope: unitScope(scope),
+    ...(filter === undefined ? {} : { filter }),
     ...(cardType === 'gear' ? { cardType: 'gear' as const } : {}),
     ...(place === 'at a battlefield' ? { atBattlefield: true } : {}),
     ...(place === 'here' ? { here: true } : {}),
@@ -472,7 +522,24 @@ function unitTarget(
     ...(/\b(?:another|other)\b/i.test(article ?? '') ? { excludeSelf: true } : {}),
     ...(maxMight === undefined ? {} : { maxMight }),
     ...(many === undefined ? {} : { count: many }),
+    ...(tag === undefined ? {} : { filter: { ...(filter ?? {}), tag } }),
   };
+}
+
+/**
+ * 133.8's tag, read off a noun that is not a card type.
+ *
+ * `undefined` for "unit"/"units", which is the ordinary case. Only a
+ * capitalised word qualifies, because that is how the corpus prints a tag and
+ * a lowercase unknown noun is a shape the grammar has not read rather than a
+ * tag it should invent.
+ */
+function tagNoun(noun: string | undefined): string | undefined {
+  const word = (noun ?? '').trim();
+  if (word === '' || /^units?$/i.test(word)) {
+    return undefined;
+  }
+  return word.replace(/s$/, '');
 }
 
 /**
@@ -503,6 +570,37 @@ function articleCount(article: string | undefined): TargetCount | undefined {
     return n === undefined || n < 2 ? undefined : { min: n, max: n };
   }
   return undefined;
+}
+
+/**
+ * The `all` counterpart of `unitTarget` (355.5.a).
+ *
+ * Its own builder for exactly the reason `unitTarget` has one: three clause
+ * rules were each assembling this spec inline, and the first widening — an
+ * adjective in the scope phrase — was honoured by none of them. "Kill all
+ * **damaged** enemy units here" silently became "kill all enemy units here",
+ * which is a card that parses and is wrong.
+ */
+function allTarget(
+  scope: string | undefined,
+  cardType: string | undefined,
+  where: string | undefined,
+): TargetSpec | undefined {
+  const filter = objectFilter(scope);
+  if (filter === 'refused') {
+    return undefined;
+  }
+  const place = (where ?? '').trim().toLowerCase();
+  const type = (cardType ?? 'unit').trim().toLowerCase();
+  return {
+    kind: 'all',
+    scope: unitScope(scope),
+    ...(filter === undefined ? {} : { filter }),
+    ...(type === 'gear' ? { cardType: 'gear' as const } : {}),
+    ...(place === 'here' || place === 'at my battlefield' ? { here: true } : {}),
+    ...(place === 'at battlefields' ? { atBattlefield: true } : {}),
+    ...(place === 'in combat' ? { inCombat: true } : {}),
+  };
 }
 
 const CLAUSES: readonly ClauseRule[] = [
@@ -561,21 +659,12 @@ const CLAUSES: readonly ClauseRule[] = [
      * board instead of the one chosen.
      */
     pattern:
-      /^deal (\d+) (?:damage )?to all (friendly |enemy )?units(?: (here|at my battlefield|at battlefields|in combat))?$/i,
+      /^deal (\d+) (?:damage )?to all ((?:damaged |exhausted |ready |stunned |buffed |friendly |enemy )*)units(?: (here|at my battlefield|at battlefields|in combat))?$/i,
     build: (m) => {
       const n = count(m[1] ?? '');
       if (n === undefined) return undefined;
       const where = (m[3] ?? '').toLowerCase();
-      return {
-        effects: [{ kind: 'dealDamage', amount: n }],
-        target: {
-          kind: 'all',
-          scope: unitScope(m[2]),
-          ...(where === 'here' || where === 'at my battlefield' ? { here: true } : {}),
-          ...(where === 'at battlefields' ? { atBattlefield: true } : {}),
-          ...(where === 'in combat' ? { inCombat: true } : {}),
-        },
-      };
+      return { effects: [{ kind: 'dealDamage', amount: n }], target: allTarget(m[2], 'unit', where) };
     },
   },
   {
@@ -587,7 +676,7 @@ const CLAUSES: readonly ClauseRule[] = [
      * target's location and "to its base" is the Destination.
      */
     pattern:
-      /^move (an?|another|up to (?:\d+|one|two|three|four)|two|three|four) (friendly |enemy )?units?(?: (?:at|from) a battlefield)? (?:to|on) (?:its |your |their )?base$/i,
+      /^move (an?|another|up to (?:\d+|one|two|three|four)|two|three|four) ((?:damaged |exhausted |ready |stunned |buffed |friendly |enemy )*)units?(?: (?:at|from) a battlefield)? (?:to|on) (?:its |your |their )?base$/i,
     build: (m) => ({
       effects: [{ kind: 'move' }],
       target: unitTarget(m[1], m[2], 'unit', 'at a battlefield'),
@@ -596,7 +685,7 @@ const CLAUSES: readonly ClauseRule[] = [
   },
   {
     /** "Kill all gear", "Buff all friendly units" — the same `all` spec. */
-    pattern: /^(kill|buff) all (friendly |enemy )?(unit|gear)s?(?: (here|at my battlefield|at battlefields))?$/i,
+    pattern: /^(kill|buff) all ((?:damaged |exhausted |ready |stunned |buffed |friendly |enemy )*)(unit|gear)s?(?: (here|at my battlefield|at battlefields))?$/i,
     build: (m) => {
       const where = (m[4] ?? '').toLowerCase();
       const cardType = (m[3] ?? 'unit').toLowerCase() as 'unit' | 'gear';
@@ -607,20 +696,14 @@ const CLAUSES: readonly ClauseRule[] = [
       }
       return {
         effects: [{ kind: m[1]?.toLowerCase() === 'kill' ? 'kill' : 'buff' }],
-        target: {
-          kind: 'all',
-          scope: unitScope(m[2]),
-          ...(cardType === 'unit' ? {} : { cardType }),
-          ...(where === 'here' || where === 'at my battlefield' ? { here: true } : {}),
-          ...(where === 'at battlefields' ? { atBattlefield: true } : {}),
-        },
+        target: allTarget(m[2], cardType, where),
       };
     },
   },
   {
     // 417 damages a Unit and nothing else, so the noun is fixed here where
     // `kill` and `toHand` take one — a Gear cannot be damaged.
-    pattern: /^deal (\d+) to (an?|another) (friendly |enemy )?unit( at a battlefield| here)?$/i,
+    pattern: /^deal (\d+) to (an?|another) ((?:damaged |exhausted |ready |stunned |buffed |friendly |enemy )*)unit( at a battlefield| here)?$/i,
     build: (m) => {
       const n = count(m[1] ?? '');
       return n === undefined
@@ -648,7 +731,7 @@ const CLAUSES: readonly ClauseRule[] = [
   },
   {
     pattern:
-      /^give (an?|another|up to (?:\d+|one|two|three|four)|two|three|four) (friendly |enemy )?units?(?: each)?( here| at a battlefield)? ([+-])(\d+) might this turn(?:, to a minimum of (\d+) might)?$/i,
+      /^give (an?|another|up to (?:\d+|one|two|three|four)|two|three|four) ((?:damaged |exhausted |ready |stunned |buffed |friendly |enemy )*)units?(?: each)?( here| at a battlefield)? ([+-])(\d+) might this turn(?:, to a minimum of (\d+) might)?$/i,
     build: (m) => {
       const grant = signedMight(m[4], m[5], m[6]);
       return grant === undefined
@@ -742,7 +825,7 @@ const CLAUSES: readonly ClauseRule[] = [
      * outcome: half a grant is the wrong card.
      */
     pattern:
-      /^give (?:(an?|another) (friendly |enemy )?unit( here)?|(me)) ([a-z][a-z\s\d,-]*?) this turn$/i,
+      /^give (?:(an?|another) ((?:damaged |exhausted |ready |stunned |buffed |friendly |enemy )*)unit( here)?|(me)) ([a-z][a-z\s\d,-]*?) this turn$/i,
     build: (m) => {
       // 801.3.a grants each keyword separately, so "SHIELD 3 and TANK" is two
       // grants on one target rather than an unreadable clause. The whole line
@@ -770,7 +853,7 @@ const CLAUSES: readonly ClauseRule[] = [
     // 355.9.a.1 makes a Unit target a Game Object on the Board, and a Gear is
     // one too — 412's zone move does not care which. Only the sweep narrows.
     pattern:
-      /^return (an?|another) (friendly |enemy )?(unit|gear)( at a battlefield| here)? to (?:its|their) owner'?s? hand$/i,
+      /^return (an?|another) ((?:damaged |exhausted |ready |stunned |buffed |friendly |enemy )*)(unit|gear)( at a battlefield| here)? to (?:its|their) owner'?s? hand$/i,
     build: (m) => ({
       effects: [{ kind: 'toHand' }],
       target: unitTarget(m[1], m[2], m[3], m[4]),
@@ -802,7 +885,7 @@ const CLAUSES: readonly ClauseRule[] = [
      * each` already uses: a printed 1 scaled by what the count reads.
      */
     pattern:
-      /^deal damage equal to (.+?) to (an?|another) (friendly |enemy )?unit( at a battlefield| here)?$/i,
+      /^deal damage equal to (.+?) to (an?|another) ((?:damaged |exhausted |ready |stunned |buffed |friendly |enemy )*)unit( at a battlefield| here)?$/i,
     build: (m) => {
       const per = parseCount(m[1] ?? '');
       return per === undefined
@@ -817,7 +900,7 @@ const CLAUSES: readonly ClauseRule[] = [
     // 428 kills any Permanent, so "kill a gear" is the same clause with a
     // different noun — the sweep narrows and the effect does not change.
     pattern:
-      /^kill (an?|another) (friendly |enemy )?(unit|gear)( at a battlefield| here)?(?: with (\d+) might or less)?$/i,
+      /^kill (an?|another) ((?:damaged |exhausted |ready |stunned |buffed |friendly |enemy )*)(unit|gear)( at a battlefield| here)?(?: with (\d+) might or less)?$/i,
     build: (m) => {
       const bound = m[5] === undefined ? undefined : count(m[5]);
       return m[5] !== undefined && bound === undefined
@@ -828,7 +911,7 @@ const CLAUSES: readonly ClauseRule[] = [
   {
     // Rule 423. Same shape as `kill` above, because the wording is the same and
     // only the verb differs.
-    pattern: /^stun (an?|another) (friendly |enemy )?unit( at a battlefield| here)?$/i,
+    pattern: /^stun (an?|another) ((?:damaged |exhausted |ready |stunned |buffed |friendly |enemy )*)unit( at a battlefield| here)?$/i,
     build: (m) => ({ effects: [{ kind: 'stun' }], target: unitTarget(m[1], m[2], 'unit', m[3]) }),
   },
   {
@@ -839,7 +922,7 @@ const CLAUSES: readonly ClauseRule[] = [
      * base" still reads its printed Destination rather than becoming a free
      * choice — `matchClause` takes the first rule that consumes the line whole.
      */
-    pattern: /^move (an?|another) (friendly |enemy )?unit$/i,
+    pattern: /^move (an?|another) ((?:damaged |exhausted |ready |stunned |buffed |friendly |enemy )*)unit$/i,
     build: (m) => ({
       effects: [{ kind: 'move' }],
       target: unitTarget(m[1], m[2], 'unit', undefined),
@@ -859,12 +942,16 @@ const CLAUSES: readonly ClauseRule[] = [
     // One rule rather than three: the verbs differ and the target phrase does
     // not, which is the whole reason `unitTarget` exists.
     pattern:
-      /^(ready|buff|heal|exhaust) (an?|another|(?:up to )?(?:\d+|one|two|three|four))( other)? (friendly |enemy )?units?( at a battlefield| here)?$/i,
+      /^(ready|buff|heal|exhaust) (an?|another|(?:up to )?(?:\d+|one|two|three|four))( other)? ((?:damaged |exhausted |ready |stunned |buffed |friendly |enemy )*)(units?|[A-Z][A-Za-z'-]+s?)( at a battlefield| here)?$/i,
     build: (m) => ({
       effects: [{ kind: (m[1] ?? '').toLowerCase() as 'ready' | 'buff' | 'heal' | 'exhaust' }],
       // "buff **two other** friendly units": the count and the "other" are one
       // article phrase, so `unitTarget` reads both from the same string.
-      target: unitTarget(`${m[2] ?? ''}${m[3] ?? ''}`, m[4], 'unit', m[5]),
+      //
+      // 133.8: a capitalised noun that is not "unit" is a tag — "ready another
+      // friendly **Mech**". A capital is required because a lowercase noun the
+      // grammar does not know is a shape it has not read, not a tag.
+      target: unitTarget(`${m[2] ?? ''}${m[3] ?? ''}`, m[4], 'unit', m[6], undefined, tagNoun(m[5])),
     }),
   },
   {
@@ -1770,6 +1857,26 @@ const RESTRICTIONS: readonly {
 ];
 
 /** Read one static clause, or `undefined` if it is outside the grammar. */
+/**
+ * A predicate that may be about the *source* rather than the state.
+ *
+ * `parseStatePredicate` deliberately does not answer "I'm buffed" or "I'm at a
+ * battlefield" — those read the source, and a card in hand has neither — so the
+ * two are named here and everything else goes through the shared grammar.
+ * Factored out because two callers need it: the "While …" wrapper and rule
+ * 002's "Use my abilities only while …".
+ */
+function parseSourcePredicate(phrase: string): Condition | undefined {
+  const source = phrase.trim().match(/^i'?m (buffed|at a battlefield)$/i);
+  if (source !== null) {
+    return /buffed/i.test(source[1] ?? '') ? { kind: 'buffed' } : { kind: 'atBattlefield' };
+  }
+  const state = parseStatePredicate(phrase);
+  // A static has no chosen target, so a `targetIs` predicate could never hold
+  // — the same reason a source-relative condition is refused without a source.
+  return state?.kind === 'targetIs' ? undefined : state;
+}
+
 export function parseStatic(line: string): StaticAbility | undefined {
   let text = line.replace(/[.]+$/, '').trim();
   let condition: Condition | undefined;
@@ -1781,20 +1888,7 @@ export function parseStatic(line: string): StaticAbility | undefined {
   // "While you have 8+ runes" needs no rule of its own.
   const whileClause = text.match(/^while (.+?),\s*(.+)$/i);
   if (whileClause !== null) {
-    const predicate = (whileClause[1] ?? '').trim();
-    const source = predicate.match(/^i'?m (buffed|at a battlefield)$/i);
-    condition =
-      source !== null
-        ? /buffed/i.test(source[1] ?? '')
-          ? { kind: 'buffed' }
-          : { kind: 'atBattlefield' }
-        : parseStatePredicate(predicate);
-    // A static has no chosen target, so a `targetIs` predicate could never
-    // hold — the same reason a source-relative condition is refused without a
-    // source. Refused rather than left to read false forever.
-    if (condition?.kind === 'targetIs') {
-      return undefined;
-    }
+    condition = parseSourcePredicate((whileClause[1] ?? '').trim());
     // A "while" the grammar cannot read must fail the card: dropping it would
     // make the static unconditional, which is strictly stronger than printed.
     if (condition === undefined) {
@@ -1810,6 +1904,26 @@ export function parseStatic(line: string): StaticAbility | undefined {
     }
     condition = split.condition;
     text = split.rest;
+  }
+
+  // "Use my abilities only while I'm at a battlefield" (377 with rule 002).
+  //
+  // Read before the `RESTRICTIONS` table because the printed wording is
+  // "only while X" and the model wants "while not X" — the negation is what
+  // makes it the same shape as every other restriction, and `Condition.not`
+  // supplies it. A condition already read off the line would be about the
+  // wrong half, so a wording carrying both is refused.
+  const onlyWhile = text.match(/^use (?:my|this) abilit(?:y|ies) only while (.+)$/i);
+  if (onlyWhile !== null) {
+    const inner = parseSourcePredicate(onlyWhile[1] ?? '');
+    if (inner === undefined || condition !== undefined) {
+      return undefined;
+    }
+    return {
+      affects: { who: 'self' },
+      grant: { forbid: [{ kind: 'activateAbility' }] },
+      condition: { kind: 'not', condition: inner },
+    };
   }
 
   // Rule 002: a clause that takes a permission away rather than adding one.
@@ -2145,11 +2259,16 @@ export function parseEffects(body: string): CardEffect | undefined {
  * invitation to try something else. Falling through would turn a deliberate
  * refusal into a different reading.
  */
-function matchClause(part: string): ClauseResult | undefined {
+function matchClause(part: string): (ClauseResult & { target: TargetSpec }) | undefined {
   for (const candidate of CLAUSES) {
     if (candidate.pattern.test(part)) {
       const match = part.match(candidate.pattern);
-      return match === null ? undefined : candidate.build(match);
+      const built = match === null ? undefined : candidate.build(match);
+      // A refused target phrase refuses the clause: reading "an exhausted
+      // friendly unit" as "a friendly unit" would widen the card.
+      return built === undefined || built.target === undefined
+        ? undefined
+        : { ...built, target: built.target };
     }
   }
   return undefined;

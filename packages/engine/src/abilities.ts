@@ -28,7 +28,12 @@ import {
 
 import { canPayAdditional } from './additional.js';
 import { activeAbilities, attachedTextOf } from './attach.js';
-import { grantedAbilities, grantingStatics, type ActiveStatic } from './statics.js';
+import {
+  grantedAbilities,
+  grantingStatics,
+  objectForbidden,
+  type ActiveStatic,
+} from './statics.js';
 import { abilityCost } from './costs.js';
 import { dependencyMet } from './dependency.js';
 import { canPay } from './play.js';
@@ -203,6 +208,12 @@ export function activatableAbilities(
   const granting = grantingStatics(state);
   for (const source of boardEntities(state, player)) {
     const entity = getEntity(state, source);
+    // Rule 002 with 377: "Use my abilities only while I'm at a battlefield"
+    // removes the permission rather than changing what the ability does, so it
+    // is asked here, where 381's other permissions are.
+    if (objectForbidden(state, source, 'activateAbility')) {
+      continue;
+    }
     // 718.2/718.3: an Attached card's own abilities are Inactive and its
     // Top-Most Card gains the Effect Text's instead, so what a Game Object can
     // do is asked rather than read straight off its card.
