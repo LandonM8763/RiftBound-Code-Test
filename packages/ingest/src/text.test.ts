@@ -938,7 +938,6 @@ describe('static abilities (rules 363-365)', () => {
       'My Might is increased by the number of cards on your trash.',
       'Units you play this turn enter ready.',
       'I can have any number of buffs.',
-      "While I'm at a battlefield, opponents can only play units to their base.",
       'Stunned enemy units here have -8 Might, to a minimum of 1 Might.',
     ];
     for (const text of beyond) {
@@ -1489,6 +1488,84 @@ describe('the target phrase, shared by every clause that takes one', () => {
         excludeSelf: true,
       });
     }
+  });
+});
+
+describe('static restrictions (rule 002)', () => {
+  it('449.1: reads "Units can\'t move to base"', () => {
+    const parsed = parseCardText("Units can't move to base.");
+    expect(parsed.unparsed).toHaveLength(0);
+    expect(parsed.abilities?.statics?.[0]).toEqual({
+      affects: { who: 'any' },
+      grant: { forbid: [{ kind: 'moveToBase' }] },
+    });
+  });
+
+  it('355.9: reads the "from here" form as the same restriction, scoped', () => {
+    expect(parseCardText("Units can't move from here to base.").abilities?.statics?.[0]).toEqual({
+      affects: { who: 'any', here: true },
+      grant: { forbid: [{ kind: 'moveToBase' }] },
+    });
+  });
+
+  it('carries a "While …" condition onto the restriction', () => {
+    expect(
+      parseCardText("While I'm at a battlefield, opponents can't score points.").abilities
+        ?.statics?.[0],
+    ).toEqual({
+      affects: { who: 'enemy' },
+      grant: { forbid: [{ kind: 'score' }] },
+      condition: { kind: 'atBattlefield' },
+    });
+  });
+
+  it('reads two restrictions on one card as two statics', () => {
+    const parsed = parseCardText(
+      "While I'm at a battlefield, opponents can only play units to their base.\n" +
+        "While I'm at a battlefield, spells and abilities can't ready enemy units and gears.",
+    );
+    expect(parsed.unparsed).toHaveLength(0);
+    expect(parsed.abilities?.statics).toHaveLength(2);
+  });
+
+  it('refuses a near-miss rather than reading the nearest match', () => {
+    // Each is a restriction the engine does not enforce. Reading one as its
+    // nearest neighbour would forbid the wrong thing.
+    for (const text of [
+      "Units can't move from here to a battlefield.",
+      "Your opponents' HIDDEN cards can't be revealed here.",
+      "Players can't score here until their third turn.",
+    ]) {
+      expect(parseCardText(text).unparsed, text).toHaveLength(1);
+    }
+  });
+});
+
+describe('reducing Might (143.2)', () => {
+  it('reads the signed form with its printed floor', () => {
+    const parsed = parseCardText('Give a unit -2 Might this turn, to a minimum of 1 Might.');
+    expect(parsed.unparsed).toHaveLength(0);
+    expect(parsed.effect?.effects).toEqual([{ kind: 'giveMight', amount: -2, minimum: 1 }]);
+  });
+
+  it('reads the bare plural as a criterion (355.5.a)', () => {
+    const parsed = parseCardText('Give enemy units -3 Might this turn, to a minimum of 1 Might.');
+    expect(parsed.effect?.target).toEqual({ kind: 'all', scope: 'enemy' });
+    expect(parsed.effect?.effects).toEqual([{ kind: 'giveMight', amount: -3, minimum: 1 }]);
+  });
+
+  it('reads "your other units" as friendly, excluding the source', () => {
+    expect(parseCardText('Give your other units +2 Might this turn.').effect?.target).toEqual({
+      kind: 'all',
+      scope: 'friendly',
+      excludeSelf: true,
+    });
+  });
+
+  it('refuses a floor on a positive grant, which means nothing', () => {
+    expect(
+      parseCardText('Give a unit +2 Might this turn, to a minimum of 1 Might.').unparsed,
+    ).toHaveLength(1);
   });
 });
 

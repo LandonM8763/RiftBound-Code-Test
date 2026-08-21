@@ -373,6 +373,44 @@ function unitScope(prefix: string | undefined): 'any' | 'friendly' | 'enemy' {
 }
 
 /**
+ * "+2 Might this turn", "-2 Might this turn, to a minimum of 1 Might".
+ *
+ * Signed rather than two clause rules, because the two are one effect with
+ * opposite amounts — and the floor only means anything on the negative side,
+ * which is why it is refused on the positive one rather than ignored.
+ */
+function signedMight(
+  sign: string | undefined,
+  digits: string | undefined,
+  floor: string | undefined,
+): Effect | undefined {
+  const n = count(digits ?? '');
+  if (n === undefined) {
+    return undefined;
+  }
+  const amount = sign === '-' ? -n : n;
+  if (floor === undefined) {
+    return { kind: 'giveMight', amount };
+  }
+  const minimum = count(floor);
+  // "+2 Might, to a minimum of 1" is not a wording the corpus prints and not
+  // one this model can mean anything by, so it fails rather than dropping the
+  // clause — a floor silently ignored is a card stronger than printed.
+  if (minimum === undefined || amount >= 0) {
+    return undefined;
+  }
+  return { kind: 'giveMight', amount, minimum };
+}
+
+/** The controller scope a bare plural names — "your units", "enemy units". */
+function pluralScope(whole: string): 'any' | 'friendly' | 'enemy' {
+  if (/\benemy units\b/i.test(whole)) {
+    return 'enemy';
+  }
+  return /\b(?:your|friendly)\b/i.test(whole) ? 'friendly' : 'any';
+}
+
+/**
  * One builder for every "a/another [friendly|enemy] unit/gear [where]" phrase.
  *
  * The four parts are orthogonal and each clause that takes a target captures
@@ -533,27 +571,23 @@ const CLAUSES: readonly ClauseRule[] = [
      * makes a criterion rather than a choice. Listed before the singular so
      * "units" is never read as "a unit".
      */
-    pattern: /^give (friendly |enemy )?units \+(\d+) might this turn$/i,
+    pattern:
+      /^give (?:(?:your|friendly|enemy) )?(?:other )?units ([+-])(\d+) might this turn(?:, to a minimum of (\d+) might)?$/i,
     build: (m) => {
-      const n = count(m[2] ?? '');
-      return n === undefined
+      const grant = signedMight(m[1], m[2], m[3]);
+      return grant === undefined
         ? undefined
-        : {
-            effects: [{ kind: 'giveMight', amount: n }],
-            target: { kind: 'all', scope: unitScope(m[1]) },
-          };
+        : { effects: [grant], target: { kind: 'all', scope: pluralScope(m[0]), ...(/\bother\b/i.test(m[0]) ? { excludeSelf: true } : {}) } };
     },
   },
   {
-    pattern: /^give (an?|another) (friendly |enemy )?unit( here)? \+(\d+) might this turn$/i,
+    pattern:
+      /^give (an?|another) (friendly |enemy )?unit( here| at a battlefield)? ([+-])(\d+) might this turn(?:, to a minimum of (\d+) might)?$/i,
     build: (m) => {
-      const n = count(m[4] ?? '');
-      return n === undefined
+      const grant = signedMight(m[4], m[5], m[6]);
+      return grant === undefined
         ? undefined
-        : {
-            effects: [{ kind: 'giveMight', amount: n }],
-            target: unitTarget(m[1], m[2], 'unit', m[3]),
-          };
+        : { effects: [grant], target: unitTarget(m[1], m[2], 'unit', m[3]) };
     },
   },
   {
@@ -838,12 +872,10 @@ const CLAUSES: readonly ClauseRule[] = [
     build: () => ({ effects: [{ kind: 'recall' }], target: SELF }),
   },
   {
-    pattern: /^give me \+(\d+) might this turn$/i,
+    pattern: /^give me ([+-])(\d+) might this turn(?:, to a minimum of (\d+) might)?$/i,
     build: (m) => {
-      const n = count(m[1] ?? '');
-      return n === undefined
-        ? undefined
-        : { effects: [{ kind: 'giveMight', amount: n }], target: SELF };
+      const grant = signedMight(m[1], m[2], m[3]);
+      return grant === undefined ? undefined : { effects: [grant], target: SELF };
     },
   },
   {
@@ -1370,6 +1402,9 @@ const STATIC_SCOPES: readonly { readonly pattern: RegExp; readonly scope: Static
   { pattern: /^enemy units here$/i, scope: { who: 'enemy', here: true } },
   { pattern: /^enemy units$/i, scope: { who: 'enemy' } },
   { pattern: /^units here$/i, scope: { who: 'any', here: true } },
+  // A bare plural with no controller word is everyone's — "Units can't move to
+  // base" binds the printer's own Units too.
+  { pattern: /^units$/i, scope: { who: 'any' } },
   // "Your units here have GANKING" — the same statement as "friendly units",
   // written from the reader's side rather than the board's.
   { pattern: /^your units here$/i, scope: { who: 'friendly', here: true } },
@@ -1519,6 +1554,80 @@ function mergeAbilities(a: CardAbilities | undefined, b: CardAbilities): CardAbi
   };
 }
 
+/**
+ * Restrictions a static may state (rule 002), by their printed wording.
+ *
+ * A closed table rather than a grammar, and deliberately so: each entry names
+ * one rule the engine enforces at one place, and a wording that is *nearly* one
+ * of these — "units can't move from here to a battlefield" — is a different
+ * restriction the engine does not have. Reading it as the nearest match would
+ * be the plausible-and-wrong card the gap model exists to prevent.
+ *
+ * `scope` is the phrase before the prohibition, read by `scopeNamed` where it
+ * names objects and by `who` where it names players.
+ */
+const RESTRICTIONS: readonly {
+  readonly pattern: RegExp;
+  readonly build: (match: RegExpMatchArray) => StaticAbility | undefined;
+}[] = [
+  {
+    // 449.1: "Units can't move to base", "Units can't move from here to base".
+    pattern: /^(.+?) can'?t move (?:from here )?to base$/i,
+    build: (m) => {
+      const here = /^units? can'?t move from here/i.test(m[0]);
+      const scope = scopeNamed((m[1] ?? '').trim());
+      return scope === undefined
+        ? undefined
+        : {
+            affects: here ? { ...scope, here: true } : scope,
+            grant: { forbid: [{ kind: 'moveToBase' }] },
+          };
+    },
+  },
+  {
+    // 355.2: "Units can't be played here" — place-facing, so the scope names
+    // whose Units it binds and the place is this card's own Location.
+    pattern: /^(.+?) can'?t be played here$/i,
+    build: (m) => {
+      const scope = scopeNamed((m[1] ?? '').trim());
+      return scope === undefined
+        ? undefined
+        : { affects: scope, grant: { forbid: [{ kind: 'playHere' }] } };
+    },
+  },
+  {
+    // 355.6: "I can't be chosen by enemy spells and abilities" — the mirror of
+    // Deflect, which prices the choice rather than removing it.
+    pattern: /^i can'?t be chosen by enemy spells and abilities$/i,
+    build: () => ({
+      affects: { who: 'self' },
+      grant: { forbid: [{ kind: 'chosenByOpponent' }] },
+    }),
+  },
+  {
+    // 467: "opponents can't score points".
+    pattern: /^opponents? can'?t score points$/i,
+    build: () => ({ affects: { who: 'enemy' }, grant: { forbid: [{ kind: 'score' }] } }),
+  },
+  {
+    // 355.2: "opponents can only play units to their base" — the inverse of
+    // 355.2.b's permission.
+    pattern: /^opponents? can only play units to (?:their|your) base$/i,
+    build: () => ({
+      affects: { who: 'enemy' },
+      grant: { forbid: [{ kind: 'playAwayFromBase' }] },
+    }),
+  },
+  {
+    // 419: "spells and abilities can't ready enemy units and gears".
+    pattern: /^spells and abilities can'?t ready (friendly|enemy) units and gears?$/i,
+    build: (m) => ({
+      affects: { who: (m[1] ?? '').toLowerCase() === 'enemy' ? 'enemy' : 'friendly' },
+      grant: { forbid: [{ kind: 'readyByEffect' }] },
+    }),
+  },
+];
+
 /** Read one static clause, or `undefined` if it is outside the grammar. */
 export function parseStatic(line: string): StaticAbility | undefined {
   let text = line.replace(/[.]+$/, '').trim();
@@ -1554,6 +1663,20 @@ export function parseStatic(line: string): StaticAbility | undefined {
     }
     condition = split.condition;
     text = split.rest;
+  }
+
+  // Rule 002: a clause that takes a permission away rather than adding one.
+  // Tried before the grants, because "Units can't be played here" would
+  // otherwise fall through to the "<scope> have <grant>" shape and fail there.
+  for (const rule of RESTRICTIONS) {
+    const match = text.match(rule.pattern);
+    if (match === null) {
+      continue;
+    }
+    const restriction = rule.build(match);
+    return restriction === undefined
+      ? undefined
+      : { ...restriction, ...(condition ? { condition } : {}) };
   }
 
   // "<scope> enter(s) ready" (359.2.c is what this replaces).

@@ -191,13 +191,25 @@ export type Effect =
   /** Rule 418: clear marked damage from the target. */
   | { readonly kind: 'heal' }
   /**
-   * Raise the target's Might until the end of turn.
+   * Change the target's Might until the end of turn. Signed: "+2 Might this
+   * turn" and "-2 Might this turn" are one effect with opposite amounts.
    *
    * Deliberately not a Buff: rule 702.3 caps Buffs at one counter per Unit and
    * 703 fixes each at +1 Might, so a "+2 Might this turn" effect is a Might
-   * modifier, not a Buff. Buffs are a separate mechanic and are not modelled.
+   * modifier, not a Buff. Buffs are a separate mechanic of their own.
+   *
+   * `minimum` is the printed "to a minimum of 1 Might": the reduction stops
+   * there rather than continuing past it. **Measured against the Unit's actual
+   * Might, not its floored one** — 143.2.b.1 says a Might treated as 0 "is not
+   * 0" and that effects calculating increases and decreases use the actual
+   * value, so a Unit already below the floor is not *raised* by a reduction.
+   * Only meaningful with a negative `amount`.
    */
-  | { readonly kind: 'giveMight'; readonly amount: number }
+  | {
+      readonly kind: 'giveMight';
+      readonly amount: number;
+      readonly minimum?: number | undefined;
+    }
   /** Rule 429: Add resources to the controller's Rune Pool. */
   | { readonly kind: 'addEnergy'; readonly count: number }
   | { readonly kind: 'addPower'; readonly domain: Domain; readonly count: number }

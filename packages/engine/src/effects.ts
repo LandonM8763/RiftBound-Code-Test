@@ -10,14 +10,14 @@ import type { CardEffect, DestinationSpec, Effect, TargetSpec } from '@riftbound
 
 import type { TriggerEventInstance } from './abilities.js';
 import { attach, detach, equipAbilityOf } from './attach.js';
-import { mightOf } from './combat.js';
+import { actualMightOf, mightOf } from './combat.js';
 import { conditionMet } from './condition.js';
 import { abilityCost } from './costs.js';
 import { countOf } from './count.js';
 import type { GameEvent } from './events.js';
 import { moveEntity, withEntity, withPlayer } from './mutate.js';
 import { canPay, payFrom } from './play.js';
-import { entersReady } from './statics.js';
+import { entersReady, objectForbidden, playerForbidden } from './statics.js';
 import { createTokens, sendToNonBoardZone } from './token.js';
 import type { EntityId, GameState, Location, PlayerId } from './state.js';
 import {
@@ -249,6 +249,12 @@ export function legalTargets(
         return false;
       }
       if (spec.scope === 'enemy' && owner === controller) {
+        return false;
+      }
+      // 355.6 with rule 002: "I can't be chosen by enemy spells and abilities"
+      // removes the choice rather than pricing it, which is what separates it
+      // from Deflect (809). Its own controller may still choose it.
+      if (owner !== controller && objectForbidden(state, unit, 'chosenByOpponent')) {
         return false;
       }
       return true;
@@ -507,10 +513,22 @@ function applyEffect(
       if (target === undefined || !onBoard(state, target)) {
         return state;
       }
-      events.push({ type: 'mightGranted', unit: target, amount: effect.amount });
+      // "to a minimum of 1 Might": the reduction stops at the floor rather than
+      // continuing past it. 143.2.b.1 makes that a comparison against the
+      // *actual* Might — a Unit already below the floor keeps its value rather
+      // than being raised to it, which is what clamping to `>= 0` would do.
+      let amount = effect.amount;
+      if (effect.minimum !== undefined && amount < 0) {
+        const room = actualMightOf(state, target) - effect.minimum;
+        amount = Math.min(0, Math.max(amount, -Math.max(0, room)));
+      }
+      if (amount === 0) {
+        return state;
+      }
+      events.push({ type: 'mightGranted', unit: target, amount });
       return withEntity(state, target, (current) => ({
         ...current,
-        mightBonus: current.mightBonus + effect.amount,
+        mightBonus: current.mightBonus + amount,
       }));
     }
 
@@ -586,6 +604,13 @@ function applyEffect(
       if (target === undefined || !onBoard(state, target)) {
         return state;
       }
+      // 419 with rule 002: "Spells and abilities can't ready enemy units and
+      // gears". Checked when the effect *runs* rather than when the target is
+      // chosen, because it forbids the readying rather than the choosing —
+      // 358.1's re-check is exactly this kind of question.
+      if (objectForbidden(state, target, 'readyByEffect')) {
+        return state;
+      }
       return withEntity(state, target, (current) => ({ ...current, exhausted: false }));
     }
 
@@ -617,6 +642,12 @@ function applyEffect(
     case 'score': {
       const amount = Math.max(0, effect.amount);
       if (amount === 0) {
+        return state;
+      }
+      // Rule 002: "opponents can't score points" binds every source of points,
+      // not only Conquer and Hold — 471.1.a.1's exemption is about the Final
+      // Point restriction, not about a card that forbids scoring outright.
+      if (playerForbidden(state, controller, 'score')) {
         return state;
       }
       const total = getPlayer(state, controller).points + amount;

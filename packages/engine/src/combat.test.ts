@@ -12,9 +12,11 @@ import { makeBattlefield, makeLegend, makeRune, makeUnit } from '@riftbound/card
 import { describe, expect, it } from 'vitest';
 
 import { assignDamage, combatResult, mightOf, sumMight } from './combat.js';
-import { keywordsOf, unitKeywordValue } from './statics.js';
+import { keywordsOf, playerForbidden, unitKeywordValue } from './statics.js';
 import type { GameEvent } from './events.js';
+import { legalTargets } from './effects.js';
 import { currentLegalActions } from './legal.js';
+import { standardMoveDestinations } from './move.js';
 import { checkInvariants } from './invariants.js';
 import { moveEntity, withEntity } from './mutate.js';
 import { reduce } from './reduce.js';
@@ -678,7 +680,37 @@ describe('static abilities (rules 363-365)', () => {
     },
   });
 
-  /** "Your Mechs have +1 Might" — a scope narrowed to a tag (133.8). */
+  /** "Units can't move to base" (449.1 with rule 002). */
+const WARDEN_OF_THE_LINE = makeUnit(2, ['fury'], {
+  id: cardId('C-025'),
+  name: 'Warden of the Line',
+  cost: cost(1),
+  abilities: {
+    statics: [{ affects: { who: 'any' }, grant: { forbid: [{ kind: 'moveToBase' }] } }],
+  },
+});
+
+/** "Opponents can't score points" (467 with rule 002). */
+const SCORE_DENIER = makeUnit(2, ['fury'], {
+  id: cardId('C-026'),
+  name: 'Score Denier',
+  cost: cost(1),
+  abilities: {
+    statics: [{ affects: { who: 'enemy' }, grant: { forbid: [{ kind: 'score' }] } }],
+  },
+});
+
+/** "I can't be chosen by enemy spells and abilities" (355.6 with rule 002). */
+const UNTOUCHABLE = makeUnit(2, ['fury'], {
+  id: cardId('C-027'),
+  name: 'Untouchable',
+  cost: cost(1),
+  abilities: {
+    statics: [{ affects: { who: 'self' }, grant: { forbid: [{ kind: 'chosenByOpponent' }] } }],
+  },
+});
+
+/** "Your Mechs have +1 Might" — a scope narrowed to a tag (133.8). */
   const FOREMAN = makeUnit(2, ['fury'], {
     id: cardId('C-023'),
     name: 'Foreman',
@@ -710,6 +742,9 @@ describe('static abilities (rules 363-365)', () => {
     BERSERKER,
     FOREMAN,
     MECH,
+    WARDEN_OF_THE_LINE,
+    SCORE_DENIER,
+    UNTOUCHABLE,
     FURY_RUNE,
     ...BATTLEFIELDS,
   ] as CardDefinition[]);
@@ -726,6 +761,9 @@ describe('static abilities (rules 363-365)', () => {
         ...Array.from({ length: 3 }, () => BERSERKER.id),
         ...Array.from({ length: 3 }, () => FOREMAN.id),
         ...Array.from({ length: 3 }, () => MECH.id),
+        ...Array.from({ length: 3 }, () => WARDEN_OF_THE_LINE.id),
+        ...Array.from({ length: 3 }, () => SCORE_DENIER.id),
+        ...Array.from({ length: 3 }, () => UNTOUCHABLE.id),
       ],
       runes: Array.from({ length: 8 }, () => FURY_RUNE.id),
       battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
@@ -763,6 +801,43 @@ describe('static abilities (rules 363-365)', () => {
     // "Your Mechs" includes the source, unlike "other friendly units".
     expect(mightOf(state, foreman)).toBe(3);
     expect(mightOf(state, untagged)).toBe(2);
+  });
+
+  it('002: "Units can\'t move to base" removes the destination entirely', () => {
+    let state = staticGame('forbid-move');
+    const me = state.activePlayer;
+    const [a, mover] = place(state, me, SMALL, 0);
+    state = a;
+
+    // 144.4.b normally always offers the Base; the restriction takes it away,
+    // and without Ganking that leaves the Unit nowhere to go.
+    expect(standardMoveDestinations(state, mover)).toHaveLength(1);
+    const [b] = place(state, me, WARDEN_OF_THE_LINE, 0);
+    state = b;
+    expect(standardMoveDestinations(state, mover)).toEqual([]);
+  });
+
+  it('002: "opponents can\'t score points" binds the opponent, not the printer', () => {
+    let state = staticGame('forbid-score');
+    const me = state.activePlayer;
+    const them = playerId((me + 1) % state.players.length);
+    const [a] = place(state, me, SCORE_DENIER, 1);
+    state = a;
+
+    expect(playerForbidden(state, them, 'score')).toBe(true);
+    expect(playerForbidden(state, me, 'score')).toBe(false);
+  });
+
+  it('002: "I can\'t be chosen by enemy spells" leaves my own choices alone', () => {
+    let state = staticGame('forbid-chosen');
+    const me = state.activePlayer;
+    const them = playerId((me + 1) % state.players.length);
+    const [a, safe] = place(state, me, UNTOUCHABLE, 0);
+    state = a;
+
+    const spec = { kind: 'unit' as const, scope: 'any' as const };
+    expect(legalTargets(state, them, spec)).not.toContain(safe);
+    expect(legalTargets(state, me, spec)).toContain(safe);
   });
 
   it('stops the moment the source leaves the Board (365)', () => {

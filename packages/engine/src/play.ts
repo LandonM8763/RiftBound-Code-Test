@@ -24,7 +24,7 @@ import {
 } from '@riftbound/cards';
 
 import { canPayAdditional } from './additional.js';
-import { extraPlayLocations } from './statics.js';
+import { extraPlayLocations, placeForbidden, playerForbidden } from './statics.js';
 import { totalCost } from './costs.js';
 
 import type { Entity, EntityId, GameState, Location, PlayerId, RunePool } from './state.js';
@@ -109,7 +109,18 @@ export function validUnitLocations(
 ): Location[] {
   const extra = card === undefined ? undefined : extraPlayLocations(state, player, card);
   const locations: Location[] = [playerLocation(player, 'base')];
+  // Rule 002: "Opponents can only play units to their base" narrows 355.2.a to
+  // the Base alone — the exact inverse of `playTo`, which widens it. Checked
+  // before the sweep because it removes every Battlefield at once.
+  if (playerForbidden(state, player, 'playAwayFromBase')) {
+    return locations;
+  }
   state.battlefields.forEach((battlefield, index) => {
+    // "Units can't be played here" (355.2), read off the Battlefield's own
+    // Game Object rather than off the Unit being played.
+    if (placeForbidden(state, index, player, 'playHere')) {
+      return;
+    }
     if (battlefield.controller === player) {
       locations.push({ kind: 'battlefield', index });
       return;

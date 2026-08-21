@@ -20,6 +20,7 @@ import {
   isSourceCondition,
   type CardAbilities,
   type CardDefinition,
+  type Restriction,
   type CardId,
   type Keyword,
   type StaticAbility,
@@ -342,6 +343,86 @@ export function grantedAbilities(
     found.push({ abilities: ability.grant.abilities, from: source });
   }
   return found;
+}
+
+/**
+ * Is `unit` forbidden from `kind` by a static on the Board (rule 002)?
+ *
+ * The object-facing reading: `affects` is judged against the Unit itself, the
+ * same sweep `mightOf` and `keywordsOf` make.
+ */
+export function objectForbidden(
+  state: GameState,
+  unit: EntityId,
+  kind: Restriction['kind'],
+): boolean {
+  for (const { source, controller, ability } of activeStatics(state)) {
+    if (!(ability.grant.forbid ?? []).some((one) => one.kind === kind)) {
+      continue;
+    }
+    if (reaches(state, source, controller, ability.affects, unit)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Is `player` forbidden from `kind` (rule 002)?
+ *
+ * The player-facing reading: only `affects.who` is consulted, and it is read
+ * relative to the *static's* controller — "opponents can't score" on my Unit
+ * forbids you, not me. `here` and `excludeSelf` name objects and so have
+ * nothing to say about a player; a static that sets them alongside a
+ * player-facing restriction is refused at ingest rather than half-honoured.
+ */
+export function playerForbidden(
+  state: GameState,
+  player: PlayerId,
+  kind: Restriction['kind'],
+): boolean {
+  for (const { controller, ability } of activeStatics(state)) {
+    if (!(ability.grant.forbid ?? []).some((one) => one.kind === kind)) {
+      continue;
+    }
+    const who = ability.affects.who;
+    const friendly = controller === player;
+    if (who === 'any' || (who === 'friendly' && friendly) || (who === 'enemy' && !friendly)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Is `battlefield` forbidden to `player` for `kind` (rule 002)?
+ *
+ * The place-facing reading: the place is the static's own source Location,
+ * because every card that prints one of these says "here" on a Battlefield's
+ * own ability (170.5 puts its Game Object at its own index). `affects.who` then
+ * says which players it binds.
+ */
+export function placeForbidden(
+  state: GameState,
+  battlefield: number,
+  player: PlayerId,
+  kind: Restriction['kind'],
+): boolean {
+  for (const { source, controller, ability } of activeStatics(state)) {
+    if (!(ability.grant.forbid ?? []).some((one) => one.kind === kind)) {
+      continue;
+    }
+    const at = getEntity(state, source).location;
+    if (at.kind !== 'battlefield' || at.index !== battlefield) {
+      continue;
+    }
+    const who = ability.affects.who;
+    const friendly = controller === player;
+    if (who === 'any' || (who === 'friendly' && friendly) || (who === 'enemy' && !friendly)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**

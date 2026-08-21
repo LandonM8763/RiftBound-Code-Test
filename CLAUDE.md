@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 204 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 215 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -493,7 +493,7 @@ builds the batch on top of it. Keep that split — a win rate computed inside
 | `condition.ts` | State predicates, asked by statics, cost modifiers, effects and "enters ready" alike |
 | `count.ts` | Numbers read off the state, asked by the same three; also answers `Condition`'s `controls` |
 | `additional.ts` | Additional Costs (356.2): what can be paid, and paying it |
-| `statics.ts` | Static and Passive abilities: Might, granted keywords, entering ready |
+| `statics.ts` | Static and Passive abilities: Might, granted keywords, entering ready, and rule 002's restrictions |
 | `costs.ts` | Rule 356's layers: what a card or ability actually costs to play |
 | `legal.ts` | `legalActions(state, player)` |
 | `view.ts` | Per-player observable view; redacts hidden zones |
@@ -1083,6 +1083,57 @@ by its index instead of slicing `state.chain`, which keeps whatever resolution
 appended. The fuzz harness's count of triggers finalized with a chosen target
 went from 377 to 655 across the same 300 games.
 
+### Static restrictions
+
+Rule 002 with `Restriction` in `cards/static.ts` and three lookups in
+`engine/statics.ts`.
+
+**A static is a scope plus a grant; a restriction is the same shape with the
+opposite sign.** "Units can't move to base", "opponents can't score points", "I
+can't be chosen by enemy spells and abilities" — rule 002 makes card text
+supersede the rules, so removing a permission is the same kind of statement as
+adding one, which is why `forbid` sits on `StaticGrant` beside `keywords` and
+`playTo` rather than becoming a parallel mechanism.
+
+Each variant names one rule the engine already enforces, so honouring it is a
+check at the one place that rule lives:
+
+| Restriction | Rule | Where it is asked |
+|---|---|---|
+| `moveToBase` | 449.1 | `standardMoveDestinations` |
+| `playHere` | 355.2 | `validUnitLocations` |
+| `chosenByOpponent` | 355.6 | `legalTargets` |
+| `score` | 467 | `conquer`, the Scoring Step, and the `score` effect |
+| `readyByEffect` | 419 | the `ready` effect |
+| `playAwayFromBase` | 355.2 | `validUnitLocations` |
+
+Three things are load-bearing:
+
+- **The scope means different things for different variants, and it has to.**
+  `moveToBase`, `chosenByOpponent` and `readyByEffect` are about a Game Object
+  and read `affects` the ordinary way (`objectForbidden`); `score` and
+  `playAwayFromBase` are about a *player*, so only `affects.who` is consulted
+  (`playerForbidden`); `playHere` is about a *place*, and the place is the
+  static's own source Location (`placeForbidden`). Every printed card matches
+  one of those three readings — a Battlefield says "here" about itself, a Unit
+  says "opponents" about players — so the alternative was a scope grammar with
+  three unused halves.
+- **`chosenByOpponent` is the mirror of Deflect, not a variant of it.** 809
+  makes the choice cost more; this removes it. Its own controller may still
+  choose it, which is what the `owner !== controller` guard says.
+- **`RESTRICTIONS` in the parser is a closed table on purpose.** A wording that
+  is *nearly* one of these — "units can't move from here to a battlefield" — is
+  a different restriction the engine does not have, and reading it as the
+  nearest match would forbid the wrong thing. Three of the nine restriction
+  cards stay refused for exactly that reason: one wants a per-player turn count,
+  one wants a reveal mechanic, and one is turn-scoped rather than static.
+
+A forbidden Score does not happen at all, so 470's once-per-turn mark is not set
+either — the Battlefield stays available on a later turn. And a Unit at a
+Battlefield with `moveToBase` forbidden and no Ganking has *nowhere to go*: a
+state the engine had never reached before. 250 fuzz games, 65,717 actions, all
+decided, invariants holding.
+
 ### Where a Unit may be played
 
 Rule 355.2. 355.2.a's default is the controller's Base or a Battlefield they
@@ -1206,6 +1257,13 @@ Five of them encode a rule that is easy to get backwards:
   (317.2.c). Rule 702.3 caps a Unit at one, and a second is silently *not
   placed* (702.3.a) rather than being an error. `checkInvariants` enforces the
   cap. A Unit leaving play loses them (705).
+- **A Might reduction with a printed floor measures against the *actual*
+  Might, not the floored one.** 143.2.b treats a negative Might as 0, but
+  143.2.b.1 is explicit that it "is not 0" and that "effects that calculate
+  Might increases and decreases use the actual value" — so `actualMightOf` is
+  the unfloored sibling of `mightOf`, and "-2 Might, to a minimum of 1" takes
+  *nothing* from a Unit already below the floor rather than raising it to 1.
+  Clamping the result to `>= 0` would have done exactly that.
 - **A `move` is a real Move, and a Recall is not.** `move` Contests its
   Destination (450), can open a Showdown or Combat (451-452), and is followed
   by a Cleanup (453) — the same tail the Standard Move runs, shared as
@@ -1821,7 +1879,8 @@ reduced to "deal 6" is a card that plays, looks right, and is wrong.
 
 It covers `Draw N`, `Deal N to a unit [at a battlefield]`, `Give a unit +N
 Might this turn`, `Give a unit <KEYWORD> [N] this turn`, `Draw N for each <count>`, `Kill`, `Ready`, `Buff`, `Heal`, `Discard N`, `Channel N
-rune(s) [exhausted]`, `ADD` resources including `ADD Rune` for `[A]`, `Counter
+rune(s) [exhausted]`, `ADD` resources including `ADD Rune` for `[A]`, `Give
+[a unit|units|me] ±N Might this turn [, to a minimum of N Might]`, `Counter
 a spell [that costs no more than N [and no more than M Power]]`, `Gain N XP` and
 `Return <a unit|a gear|me|a <type> from your trash> to <its|my|your> owner's hand`; the self-targeting forms
 (`Ready/Buff/Heal/Exhaust/Recall me`, `Give me +N Might this turn`); the
@@ -1845,15 +1904,15 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 204 of the 468 cards that have text** — 200 parsed and 4 hand-authored, and the shape of what is
+**Coverage is 215 of the 468 cards that have text** — 211 parsed and 4 hand-authored, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 200 |
+| Fully parsed | 211 |
 | Hand-authored | 4 |
-| Blocked | 264 |
+| Blocked | 253 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 4 times, the next 2, and every one of
@@ -2027,6 +2086,8 @@ What each round actually delivered, for calibrating the next projection:
 | Triggered abilities with a price (403, 356.7) | +4 projected, **+5** delivered |
 | Might bounds, bare plurals, Base destinations | **+5** delivered |
 | The first authored entries | **+4** delivered |
+| Signed Might with a printed floor (143.2) | +5 projected, **+5** delivered |
+| Static restrictions (rule 002) | +8 projected, **+6** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic
@@ -2059,9 +2120,11 @@ round of this to do.
 
 What the corpus is blocked on now, in the order measurement puts them:
 
-1. **Durations and delayed effects** — "the next spell you play this turn costs
-   5 less", "opponents can't play cards this turn". +2, and the two cards want
-   two different mechanics.
+1. **Durations proper — a restriction or a modifier scoped to *this turn*.**
+   "Opponents can't play cards this turn", "the next spell you play this turn
+   costs 5 less". The *static* half of what used to be filed here is built (see
+   [Static restrictions](#static-restrictions)); what is left needs turn-scoped
+   state rather than a standing statement, and it is +2.
 2. **The rest of statics beyond a scope plus a grant** — "While I'm attacking
    or defending alone" needs a combat-role predicate that `Condition`
    deliberately cannot express, because a condition that reads Might back would

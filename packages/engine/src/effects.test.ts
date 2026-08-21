@@ -95,6 +95,18 @@ const BATTERY = makeGear(['fury'], {
   effect: { target: { kind: 'none' }, effects: [{ kind: 'addEnergy', count: 2 }] },
 });
 
+/** "Give a unit -3 Might this turn, to a minimum of 1 Might." */
+const WITHER = makeSpell(['calm'], {
+  id: cardId('E-036'),
+  name: 'Wither',
+  cost: cost(1),
+  timing: 'action',
+  effect: {
+    target: { kind: 'unit', scope: 'any' },
+    effects: [{ kind: 'giveMight', amount: -3, minimum: 1 }],
+  },
+});
+
 /** "Counter a spell." — a Reaction, since the Chain has to be up (425). */
 const REBUKE = makeSpell(['calm'], {
   id: cardId('E-035'),
@@ -162,6 +174,7 @@ const REGISTRY = CardRegistry.from([
   RAIN,
   DISARM,
   REBUKE,
+  WITHER,
   FURY_RUNE,
   ...BATTLEFIELDS,
 ] as CardDefinition[]);
@@ -182,6 +195,7 @@ function deck(): DeckList {
       ...Array.from({ length: 2 }, () => RAIN.id),
       ...Array.from({ length: 2 }, () => DISARM.id),
       ...Array.from({ length: 2 }, () => REBUKE.id),
+      ...Array.from({ length: 3 }, () => WITHER.id),
     ],
     runes: Array.from({ length: 8 }, () => FURY_RUNE.id),
     battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
@@ -485,6 +499,55 @@ describe('Gear as a target (428)', () => {
 
     expect(after.players[me]!.zones.trash).toContain(gear);
     checkInvariants(after);
+  });
+});
+
+describe('reducing Might with a printed floor (143.2)', () => {
+  it('stops at the floor rather than continuing past it', () => {
+    let state = withEnergy(inMainPhase('wither'), 1);
+    const me = state.activePlayer;
+    const [a, wither] = toHand(state, WITHER);
+    state = a;
+    const [b, victim] = onBoard(state, me, PLAIN, 'base');
+    state = b;
+
+    // PLAIN is 4 Might; -3 to a minimum of 1 lands exactly on the floor.
+    const after = castSpell(state, wither, victim);
+
+    expect(mightOf(after, victim)).toBe(1);
+    expect(after.entities[victim]!.mightBonus).toBe(-3);
+  });
+
+  it('applies only as much as the floor allows', () => {
+    let state = withEnergy(inMainPhase('wither-partial'), 1);
+    const me = state.activePlayer;
+    const [a, wither] = toHand(state, WITHER);
+    state = a;
+    const [b, victim] = onBoard(state, me, PLAIN, 'base');
+    // Already down to 2: only 1 of the 3 may be taken.
+    state = withEntity(b, victim, (current) => ({ ...current, mightBonus: -2 }));
+
+    const after = castSpell(state, wither, victim);
+
+    expect(mightOf(after, victim)).toBe(1);
+    expect(after.entities[victim]!.mightBonus).toBe(-3);
+  });
+
+  it('143.2.b.1: measures against the actual Might, not the floored 0', () => {
+    let state = withEnergy(inMainPhase('wither-negative'), 1);
+    const me = state.activePlayer;
+    const [a, wither] = toHand(state, WITHER);
+    state = a;
+    const [b, victim] = onBoard(state, me, PLAIN, 'base');
+    // Actual Might -1. `mightOf` reports 0, but 143.2.b.1 says it "is not 0"
+    // and that increases and decreases use the actual value — so a reduction
+    // to a minimum of 1 must take nothing, never *raise* it to 1.
+    state = withEntity(b, victim, (current) => ({ ...current, mightBonus: -5 }));
+
+    const after = castSpell(state, wither, victim);
+
+    expect(after.entities[victim]!.mightBonus).toBe(-5);
+    expect(mightOf(after, victim)).toBe(0);
   });
 });
 

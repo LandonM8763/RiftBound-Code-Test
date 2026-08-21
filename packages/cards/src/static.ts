@@ -64,6 +64,48 @@ export interface StaticScope {
   readonly token?: boolean | undefined;
 }
 
+/**
+ * Something a static *forbids*, rather than grants.
+ *
+ * Rule 002 makes card text supersede the rules, so a card that removes a
+ * permission is doing the same kind of thing as one that adds it — which is why
+ * this rides on `StaticGrant` beside `keywords` and `playTo` rather than
+ * becoming a parallel mechanism. Each variant names one rule the engine already
+ * enforces, so honouring it is a check at the one place that rule lives.
+ *
+ * **The scope means different things for different variants**, and it has to:
+ * `moveToBase`, `chosenByOpponent` and `readyByEffect` are about a Game Object
+ * and read `affects` the ordinary way; `score` and `playAwayFromBase` are about
+ * a *player*, so only `affects.who` is consulted; `playHere` is about a
+ * *place*, and the place is the static's own source Location. Every printed
+ * card matches one of those three readings — a Battlefield says "here" about
+ * itself, a Unit says "opponents" about players — so the alternative was a
+ * scope grammar with three unused halves.
+ */
+export type Restriction =
+  /** "Units can't move to base" (449.1). Object-facing. */
+  | { readonly kind: 'moveToBase' }
+  /** "Units can't be played here" (355.2). Place-facing: the source's Location. */
+  | { readonly kind: 'playHere' }
+  /**
+   * "I can't be chosen by enemy spells and abilities" (355.6).
+   *
+   * Object-facing, and the mirror of Deflect (809): where Deflect makes the
+   * choice cost more, this removes it altogether.
+   */
+  | { readonly kind: 'chosenByOpponent' }
+  /** "Opponents can't score points" (467). Player-facing. */
+  | { readonly kind: 'score' }
+  /** "Spells and abilities can't ready enemy units and gears" (419). Object-facing. */
+  | { readonly kind: 'readyByEffect' }
+  /**
+   * "Opponents can only play units to their base" (355.2). Player-facing.
+   *
+   * The inverse of `playTo`: that widens 355.2.a's default, this narrows it to
+   * the Base alone.
+   */
+  | { readonly kind: 'playAwayFromBase' };
+
 /** What a static does to the objects in its scope. */
 export interface StaticGrant {
   /**
@@ -118,6 +160,14 @@ export interface StaticGrant {
    * corpus grants one.
    */
   readonly abilities?: CardAbilities | undefined;
+  /**
+   * Permissions this static takes away (rule 002).
+   *
+   * A list, because one card prints two — "opponents can only play units to
+   * their base" and "spells and abilities can't ready enemy units and gears"
+   * are one Unit's two clauses.
+   */
+  readonly forbid?: readonly Restriction[] | undefined;
   /**
    * A value read off the state, multiplying everything numeric in this grant.
    *

@@ -93,7 +93,11 @@ export { dependencyMet } from './dependency.js';
 export {
   activeStatics,
   entersReady,
+  grantedAbilities,
   keywordsOf,
+  objectForbidden,
+  placeForbidden,
+  playerForbidden,
   staticMight,
   unitHasKeyword,
   unitKeywordValue,

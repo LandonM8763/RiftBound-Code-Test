@@ -43,24 +43,39 @@ export function mightOf(state: GameState, unit: EntityId, role?: CombatRole): nu
   if (card.type !== 'unit') {
     return 0;
   }
+  // 143.2.b: a Might below 0 counts as 0 when summing for damage and when a
+  // spell or ability references it. The unfloored value is 143.2.b.1's, below.
+  return Math.max(0, actualMightOf(state, unit, role));
+}
+
+/**
+ * Might *before* 143.2.b's floor — the "actual value" of 143.2.b.1.
+ *
+ * 143.2.b treats a negative Might as 0 when spells and abilities reference it
+ * and when summing damage, but 143.2.b.1 is explicit that it "is not 0" and
+ * that "effects that calculate Might increases and decreases use the actual
+ * value". So an effect reducing Might "to a minimum of 1" measures against
+ * this, not against `mightOf` — otherwise a Unit already below zero would be
+ * *raised* to 1 by a reduction.
+ */
+export function actualMightOf(state: GameState, unit: EntityId, role?: CombatRole): number {
+  const card = entityCard(state, unit);
+  if (card.type !== 'unit') {
+    return 0;
+  }
   const entity = getEntity(state, unit);
   // 807.1.c: "While I am an attacker, I have +X Might." 814.1.c is the mirror
   // for a defender. 807.2/814.2: multiple instances sum, and the value is read
   // over granted keywords as well as printed ones — a granted Assault is an
-  // Assault (801.3.a).
+  // Assault (801.3.a). Rule 703: each Buff contributes +1 Might. Static Might
+  // (363) is not on the Unit at all, which is why it is asked for.
   const designation =
     role === 'attacker'
       ? unitKeywordValue(state, unit, 'assault')
       : role === 'defender'
         ? unitKeywordValue(state, unit, 'shield')
         : 0;
-  // Rule 703: each Buff contributes +1 Might. 143.2.b: a Might below 0 counts
-  // as 0 when summing for damage. Static Might (363) is not on the Unit at all,
-  // which is why it is asked for rather than stored.
-  return Math.max(
-    0,
-    card.might + entity.mightBonus + entity.buffs + designation + staticMight(state, unit),
-  );
+  return card.might + entity.mightBonus + entity.buffs + designation + staticMight(state, unit);
 }
 
 export function sumMight(state: GameState, units: readonly EntityId[], role?: CombatRole): number {

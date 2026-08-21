@@ -58,7 +58,7 @@ import {
   playableFromFacedown,
   unhide,
 } from './hidden.js';
-import { entersReady } from './statics.js';
+import { entersReady, placeForbidden, playerForbidden } from './statics.js';
 import { sendToNonBoardZone } from './token.js';
 import { Rng } from './rng.js';
 import type {
@@ -689,6 +689,19 @@ function payTriggerCost(
     next = payAdditionalCost(next, player, payment as CostPayment, source, events);
   }
   return next;
+}
+
+/**
+ * Is this Score forbidden (rule 002)?
+ *
+ * Two readings of one restriction, and both are printed: "opponents can't score
+ * points" binds a *player* wherever they are, and "players can't score here"
+ * binds a *place*. Asked together because a Score always has both.
+ */
+function scoringForbidden(state: GameState, battlefield: number, player: PlayerId): boolean {
+  return (
+    playerForbidden(state, player, 'score') || placeForbidden(state, battlefield, player, 'score')
+  );
 }
 
 /** Priority after an item leaves the Chain (rule 312.2.a, 312.2.c). */
@@ -1560,6 +1573,12 @@ function conquer(
   if (battlefield.scoredBy.includes(player)) {
     return { state, events };
   }
+  // Rule 002: "opponents can't score points", "players can't score here". A
+  // forbidden Score does not happen at all, so 470's once-per-turn mark is not
+  // set either — the Battlefield stays available for a later turn.
+  if (scoringForbidden(state, index, player)) {
+    return { state, events };
+  }
 
   let next = markScored(state, index, player);
 
@@ -1884,6 +1903,9 @@ function beginning(state: GameState): ReduceResult {
     const held: number[] = [];
     next.battlefields.forEach((battlefield, index) => {
       if (battlefield.controller !== player || battlefield.scoredBy.includes(player)) {
+        return;
+      }
+      if (scoringForbidden(next, index, player)) {
         return;
       }
       held.push(index);

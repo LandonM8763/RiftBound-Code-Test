@@ -6,7 +6,7 @@
  * (446.3). What it *does* do is apply Contested status, which is the trigger
  * for Showdowns and Combat (190.3.c).
  */
-import { unitHasKeyword } from './statics.js';
+import { objectForbidden, unitHasKeyword } from './statics.js';
 import type { BattlefieldState, EntityId, GameState, Location, PlayerId } from './state.js';
 import {
   battlefieldLocation,
@@ -37,16 +37,20 @@ export function standardMoveDestinations(state: GameState, unit: EntityId): Loca
   };
 
   if (entity.location.kind === 'battlefield') {
-    // 144.4.b: back to the Base, always.
-    const home: Location = { kind: 'player', player, zone: 'base' };
+    // 144.4.b: back to the Base, always — unless a card says otherwise. Rule
+    // 002 lets "Units can't move to base" remove the destination entirely,
+    // which can leave a Unit at a Battlefield with nowhere to go.
+    const home: Location[] = objectForbidden(state, unit, 'moveToBase')
+      ? []
+      : [{ kind: 'player', player, zone: 'base' }];
     // 144.4.c / 810.1.b: Ganking is what makes Battlefield to Battlefield a
     // legal Standard Move. 810.1.c.1-3: it only *adds* this destination — it is
     // not an extra Move and has no cost of its own, so the exhaust in
     // `canStandardMove` is still the whole price.
     if (!unitHasKeyword(state, unit, 'ganking')) {
-      return [home];
+      return home;
     }
-    return [home, ...toBattlefields()];
+    return [...home, ...toBattlefields()];
   }
 
   if (entity.location.zone !== 'base') {
