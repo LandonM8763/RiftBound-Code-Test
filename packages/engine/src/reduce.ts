@@ -6,6 +6,7 @@ import {
   type AdditionalCost,
   type ActivatedAbility,
   type CardDefinition,
+  type CardType,
   type CostPayment,
   type TriggeredAbility,
   type Cost,
@@ -417,6 +418,7 @@ function playCard(
     objects: [card],
     ordinal: getPlayer(next, player).playedThisTurn.length,
     ...(location?.kind === 'battlefield' ? { battlefield: location.index } : {}),
+    ...(fromFacedown === undefined ? {} : { fromFacedown: true }),
   };
 
   if (definition.type === 'spell') {
@@ -455,6 +457,7 @@ function playCard(
     // "when you play a spell" watches this same moment. The trigger goes on the
     // Chain above the Spell and so resolves before it.
     next = raiseEvent(next, played, events);
+    next = raiseChosen(next, player, targets, events, definition.type);
     return { state: next, events };
   }
 
@@ -503,6 +506,7 @@ function playCard(
     { ...played, ...(entersAt.kind === 'battlefield' ? { battlefield: entersAt.index } : {}) },
     events,
   );
+  next = raiseChosen(next, player, targets, events, definition.type);
 
   return { state: next, events };
 }
@@ -587,6 +591,9 @@ function activateAbility(
   // the event, so this fires whether or not the ability ever resolves. The
   // source is the object, which is what a `cardType` filter reads.
   next = raiseEvent(next, { event: 'activateAbility', actor: player, objects: [source] }, events);
+  // 377.3.a.1 puts no card on the Chain for an ability, so nothing chose
+  // "with a spell" here.
+  next = raiseChosen(next, player, targets, events, undefined);
   return { state: next, events };
 }
 
@@ -739,6 +746,40 @@ function afterChainPriority(state: GameState): PlayerId | null {
  * is how one gets forgotten: the Triggered Abilities watching it reach the
  * Chain, *and* the per-turn tally that state predicates read gets incremented.
  */
+/**
+ * 355.6: announce that Game Objects were chosen as Targets.
+ *
+ * One event carrying every chosen object rather than one per object, for the
+ * reason `winCombat` gives: "when you choose a unit" must fire once for a card
+ * that names two, and a per-object event would fire it twice.
+ *
+ * `actor` is the chooser, which is what `filter.byController` reads for the
+ * "when **you** choose me" wording — an opponent choosing the same Unit is a
+ * different event and must not fire it.
+ */
+function raiseChosen(
+  state: GameState,
+  player: PlayerId,
+  targets: readonly EntityId[] | undefined,
+  events: GameEvent[],
+  /** The type of the card doing the choosing — "with a spell" (355.6). */
+  byCardType: CardType | undefined,
+): GameState {
+  const chosen = (targets ?? []).filter((id) => state.entities[id] !== undefined);
+  return chosen.length === 0
+    ? state
+    : raiseEvent(
+        state,
+        {
+          event: 'chosen',
+          actor: player,
+          objects: chosen,
+          ...(byCardType === undefined ? {} : { byCardType }),
+        },
+        events,
+      );
+}
+
 function raiseEvent(
   state: GameState,
   instance: TriggerEventInstance,
@@ -906,8 +947,8 @@ function mulligan(state: GameState, cards: readonly EntityId[]): ReduceResult {
 const EFFECT_CONTEXT: EffectContext = {
   drawCards: (state, player, count, events) => drawCards(state, player, count, events).state,
   queueDeaths: (state, units, events) => queueDeaths(state, units, events),
-  afterMove: (state, player, to, units, events) =>
-    afterMove(state, player, to, events, units),
+  afterMove: (state, player, to, units, events, origins) =>
+    afterMove(state, player, to, events, units, origins),
   raise: (state, instance, events) => raiseEvent(state, instance, events),
 };
 
@@ -1260,7 +1301,13 @@ function moveUnits(
   }
 
   let next = state;
+  // 446: noted before the move, because afterwards the Unit is at `to`.
+  const origins = new Map<EntityId, number>();
   for (const unit of units) {
+    const from = getEntity(state, unit).location;
+    if (from.kind === 'battlefield') {
+      origins.set(unit, from.index);
+    }
     // 144.2: exhausting the Unit is the cost, paid simultaneously (144.3.c).
     next = withEntity(next, unit, (current) => ({ ...current, exhausted: true }));
     next = moveEntity(next, unit, to);
@@ -1275,7 +1322,7 @@ function moveUnits(
     },
   ];
 
-  return { state: afterMove(next, player, to, events, units), events };
+  return { state: afterMove(next, player, to, events, units, origins), events };
 }
 
 /**
@@ -1291,6 +1338,14 @@ function afterMove(
   to: Location,
   events: GameEvent[],
   moved: readonly EntityId[] = [],
+  /**
+   * Where each moved Unit started (446), keyed by id.
+   *
+   * Passed in because by the time this runs the Unit is already at `to`, so
+   * the origin cannot be read off the state — and "when I move **from** a
+   * battlefield" is a question about exactly that end of the Move.
+   */
+  origins: ReadonlyMap<EntityId, number> = new Map(),
 ): GameState {
   let next = state;
 
@@ -1332,6 +1387,7 @@ function afterMove(
         actor: player,
         objects: [unit],
         ...(to.kind === 'battlefield' ? { battlefield: to.index } : {}),
+        ...(origins.get(unit) === undefined ? {} : { origin: origins.get(unit) as number }),
       },
       events,
     );
@@ -1870,7 +1926,15 @@ function awaken(state: GameState): ReduceResult {
     }
   }
 
-  return advance(next, 'beginning', [{ type: 'readied', player, entities: readied }]);
+  const events: GameEvent[] = [{ type: 'readied', player, entities: readied }];
+  // 315.1 readies by the same rule 415 an effect does, so "when you ready a
+  // friendly unit" sees the Awaken too. One event carrying every Unit woken,
+  // the way `winCombat` carries every survivor — one per Unit would fire a
+  // "when you ready" ability once for each.
+  if (readied.length > 0) {
+    next = raiseEvent(next, { event: 'ready', actor: player, objects: readied }, events);
+  }
+  return advance(next, 'beginning', events);
 }
 
 /**

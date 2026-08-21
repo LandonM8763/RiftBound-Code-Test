@@ -344,12 +344,16 @@ describe("trigger subjects and filters", () => {
     expect(ability?.limitPerTurn).toBe(1);
   });
 
-  it('refuses "when I move from a battlefield", which needs an origin', () => {
-    // The Move event carries the destination, not where the Unit came from.
-    // Reading it as any Move would fire on the wrong Moves.
-    expect(
-      parseCardText("When I move from a battlefield, draw 1.").unparsed,
-    ).toHaveLength(1);
+  it('446: reads which end of the Move a Location filter is about', () => {
+    // The Move event carries both ends now, so "from a battlefield" is a
+    // `direction` on the filter rather than a wording the grammar must refuse.
+    const parsed = parseCardText("When I move from a battlefield, draw 1.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.triggered?.[0]?.condition).toEqual({
+      event: "move",
+      subject: "self",
+      filter: { direction: "from" },
+    });
   });
 });
 
@@ -2415,5 +2419,71 @@ describe("object filters and ability-use restrictions", () => {
     expect(
       parseCardText("Use my abilities only while the moon is full.").unparsed,
     ).not.toEqual([]);
+  });
+});
+
+describe("trigger events the reducer now raises", () => {
+  const conditionOf = (text: string) =>
+    parseCardText(text).abilities?.triggered?.map((one) => one.condition);
+
+  it("415: readying, and 416: recycling", () => {
+    expect(conditionOf("When you ready a friendly unit, draw 1.")).toEqual([
+      { event: "ready", subject: "friendly" },
+    ]);
+    expect(conditionOf("When you recycle one or more cards, draw 1.")).toEqual([
+      { event: "recycle", subject: "you" },
+    ]);
+  });
+
+  it("702: spending a Buff", () => {
+    expect(conditionOf("When you spend a buff, draw 1.")).toEqual([
+      { event: "spendBuff", subject: "you" },
+    ]);
+  });
+
+  it('355.6: "with a spell" is about what chose, not about what was chosen', () => {
+    // Read as `cardType` this would ask whether the chosen Unit is a Spell,
+    // which is never true — a filter that can only be false is a dead card.
+    expect(conditionOf("When you choose me with a spell, draw 1.")).toEqual([
+      { event: "chosen", subject: "self", filter: { byController: true, bySource: "spell" } },
+    ]);
+  });
+
+  it("428 with 702 and 133.8: adjectives narrow a death", () => {
+    expect(conditionOf("When a buffed friendly unit dies, draw 1.")).toEqual([
+      { event: "dies", subject: "friendly", filter: { buffed: true } },
+    ]);
+    expect(conditionOf("When another non-Recruit unit you control dies, draw 1.")).toEqual([
+      { event: "dies", subject: "friendly", filter: { excludeSelf: true, excludeTag: "Recruit" } },
+    ]);
+  });
+
+  it("leaves the plain death wordings alone, which the adjective rule could have eaten", () => {
+    // Being first-match-wins, a rule matching "a unit dies" would read it as
+    // friendly-only — a card narrower than printed.
+    expect(conditionOf("When a unit dies, draw 1.")).toEqual([
+      { event: "dies", subject: "any" },
+    ]);
+    expect(conditionOf("When an enemy unit dies, draw 1.")).toEqual([
+      { event: "dies", subject: "enemy" },
+    ]);
+  });
+
+  it("811 and 314: where a card was played from, and whose turn it was", () => {
+    expect(conditionOf("When you play a card from HIDDEN, draw 1.")).toEqual([
+      { event: "played", subject: "you", filter: { fromFacedown: true } },
+    ]);
+    expect(conditionOf("When you play a card on an opponent's turn, draw 1.")).toEqual([
+      { event: "played", subject: "you", filter: { onOpponentTurn: true } },
+    ]);
+  });
+
+  it("446: both ends of a Move, and the mirror of `here`", () => {
+    expect(conditionOf("When I move from a battlefield, draw 1.")).toEqual([
+      { event: "move", subject: "self", filter: { direction: "from" } },
+    ]);
+    expect(
+      conditionOf("When an opponent moves to a battlefield other than mine, draw 1."),
+    ).toEqual([{ event: "move", subject: "enemy", filter: { notHere: true } }]);
   });
 });

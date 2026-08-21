@@ -20,6 +20,7 @@ import {
   type AbilityRef,
   type CardAbilities,
   type ActivatedAbility,
+  type CardType,
   type Cost,
   type TriggerCondition,
   type TriggeredAbility,
@@ -85,6 +86,18 @@ export interface TriggerEventInstance {
    * 1 — "your second card in a turn".
    */
   readonly ordinal?: number | undefined;
+  /**
+   * The type of the card that caused this event, when one did — the "with a
+   * **spell**" of 355.6's choosing. Absent for an event no card caused.
+   */
+  readonly byCardType?: CardType | undefined;
+  /**
+   * Where a Move started (446). `battlefield` is its Destination, so this is
+   * the other end — what "when I move **from** a battlefield" asks about.
+   */
+  readonly origin?: number | undefined;
+  /** 811: the card was played out of the Facedown Zone. */
+  readonly fromFacedown?: boolean | undefined;
 }
 
 /**
@@ -284,7 +297,9 @@ export function matchesTrigger(
     (filter.excludeSelf === true ||
       filter.cardType !== undefined ||
       filter.minEnergy !== undefined ||
-      filter.minPower !== undefined);
+      filter.minPower !== undefined ||
+      filter.buffed !== undefined ||
+      filter.excludeTag !== undefined);
 
   if (!objectSubject && !objectFilter) {
     return true;
@@ -311,16 +326,44 @@ function matchesEvent(
   if (filter === undefined) {
     return true;
   }
+  // "When **you** choose me": an actor constraint alongside an object subject,
+  // which `subject` alone cannot express — it says one or the other.
+  if (filter.byController === true && instance.actor !== controller) {
+    return false;
+  }
+  // "with a **spell**": the type of what caused the event, not of its object.
+  if (filter.bySource !== undefined && instance.byCardType !== filter.bySource) {
+    return false;
+  }
   if (filter.ordinal !== undefined && instance.ordinal !== filter.ordinal) {
     return false;
   }
-  if (filter.here === true) {
-    // 355.9: "here" is the source's own Location.
+  if (filter.fromFacedown !== undefined && (instance.fromFacedown === true) !== filter.fromFacedown) {
+    return false;
+  }
+  // 314: whose turn it is is state, so it is read rather than carried.
+  if (filter.onOpponentTurn === true && instance.actor === state.activePlayer) {
+    return false;
+  }
+  if (filter.here === true || filter.notHere === true) {
+    // 355.9: "here" is the source's own Location. `direction` picks which end
+    // of a Move the comparison is against — the Destination by default.
     const location = state.entities[source]?.location;
     const at = location?.kind === 'battlefield' ? location.index : undefined;
-    if (at === undefined || at !== instance.battlefield) {
+    const where = filter.direction === 'from' ? instance.origin : instance.battlefield;
+    if (at === undefined) {
       return false;
     }
+    if (filter.here === true && at !== where) {
+      return false;
+    }
+    if (filter.notHere === true && (where === undefined || at === where)) {
+      return false;
+    }
+  } else if (filter.direction === 'from' && instance.origin === undefined) {
+    // "When I move from a battlefield" with no origin recorded is not a Move
+    // this condition can be about.
+    return false;
   }
   return true;
 }
@@ -374,6 +417,17 @@ function matchesObjectFilter(
     return false;
   }
   if (filter.minPower !== undefined && (cost?.power.length ?? 0) < filter.minPower) {
+    return false;
+  }
+  // 702: "a **buffed** friendly unit". Read off the entity, which for a Unit
+  // that just died is the pre-move copy `extraSources` kept alive.
+  if (filter.buffed !== undefined && (state.entities[object]?.buffs ?? 0) > 0 !== filter.buffed) {
+    return false;
+  }
+  // 133.8: "another **non-Recruit** unit". Matches nothing to exclude while the
+  // export carries no tags, which makes the condition *wider* than printed —
+  // the same shortfall `ObjectFilter.tag` records as a gap.
+  if (filter.excludeTag !== undefined && card.tags.includes(filter.excludeTag)) {
     return false;
   }
   return true;

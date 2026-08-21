@@ -112,6 +112,34 @@ export type TriggerEvent =
   | 'stun'
   /** One or more cards were discarded (422). */
   | 'discard'
+  /**
+   * A Game Object became ready (415).
+   *
+   * Raised on the *change*, like `stun`: 415.1.c makes readying something
+   * already ready do nothing, so it must not trigger either. The Awaken Phase
+   * raises it too, with every Unit it woke as one event's objects — 315.1 is a
+   * readying like any other.
+   */
+  | 'ready'
+  /** One or more cards were Recycled (416). */
+  | 'recycle'
+  /** A Buff counter was spent (702, 705). */
+  | 'spendBuff'
+  /**
+   * A Game Object was chosen as a Target (355.6).
+   *
+   * Raised once per play or activation, with every chosen object. `actor` is
+   * the player who chose, which is what `filter.byController` reads for the
+   * "when **you** choose me" wording.
+   */
+  | 'chosen'
+  /**
+   * A Permanent left the Board (359.3).
+   *
+   * Distinct from `dies`, which is 428's trash-from-Board alone: this also
+   * covers a bounce to hand, a Banish and a token ceasing to exist (186.1).
+   */
+  | 'leave'
   /** An Activated Ability was used (377.3). */
   | 'activateAbility'
   /**
@@ -161,6 +189,33 @@ export interface TriggerFilter {
   /** "here" (355.9) — the event happened at the source's own Location. */
   readonly here?: boolean | undefined;
   /**
+   * "to a battlefield **other than mine**" — the mirror of `here`.
+   *
+   * Not `here: false`, which would read as "impose nothing": an absent field
+   * has to keep meaning absent, or every condition without one would suddenly
+   * require the event to be elsewhere.
+   */
+  readonly notHere?: boolean | undefined;
+  /**
+   * "When I move **from** a battlefield" versus "when I move **to** one" (446).
+   *
+   * Which end of the Move the Location filters are about. Absent means the
+   * Destination, which is what every other wording asks.
+   */
+  readonly direction?: 'from' | 'to' | undefined;
+  /** "When you play a card **from HIDDEN**" (811) — out of the Facedown Zone. */
+  readonly fromFacedown?: boolean | undefined;
+  /**
+   * "When you play a card **on an opponent's turn**" (314).
+   *
+   * Read against the Turn Player rather than stored on the event: whose turn it
+   * is is already state, and duplicating it onto every instance is a second
+   * source of truth.
+   */
+  readonly onOpponentTurn?: boolean | undefined;
+  /** "another **non-Recruit** unit" — the object must *not* carry this tag. */
+  readonly excludeTag?: string | undefined;
+  /**
    * "your second card in a turn" — the event must be the Nth of its kind for
    * that actor this turn, counting from 1.
    *
@@ -168,6 +223,28 @@ export interface TriggerFilter {
    * ability may fire; this picks out *which* occurrence fires it.
    */
   readonly ordinal?: number | undefined;
+  /**
+   * "When **you** choose me with a spell" — the event's actor is the source's
+   * controller.
+   *
+   * `subject` cannot say this on its own: `self` constrains the *object* and
+   * `you` constrains the *actor*, and this wording needs both at once. Without
+   * it an opponent choosing the source would fire the ability too, which is a
+   * card strictly stronger than printed.
+   */
+  readonly byController?: boolean | undefined;
+  /** "When a **buffed** friendly unit dies" (702) — the object carries a Buff. */
+  readonly buffed?: boolean | undefined;
+  /**
+   * "When you choose me **with a spell**" — the type of the card that *caused*
+   * the event, not of the object it happened to.
+   *
+   * Its own field because `cardType` is about the object: read there, this
+   * wording would ask whether the chosen Unit is a Spell, which is never true.
+   * A filter that can only ever be false is a card that never fires — the
+   * quietly-wrong outcome the gap model exists to prevent.
+   */
+  readonly bySource?: CardType | undefined;
 }
 
 /**

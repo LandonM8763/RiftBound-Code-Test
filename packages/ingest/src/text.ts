@@ -1151,6 +1151,17 @@ const CONDITIONS: readonly {
     },
   },
   {
+    // 811: "when you play a card **from HIDDEN**" — out of the Facedown Zone.
+    // "from face down" is the same wording with the keyword spelled out.
+    pattern: /^you play a card from (?:hidden|face ?down)$/i,
+    build: () => ({ event: 'played', subject: 'you', filter: { fromFacedown: true } }),
+  },
+  {
+    // 314: "when you play a card **on an opponent's turn**".
+    pattern: /^you play a card on an opponent'?s turn$/i,
+    build: () => ({ event: 'played', subject: 'you', filter: { onOpponentTurn: true } }),
+  },
+  {
     // "your second card in a turn" picks out *which* occurrence fires, which is
     // `ordinal` rather than a per-turn limit.
     pattern: /^you play your (second|third|fourth) card in a turn$/i,
@@ -1165,6 +1176,35 @@ const CONDITIONS: readonly {
   // Deaths (428). The subject is what separates these; the event is one.
   { pattern: /^i die$/i, build: () => ({ event: 'dies', subject: 'self' }) },
   { pattern: /^i'?m killed$/i, build: () => ({ event: 'dies', subject: 'self' }) },
+  {
+    /**
+     * "a **buffed** friendly unit dies", "**another non-Recruit** unit you
+     * control dies" — one rule, because the noun phrase is the same and only
+     * the adjectives differ.
+     *
+     * At least one narrowing word is required. Without that this would also
+     * match the bare "a unit dies" and read it as friendly-only, which is a
+     * card narrower than printed — and being first-match-wins, it would win.
+     */
+    pattern:
+      /^(?:a|an|another|one or more) (?=\S*(?:buffed|non-)|.*(?:friendly|you control))(buffed |non-[A-Za-z'-]+ )*(?:friendly )?units? (?:you control )?dies?$/i,
+    build: (m) => {
+      const words = (m[0] ?? '').toLowerCase();
+      const negated = /non-([a-z'-]+)/i.exec(m[0] ?? '');
+      const filter = {
+        ...(/\bbuffed\b/.test(words) ? { buffed: true } : {}),
+        ...(/^another\b/.test(words) ? { excludeSelf: true } : {}),
+        ...(negated === null
+          ? {}
+          : { excludeTag: (negated[1] ?? '').replace(/^./, (c) => c.toUpperCase()) }),
+      };
+      return {
+        event: 'dies',
+        subject: 'friendly',
+        ...(Object.keys(filter).length === 0 ? {} : { filter }),
+      };
+    },
+  },
   {
     pattern: /^(?:a|one or more) friendly units? dies?$/i,
     build: () => ({ event: 'dies', subject: 'friendly' }),
@@ -1204,6 +1244,17 @@ const CONDITIONS: readonly {
   // than treated as any Move.
   { pattern: /^i move$/i, build: () => ({ event: 'move', subject: 'self' }) },
   { pattern: /^i move to a battlefield$/i, build: () => ({ event: 'move', subject: 'self' }) },
+  {
+    // "When I move **from** a battlefield" — the other end of the Move (446).
+    pattern: /^i move from a battlefield$/i,
+    build: () => ({ event: 'move', subject: 'self', filter: { direction: 'from' } }),
+  },
+  {
+    // "to a battlefield **other than mine**" — the mirror of `here`, which is
+    // why it is its own field rather than `here: false`.
+    pattern: /^an opponent moves to a battlefield other than mine$/i,
+    build: () => ({ event: 'move', subject: 'enemy', filter: { notHere: true } }),
+  },
 
   // Combat (466.3).
   { pattern: /^i win (?:a )?combat$/i, build: () => ({ event: 'winCombat', subject: 'self' }) },
@@ -1241,6 +1292,42 @@ const CONDITIONS: readonly {
       event: 'activateAbility',
       subject: 'you',
       filter: { cardType: (m[1] ?? '').toLowerCase() as 'gear' | 'unit' | 'spell' },
+    }),
+  },
+
+  // Readying (415). The Awaken Phase raises this too, which is what the
+  // printed wording means — 315.1 readies by the same rule an effect does.
+  {
+    pattern: /^you ready an? ((?:friendly|enemy) )?(unit|gear)$/i,
+    build: (m) => ({
+      event: 'ready',
+      subject: (m[1] ?? '').trim().toLowerCase() === 'enemy' ? 'enemy' : 'friendly',
+      ...((m[2] ?? 'unit').toLowerCase() === 'gear' ? { filter: { cardType: 'gear' as const } } : {}),
+    }),
+  },
+  { pattern: /^you ready me$/i, build: () => ({ event: 'ready', subject: 'self' }) },
+
+  // Recycling (416) and spending a Buff (702).
+  {
+    pattern: /^you recycle(?: one or more cards| a card| \d+ cards?)?$/i,
+    build: () => ({ event: 'recycle', subject: 'you' }),
+  },
+  { pattern: /^you spend a buff$/i, build: () => ({ event: 'spendBuff', subject: 'you' }) },
+
+  // 355.6: being chosen as a Target. `byController` is what makes "when **you**
+  // choose me" different from an opponent pointing a spell at the same Unit —
+  // `subject: 'self'` constrains the object and this constrains the actor.
+  {
+    pattern: /^you choose me(?: with an? (spell|ability))?$/i,
+    build: (m) => ({
+      event: 'chosen',
+      subject: 'self',
+      filter: {
+        byController: true,
+        // The Spell is what *chose*, so this is `bySource`; read as `cardType`
+        // it would ask whether the chosen Unit is a Spell and never hold.
+        ...(m[1] === undefined ? {} : { bySource: m[1].toLowerCase() as CardType }),
+      },
     }),
   },
 ];

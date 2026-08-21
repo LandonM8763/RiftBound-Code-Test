@@ -125,6 +125,8 @@ export interface EffectContext {
     to: Location,
     units: readonly EntityId[],
     events: GameEvent[],
+    /** 446: where each Unit started, for "when I move from a battlefield". */
+    origins?: ReadonlyMap<EntityId, number>,
   ) => GameState;
   /**
    * Rule 383.2: announce that something happened, so Triggered Abilities
@@ -749,7 +751,16 @@ function applyEffect(
       if (objectForbidden(state, target, 'readyByEffect')) {
         return state;
       }
-      return withEntity(state, target, (current) => ({ ...current, exhausted: false }));
+      // 415.1.c: readying something already ready does nothing, so the event is
+      // raised on the *change* — the same rule `stun` follows for 423.1.a.1.
+      if (!getEntity(state, target).exhausted) {
+        return state;
+      }
+      return context.raise(
+        withEntity(state, target, (current) => ({ ...current, exhausted: false })),
+        { event: 'ready', actor: controller, objects: [target] },
+        events,
+      );
     }
 
     case 'exhaust': {
@@ -764,14 +775,20 @@ function applyEffect(
     // a Burn Out, which is why this takes what it can and stops.
     case 'recycleTop': {
       let next = state;
+      let moved = 0;
       for (let i = 0; i < Math.max(0, effect.count); i += 1) {
         const top = getPlayer(next, controller).zones.mainDeck[0];
         if (top === undefined) {
           break;
         }
         next = moveEntity(next, top, playerLocation(controller, 'mainDeck'), 'bottom');
+        moved += 1;
       }
-      return next;
+      // 416: "when you recycle one or more cards" is one event however many
+      // moved, and none at all when the deck had nothing left (436.4.a).
+      return moved === 0
+        ? next
+        : context.raise(next, { event: 'recycle', actor: controller }, events);
     }
 
     // 467-471: gain points outright. 471.1.a.1 exempts this from the Final
@@ -852,7 +869,11 @@ function applyEffect(
         return state;
       }
       events.push({ type: 'buffSpent', unit: target });
-      return withEntity(state, target, (current) => ({ ...current, buffs: current.buffs - 1 }));
+      return context.raise(
+        withEntity(state, target, (current) => ({ ...current, buffs: current.buffs - 1 })),
+        { event: 'spendBuff', actor: controller, objects: [target] },
+        events,
+      );
     }
 
     // 422: hand to trash, without the card doing anything on the way.
@@ -931,6 +952,10 @@ function applyEffect(
       if (sameLocation(getEntity(state, target).location, destination)) {
         return state;
       }
+      // 446: noted before the move, because afterwards it is at `destination`.
+      const from = getEntity(state, target).location;
+      const origins =
+        from.kind === 'battlefield' ? new Map([[target, from.index]]) : new Map<EntityId, number>();
       const moved = moveEntity(state, target, destination);
       events.push({
         type: 'unitsMoved',
@@ -938,7 +963,7 @@ function applyEffect(
         units: [target],
         battlefield: destination.kind === 'battlefield' ? destination.index : null,
       });
-      return context.afterMove(moved, controller, destination, [target], events);
+      return context.afterMove(moved, controller, destination, [target], events, origins);
     }
 
     // 801.3.a: a granted keyword is as real as a printed one. Stored on the

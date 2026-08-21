@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 238 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 248 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -561,7 +561,7 @@ A `TriggerCondition` is three things rather than one variant:
 
 | Field | Rule | What it says |
 |---|---|---|
-| `event` | 383.2 | What happened: `played`, `dies`, `conquer`, `hold`, `move`, `winCombat`, `attack`, `defend`, `buffed`, `stun`, `discard`, `activateAbility`, `beginningPhase`, `endOfTurn` |
+| `event` | 383.2 | What happened: `played`, `dies`, `conquer`, `hold`, `move`, `winCombat`, `attack`, `defend`, `buffed`, `stun`, `discard`, `activateAbility`, `ready`, `recycle`, `spendBuff`, `chosen`, `beginningPhase`, `endOfTurn` |
 | `subject` | 383.1 | Whose: `self`, `you`, `friendly`, `enemy`, `any` |
 | `filter` | 383.1 | Which: card type, `excludeSelf`, a cost floor, `here`, an ordinal |
 
@@ -585,6 +585,21 @@ Four things about it are load-bearing:
 - **`triggersFor` takes `extraSources`.** A corpse is off the Board, so its own
   Deathknell would never be found; naming it keeps it a candidate *without*
   making it the only one, which is what lets a bystander see the same death.
+
+**A trigger filter may be about the event rather than its object**, and two of
+them have to be. `byController` constrains the *actor* where `subject`
+constrains the object — "when **you** choose me" needs both, and an opponent
+pointing a spell at the same Unit is a different event. `bySource` is the type
+of the card that *caused* the event: read as `cardType`, "with a spell" would
+ask whether the chosen Unit is a Spell and never hold, which is a card that
+never fires rather than a card that fires wrongly.
+
+**A Move carries both its ends** (446). `battlefield` is the Destination and
+`origin` is where the Unit started, noted before the move because afterwards it
+is already at the Destination. `filter.direction` picks which one a Location
+filter is about, and `notHere` is the mirror of `here` — its own field rather
+than `here: false`, because an absent field has to keep meaning "impose
+nothing".
 
 **`attack` and `defend` are rule 464.2.c.3's designations, not the Move that
 caused them.** They are raised when Combat opens, for every Unit the Attacker or
@@ -2062,15 +2077,15 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 238 of the 468 cards that have text** — 230 parsed and 8 hand-authored, and the shape of what is
+**Coverage is 248 of the 468 cards that have text** — 240 parsed and 8 hand-authored, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 230 |
+| Fully parsed | 240 |
 | Hand-authored | 8 |
-| Blocked | 230 |
+| Blocked | 220 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 4 times, the next 2, and every one of
@@ -2250,6 +2265,7 @@ What each round actually delivered, for calibrating the next projection:
 | Dynamic amounts off the source (143, 807) | **+3** delivered |
 | Seven shared clause shapes, read once rather than per card | **+7** delivered |
 | Object filters and ability-use restrictions (002, 377) | **+6** delivered |
+| Five trigger events and six trigger filters | **+10** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic
@@ -2275,10 +2291,27 @@ is the payments that are still refused — "kill *any number of* friendly units"
 "spend any number of buffs" — where a variable count is a choice as well as a
 quantity, so the cost cannot be proven payable before the card is played.
 
-**The trigger tail is now genuinely spent.** The 8 cards a wider condition would
-still buy want 8 *distinct* wordings, and most need a mechanic that does not
-exist — an event for choosing a target among them. There is no third
-round of this to do.
+**The trigger tail was declared spent once and was not.** The claim rested on a
+count of *wordings*, and the wordings genuinely are all distinct — but several
+of them wanted the same missing thing underneath, which is an **event** rather
+than a phrasing. Five were missing: `ready` (415), `recycle` (416),
+`spendBuff` (702), `chosen` (355.6) and, still unbuilt, a Permanent leaving the
+Board. Adding them plus six filters delivered +10.
+
+Two of those filters exist because a subject cannot say what they say:
+
+- **`byController` constrains the *actor* while `subject` constrains the
+  object.** "When **you** choose me with a spell" needs both at once — an
+  opponent pointing a spell at the same Unit is a different event — and
+  `subject` says one or the other.
+- **`bySource` is the type of the card that *caused* the event**, not of the
+  object it happened to. Read as `cardType`, "with a spell" would ask whether
+  the chosen Unit is a Spell, which is never true: a filter that can only be
+  false is a card that never fires.
+
+The lesson generalises past triggers: **count the mechanics the wordings need,
+not the wordings.** A flat tail of distinct phrasings can still sit on a short
+list of missing verbs.
 
 What the corpus is blocked on now, in the order measurement puts them:
 

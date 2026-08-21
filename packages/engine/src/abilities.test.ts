@@ -296,6 +296,80 @@ const SNIPER = makeUnit(2, ["fury"], {
   abilities: { activated: [{ cost: cost(1), effect: DAMAGE_TWO }] },
 });
 
+/** "[0], Exhaust: Ready a friendly unit" — a readying the reducer can drive. */
+const WAKER = makeUnit(2, ["fury"], {
+  id: cardId("A-073"),
+  name: "Waker",
+  cost: cost(1),
+  abilities: {
+    activated: [
+      {
+        cost: cost(0),
+        effect: { target: { kind: "unit", scope: "friendly" }, effects: [{ kind: "ready" }] },
+      },
+    ],
+  },
+});
+
+/** "[0], Exhaust: Kill a unit". */
+const SLAYER = makeUnit(2, ["fury"], {
+  id: cardId("A-074"),
+  name: "Slayer",
+  cost: cost(1),
+  abilities: {
+    activated: [
+      {
+        cost: cost(0),
+        effect: { target: { kind: "unit", scope: "any" }, effects: [{ kind: "kill" }] },
+      },
+    ],
+  },
+});
+
+/** "When you ready a friendly unit, draw 1" (415). */
+const ROUSER = makeUnit(2, ["fury"], {
+  id: cardId("A-070"),
+  name: "Rouser",
+  cost: cost(1),
+  abilities: {
+    triggered: [{ condition: { event: "ready", subject: "friendly" }, effect: DRAW_ONE }],
+  },
+});
+
+/** "When you choose me with a spell, draw 1" (355.6). */
+const BAIT = makeUnit(2, ["fury"], {
+  id: cardId("A-071"),
+  name: "Bait",
+  cost: cost(1),
+  abilities: {
+    triggered: [
+      {
+        condition: {
+          event: "chosen",
+          subject: "self",
+          filter: { byController: true, bySource: "spell" },
+        },
+        effect: DRAW_ONE,
+      },
+    ],
+  },
+});
+
+/** "When a buffed friendly unit dies, draw 1" (702). */
+const MOURNER_OF_BUFFS = makeUnit(2, ["fury"], {
+  id: cardId("A-072"),
+  name: "Buff Mourner",
+  cost: cost(1),
+  abilities: {
+    triggered: [
+      {
+        condition: { event: "dies", subject: "friendly", filter: { buffed: true } },
+        effect: DRAW_ONE,
+      },
+    ],
+  },
+});
+
 const RUNE = makeRune("fury", { id: cardId("A-100") });
 const BATTLEFIELDS = Array.from({ length: 3 }, (_, i) =>
   makeBattlefield({ id: cardId(`A-20${i}`) }),
@@ -411,6 +485,11 @@ const REGISTRY = CardRegistry.from([
   SEER,
   TOLLKEEPER,
   EXECUTE,
+  WAKER,
+  SLAYER,
+  ROUSER,
+  BAIT,
+  MOURNER_OF_BUFFS,
   RUNE,
   ...BATTLEFIELDS,
 ] as CardDefinition[]);
@@ -1690,5 +1769,117 @@ describe("choices for Triggered Abilities (rule 402)", () => {
       }),
     ).toThrow(IllegalActionError);
     expect(victim).toBeDefined();
+  });
+});
+
+describe("events the reducer raises (415, 355.6, 702)", () => {
+  const handSize = (state: GameState, player: PlayerId): number =>
+    state.players[player]!.zones.hand.length;
+
+  /** Activate ability 0 of `source` at `victim` and let the Chain settle. */
+  const use = (state: GameState, source: EntityId, victim: EntityId): GameState =>
+    resolveChain(
+      reduce(state, { type: "activateAbility", source, index: 0, targets: [victim] }).state,
+    );
+
+  it("415.1.c: readying fires on the change, not on the instruction", () => {
+    let state = inMainPhase("ready-event");
+    const me = state.activePlayer;
+    const [a] = withBoardCard(state, ROUSER.id);
+    state = a;
+    const [b, waker] = withBoardCard(state, WAKER.id);
+    state = b;
+    const [c, sleeping] = withBoardCard(state, PLAIN.id);
+    state = withEntity(c, sleeping, (current) => ({ ...current, exhausted: true }));
+
+    const before = handSize(state, me);
+    const woken = use(state, waker, sleeping);
+    expect(getEntity(woken, sleeping).exhausted).toBe(false);
+    expect(handSize(woken, me)).toBe(before + 1);
+
+    // 415.1.c makes readying something already ready do nothing, so nothing
+    // triggers — the same rule `stun` follows for 423.1.a.1.
+    const [d, second] = withBoardCard(woken, WAKER.id);
+    const again = use(d, second, sleeping);
+    expect(handSize(again, me)).toBe(handSize(woken, me));
+  });
+
+  it("315.1: the Awaken Phase raises one event, not one per Unit", () => {
+    let state = createGame({ decks: [deck(), deck()], registry: REGISTRY, seed: "awaken" }).state;
+    while (state.phase === "mulligan") {
+      state = reduce(state, { type: "mulligan", cards: [] }).state;
+    }
+    const me = state.activePlayer;
+    const [a] = withBoardCard(state, ROUSER.id);
+    state = a;
+    for (let i = 0; i < 2; i += 1) {
+      const [next, unit] = withBoardCard(state, PLAIN.id);
+      state = withEntity(next, unit, (current) => ({ ...current, exhausted: true }));
+    }
+
+    expect(state.phase).toBe("awaken");
+    const awoken = reduce(state, { type: "resolvePhase" }).state;
+    // Two Units woken, one event: a per-Unit event would queue this twice.
+    expect(awoken.chain).toHaveLength(1);
+    expect(handSize(resolveChain(awoken), me)).toBe(handSize(state, me) + 1);
+  });
+
+  it("355.6: choosing is an event, and who chose is part of it", () => {
+    let state = inMainPhase("chosen-event");
+    const me = state.activePlayer;
+    const [a, bait] = withBoardCard(state, BAIT.id);
+    // EXECUTE only chooses a Unit at a Battlefield (355.9.b).
+    state = moveEntity(a, bait, battlefieldLocation(0));
+    const [b, execute] = withHandCard(state, EXECUTE.id);
+    state = b;
+
+    const before = handSize(state, me);
+    const played = resolveChain(
+      reduce(state, { type: "playCard", card: execute, targets: [bait] }).state,
+    );
+    // One card drawn, one Spell gone from the hand.
+    expect(handSize(played, me)).toBe(before);
+  });
+
+  it("355.6: an ability chose, so the \"with a spell\" half does not hold", () => {
+    let state = inMainPhase("chosen-by-ability");
+    const me = state.activePlayer;
+    const [a, bait] = withBoardCard(state, BAIT.id);
+    state = a;
+    const [b, sniper] = withBoardCard(state, SNIPER.id);
+    state = b;
+
+    const before = handSize(state, me);
+    // 377.3.a.1 puts no card on the Chain for an ability, so `bySource` is
+    // unset and the filter refuses it.
+    expect(handSize(use(state, sniper, bait), me)).toBe(before);
+  });
+
+  it("702: a death filter reads the Buff off the pre-move copy", () => {
+    let state = inMainPhase("buffed-death");
+    const me = state.activePlayer;
+    const [a] = withBoardCard(state, MOURNER_OF_BUFFS.id);
+    state = a;
+    const [b, slayer] = withBoardCard(state, SLAYER.id);
+    state = b;
+    const [c, victim] = withBoardCard(state, PLAIN.id);
+    state = withEntity(c, victim, (current) => ({ ...current, buffs: 1 }));
+
+    const before = handSize(state, me);
+    expect(handSize(use(state, slayer, victim), me)).toBe(before + 1);
+  });
+
+  it("702: an unbuffed death does not match the same filter", () => {
+    let state = inMainPhase("plain-death");
+    const me = state.activePlayer;
+    const [a] = withBoardCard(state, MOURNER_OF_BUFFS.id);
+    state = a;
+    const [b, slayer] = withBoardCard(state, SLAYER.id);
+    state = b;
+    const [c, victim] = withBoardCard(state, PLAIN.id);
+    state = c;
+
+    const before = handSize(state, me);
+    expect(handSize(use(state, slayer, victim), me)).toBe(before);
   });
 });
