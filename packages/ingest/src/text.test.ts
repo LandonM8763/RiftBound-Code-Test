@@ -742,7 +742,7 @@ describe("zone movement", () => {
     expect(
       parseCardText("Return a unit from your trash to your hand.").effect,
     ).toEqual({
-      target: { kind: "trashCard", cardType: "unit" },
+      target: { kind: "trashCard", cardTypes: ["unit"] },
       effects: [{ kind: "toHand" }],
     });
     expect(
@@ -750,7 +750,7 @@ describe("zone movement", () => {
         ?.target,
     ).toEqual({
       kind: "trashCard",
-      cardType: "spell",
+      cardTypes: ["spell"],
     });
   });
 
@@ -2528,5 +2528,43 @@ describe("the triggering object, and a floor on a static grant", () => {
     ).toEqual({ event: "played", subject: "you", filter: { mighty: true } });
     // `mightOf` consults statics, so a grant counting Might would recurse.
     expect(parseCardText("I have +1 Might for each my Might.").unparsed).not.toEqual([]);
+  });
+});
+
+describe("playing a card out of the trash (354, 355.2)", () => {
+  it("reads the effect, the cost bounds and the entry Location", () => {
+    const parsed = parseCardText(
+      "When you play me, you may play a unit costing no more than 3 and no more than rune from your trash, ignoring its cost.",
+    );
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.triggered?.[0]?.effect).toEqual({
+      target: { kind: "trashCard", cardTypes: ["unit"], maxEnergy: 3, maxPower: 1 },
+      destination: { kind: "unitEntry" },
+      effects: [{ kind: "playFromTrash", ignore: "all" }],
+    });
+    expect(parsed.abilities?.triggered?.[0]?.optional).toBe(true);
+  });
+
+  it('distinguishes "ignoring its cost" from "ignoring its Energy cost"', () => {
+    const energyOnly = parseCardText(
+      "When you play me, you may play a unit from your trash, ignoring its Energy cost.",
+    );
+    expect(energyOnly.abilities?.triggered?.[0]?.effect.effects).toEqual([
+      { kind: "playFromTrash", ignore: "energy" },
+    ]);
+  });
+
+  it("refuses a play whose cost is not ignored, rather than making the card free", () => {
+    // Paying at resolution needs a payment step the engine does not have, so
+    // reading this as free would be a card stronger than printed.
+    expect(
+      parseCardText("When I conquer, you may play a unit from your trash.").unparsed,
+    ).not.toEqual([]);
+  });
+
+  it("reads a disjunction of card types as one list", () => {
+    const parsed = parseCardText("Return a unit or gear from your trash to your hand.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.effect?.target).toEqual({ kind: "trashCard", cardTypes: ["unit", "gear"] });
   });
 });

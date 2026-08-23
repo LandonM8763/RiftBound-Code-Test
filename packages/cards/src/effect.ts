@@ -188,7 +188,23 @@ export type TargetSpec =
    * `cardType` narrows to "a **unit** from your trash", which is how the corpus
    * prints it; omitted, any card qualifies.
    */
-  | { readonly kind: 'trashCard'; readonly cardType?: CardType | undefined }
+  | {
+      readonly kind: 'trashCard';
+      /**
+       * "a **unit** from your trash", "a **unit or gear** from your trash".
+       *
+       * A list because the corpus prints the disjunction, and one field rather
+       * than a singular plus a plural: two that can disagree eventually do.
+       * Omitted, any card in the trash qualifies.
+       */
+      readonly cardTypes?: readonly CardType[] | undefined;
+      /**
+       * "a unit **costing no more than 3**" — bounds on the *printed* cost
+       * (356.1.c), the same reading `chainItem` takes.
+       */
+      readonly maxEnergy?: number | undefined;
+      readonly maxPower?: number | undefined;
+    }
   /**
    * A card or ability on the Chain — 425.3's "Counter [a card or ability on the
    * chain]".
@@ -252,6 +268,14 @@ export type TargetSpec =
  * targets are, one action per legal destination.
  */
 export type DestinationSpec =
+  /**
+   * Where a Unit played by an effect enters the Board (355.2).
+   *
+   * Its own variant rather than reusing `battlefield`, because 355.2.a's set is
+   * narrower than a Move's: the controller's Base or a Battlefield *they
+   * Control*, where a Move may go anywhere the Unit is allowed to be.
+   */
+  | { readonly kind: 'unitEntry' }
   /** Any Battlefield the Unit may legally reach. */
   | { readonly kind: 'battlefield' }
   /** The controller's own Base. */
@@ -328,6 +352,22 @@ export type Effect =
        */
       readonly per?: Count | undefined;
     }
+  /**
+   * Play the chosen card out of the trash (354, 355.2).
+   *
+   * Rule 354 moves a card to the Chain "from its current zone", so playing one
+   * out of the trash is the ordinary Process of Play with a different starting
+   * zone — not a new kind of action. The engine's existing simplification
+   * applies: 359.2 takes a Permanent off the Chain the moment it is Finalized,
+   * so a Unit goes straight to the Board and nothing can respond in between.
+   *
+   * `ignore` is 356.1.b's ignored Base Cost, and the *only* supported form.
+   * A card that plays another and does not say "ignoring its cost" would have
+   * its controller pay at resolution, which needs a payment step the engine
+   * does not have — so the parser refuses that wording rather than making the
+   * card free.
+   */
+  | { readonly kind: 'playFromTrash'; readonly ignore: 'all' | 'energy' }
   /** Rule 429: Add resources to the controller's Rune Pool. */
   | { readonly kind: 'addEnergy'; readonly count: number }
   | { readonly kind: 'addPower'; readonly domain: Domain; readonly count: number }
@@ -602,5 +642,6 @@ export function targetCount(spec: TargetSpec | undefined): TargetCount {
 
 /** True when playing this card requires the player to choose a Destination. */
 export function needsDestination(effect: CardEffect | undefined): boolean {
-  return effect?.destination?.kind === 'battlefield' || effect?.destination?.kind === 'any';
+  const kind = effect?.destination?.kind;
+  return kind === 'battlefield' || kind === 'any' || kind === 'unitEntry';
 }

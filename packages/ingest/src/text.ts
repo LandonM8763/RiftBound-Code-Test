@@ -866,15 +866,57 @@ const CLAUSES: readonly ClauseRule[] = [
   },
   {
     /**
+     * "Play a unit from your trash, ignoring its Energy cost" (354, 355.2).
+     *
+     * "Ignoring its cost" is required, and not for convenience: a card that
+     * plays another and does not say it would have its controller pay at
+     * resolution, which needs a payment step during resolution the engine does
+     * not have. Reading it as free would make the card stronger than printed.
+     */
+    pattern:
+      /^play an? (unit|gear)(?: costing no more than (\d+)(?: and no more than (\d+|runes?))?)? from your trash,? ignoring (?:its|their) (energy )?cost$/i,
+    build: (m) => {
+      const maxEnergy = m[2] === undefined ? undefined : count(m[2]);
+      if (m[2] !== undefined && maxEnergy === undefined) {
+        return undefined;
+      }
+      // 135.2.e.5: the export renders a Power pip as the word "Rune".
+      const power = m[3] === undefined ? undefined : /rune/i.test(m[3]) ? 1 : count(m[3]);
+      if (m[3] !== undefined && power === undefined) {
+        return undefined;
+      }
+      const noun = (m[1] ?? 'unit').toLowerCase() as CardType;
+      return {
+        effects: [{ kind: 'playFromTrash', ignore: m[4] === undefined ? 'all' : 'energy' }],
+        target: {
+          kind: 'trashCard',
+          cardTypes: [noun],
+          ...(maxEnergy === undefined ? {} : { maxEnergy }),
+          ...(power === undefined ? {} : { maxPower: power }),
+        },
+        // 355.2: a Unit needs a Location, chosen alongside the target. 359.2.d
+        // puts a Gear at its controller's Base with nothing to decide.
+        ...(noun === 'unit' ? { destination: { kind: 'unitEntry' as const } } : {}),
+      };
+    },
+  },
+  {
+    /**
      * "Return a unit from your trash to your hand" — a retrieval.
      *
      * The same `toHand` effect as the bounce above; only the target differs,
      * which is the whole reason both are one primitive.
      */
-    pattern: /^return an? (unit|spell|gear|rune) from your trash to your hand$/i,
+    pattern:
+      /^return an? (unit|spell|gear|rune)(?: or (unit|spell|gear|rune))? from your trash to your hand$/i,
     build: (m) => ({
       effects: [{ kind: 'toHand' }],
-      target: { kind: 'trashCard', cardType: (m[1] ?? 'unit').toLowerCase() as CardType },
+      target: {
+        kind: 'trashCard',
+        cardTypes: [m[1], m[2]]
+          .filter((word): word is string => word !== undefined)
+          .map((word) => word.toLowerCase() as CardType),
+      },
     }),
   },
   {

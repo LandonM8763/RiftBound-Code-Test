@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 251 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 254 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -1541,6 +1541,34 @@ gear", so the narrowing lives on the spec rather than on each effect. This is
 separate from `TargetSpec.gear`, which is 821.1.c's "a Card **you control** with
 the Equipment tag" and admits an already-Attached one.
 
+**Playing a card out of the trash is the ordinary Process of Play**, not a new
+action: 354 moves a card to the Chain "from its current zone", so the only
+difference is where it starts. `Effect.playFromTrash` takes a `trashCard`
+target and the engine's existing simplification carries — 359.2 takes a
+Permanent off the Chain the instant it is Finalized, so a Unit reaches the
+Board atomically and nothing can respond in between.
+
+Three things are load-bearing:
+
+- **The cost must be *ignored*, and a card that does not say so is refused.**
+  356.1.b's ignored Base Cost is the only supported form. A card whose
+  controller has to pay at resolution needs a payment step that does not exist,
+  and reading it as free would make the card stronger than printed.
+- **A Spell is refused for the same class of reason.** 359.3 leaves a Spell on
+  the Chain making its own choices, which is a decision point *during*
+  resolution — the one structural gap the engine still has. Only Permanents go
+  through this.
+- **`DestinationSpec.unitEntry` is its own variant** because 355.2.a's set is
+  narrower than a Move's: the controller's Base or a Battlefield they *Control*,
+  where a Move may go anywhere the Unit is allowed to be. It rides the same
+  enumeration path every other Destination does, so the Location is settled at
+  402.2 alongside the target.
+
+`TargetSpec.trashCard` takes a *list* of card types, because the corpus prints
+"a unit **or gear** from your trash" — one field rather than a singular beside
+a plural, for the reason this codebase refuses second sources of truth
+everywhere else.
+
 **"It" is not a target choice either, and it is not "me".** `TargetSpec` has a
 `triggerObject` variant for the "it" of "When a friendly unit dies, buff **it**"
 — the Game Object the *event* was about, where `self` is the Game Object the
@@ -2098,15 +2126,15 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 251 of the 468 cards that have text** — 243 parsed and 8 hand-authored, and the shape of what is
+**Coverage is 254 of the 468 cards that have text** — 246 parsed and 8 hand-authored, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 243 |
+| Fully parsed | 246 |
 | Hand-authored | 8 |
-| Blocked | 217 |
+| Blocked | 214 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 4 times, the next 2, and every one of
@@ -2288,6 +2316,7 @@ What each round actually delivered, for calibrating the next projection:
 | Object filters and ability-use restrictions (002, 377) | **+6** delivered |
 | Five trigger events and six trigger filters | **+10** delivered |
 | The triggering object as a target, and a floored static grant | **+3** delivered |
+| Playing a card out of the trash (354, 355.2) | +5 projected, **+3** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic

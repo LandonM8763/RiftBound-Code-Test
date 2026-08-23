@@ -7,6 +7,7 @@
  */
 import {
   anyPowerOf,
+  costOf,
   isPlayable,
   needsTargetChoice,
   targetCount,
@@ -31,7 +32,7 @@ import { abilityCost } from './costs.js';
 import { countOf } from './count.js';
 import type { GameEvent } from './events.js';
 import { moveEntity, withEntity, withPlayer } from './mutate.js';
-import { canPay, payFrom } from './play.js';
+import { canPay, payFrom, validUnitLocations } from './play.js';
 import { entersReady, objectForbidden, playerForbidden, unitKeywordValue } from './statics.js';
 import { createTokens, sendToNonBoardZone } from './token.js';
 import type { EntityId, GameState, Location, PlayerId } from './state.js';
@@ -172,9 +173,22 @@ export function legalTargets(
   // "A unit from your trash" — a card in a Non-Board Zone, not a Game Object on
   // the Board, so this walks the trash rather than the Battlefields and Bases.
   if (spec.kind === 'trashCard') {
-    return getPlayer(state, controller).zones.trash.filter(
-      (card) => spec.cardType === undefined || entityCard(state, card).type === spec.cardType,
-    );
+    return getPlayer(state, controller).zones.trash.filter((card) => {
+      const definition = entityCard(state, card);
+      if (spec.cardTypes !== undefined && !spec.cardTypes.includes(definition.type)) {
+        return false;
+      }
+      // 356.1.c: "costs no more than 3" reads the *printed* cost, never what it
+      // happened to cost to play — the same reading `chainItem` takes.
+      const cost = costOf(definition);
+      if (spec.maxEnergy !== undefined && (cost?.energy ?? 0) > spec.maxEnergy) {
+        return false;
+      }
+      if (spec.maxPower !== undefined && (cost?.power.length ?? 0) > spec.maxPower) {
+        return false;
+      }
+      return true;
+    });
   }
 
   // 425.3: "a card or ability on the chain". 359.2 takes a Permanent off the
@@ -422,6 +436,7 @@ function consumesTarget(kind: Effect['kind']): boolean {
     case 'spendBuff':
     case 'move':
     case 'toHand':
+    case 'playFromTrash':
     case 'grantKeyword':
     case 'attach':
     case 'equip':
@@ -1066,6 +1081,55 @@ function applyEffect(
       );
     }
 
+    /**
+     * 354 with 355.2: play the chosen card out of the trash.
+     *
+     * Rule 354 moves a card to the Chain "from its current zone", so this is
+     * the ordinary Process of Play with a different starting zone. The engine's
+     * documented simplification carries: 359.2 takes a Permanent off the Chain
+     * the instant it is Finalized, so a Unit reaches the Board atomically and
+     * no player can respond in between.
+     *
+     * Only a Permanent is supported. A Spell played this way would linger on
+     * the Chain (359.3) and make its own choices there, which is a decision
+     * point during resolution the engine does not have — so the parser refuses
+     * that wording rather than resolving it into nothing.
+     */
+    case 'playFromTrash': {
+      if (target === undefined) {
+        return state;
+      }
+      const definition = entityCard(state, target);
+      if (definition.type !== 'unit' && definition.type !== 'gear') {
+        return state;
+      }
+      // 355.2: the Location was chosen alongside the target. A Gear has none —
+      // 359.2.d puts it at its controller's Base.
+      const entersAt =
+        definition.type === 'gear'
+          ? playerLocation(controller, 'base')
+          : (choices.destination ?? playerLocation(controller, 'base'));
+      // 359.2.c: a Unit enters exhausted; 359.2.d: a Gear enters ready. A
+      // static saying "I enter ready" replaces the first (363), and is asked
+      // *before* the move for the reason `playCard` asks it there.
+      const ready = definition.type === 'gear' || entersReady(state, controller, definition);
+      let next = moveEntity(state, target, entersAt);
+      next = withEntity(next, target, (current) => ({ ...current, exhausted: !ready }));
+      events.push({ type: 'cardPlayed', player: controller, entity: target, onChain: false });
+      // 383.4.a: the card was Finalized and entered the Board, so everything
+      // watching a play sees it — including its own Play Effect.
+      return context.raise(
+        next,
+        {
+          event: 'played',
+          actor: controller,
+          objects: [target],
+          ...(entersAt.kind === 'battlefield' ? { battlefield: entersAt.index } : {}),
+        },
+        events,
+      );
+    }
+
     // 180-184: Create Tokens. Not a Move and not a play from hand — a Token is
     // Created directly on the Board (186), so nothing is Contested and no
     // Showdown opens. A card that wants the token to arrive fighting says
@@ -1156,6 +1220,12 @@ export function legalDestinations(
   }
   if (spec.kind === 'base') {
     return [playerLocation(controller, 'base')];
+  }
+  // 355.2.a: a Unit played by an effect enters the controller's Base or a
+  // Battlefield they Control — a narrower set than a Move's destinations, and
+  // the same one `playCard` uses for a Unit played from hand.
+  if (spec.kind === 'unitEntry') {
+    return [...validUnitLocations(state, controller)];
   }
   const battlefields = state.battlefields.map((_battlefield, index) => battlefieldLocation(index));
   // 449.1: an unstated Destination is any of them, Base included.

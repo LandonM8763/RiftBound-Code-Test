@@ -25,17 +25,19 @@ import { describe, expect, it } from "vitest";
 
 import { legalTargets } from "./effects.js";
 import { checkInvariants } from "./invariants.js";
-import { legalActions } from "./legal.js";
+import { currentLegalActions, legalActions } from "./legal.js";
 import { moveEntity, withEntity, withPlayer } from "./mutate.js";
 import { reduce } from "./reduce.js";
 import { createGame, type DeckList } from "./setup.js";
 import { isToken } from "./token.js";
 import {
   battlefieldLocation,
+  getEntity,
   isOver,
   playerLocation,
   type EntityId,
   type GameState,
+  type Location,
 } from "./state.js";
 
 const LEGEND = makeLegend(["fury"], { id: cardId("Z-000") });
@@ -63,7 +65,7 @@ const ATTENDANT = makeUnit(2, ["fury"], {
   name: "Attendant",
   cost: cost(1),
   effect: {
-    target: { kind: "trashCard", cardType: "unit" },
+    target: { kind: "trashCard", cardTypes: ["unit"] },
     effects: [{ kind: "toHand" }],
   },
 });
@@ -81,6 +83,25 @@ const DRUMMER = makeUnit(2, ["fury"], {
   },
 });
 
+/** "When you play me, play a unit from your trash, ignoring its Energy cost." */
+const NECROMANCER = makeUnit(2, ["fury"], {
+  id: cardId("Z-015"),
+  name: "Necromancer",
+  cost: cost(1),
+  abilities: {
+    triggered: [
+      {
+        condition: { event: "played", subject: "self" },
+        effect: {
+          target: { kind: "trashCard", cardTypes: ["unit"] },
+          destination: { kind: "unitEntry" },
+          effects: [{ kind: "playFromTrash", ignore: "energy" }],
+        },
+      },
+    ],
+  },
+});
+
 const RUNE = makeRune("fury", { id: cardId("Z-100") });
 const BATTLEFIELDS = Array.from({ length: 3 }, (_, i) =>
   makeBattlefield({ id: cardId(`Z-20${i}`) }),
@@ -93,6 +114,7 @@ const REGISTRY = CardRegistry.from([
   REBUKE,
   ATTENDANT,
   DRUMMER,
+  NECROMANCER,
   RUNE,
   ...BATTLEFIELDS,
 ] as CardDefinition[]);
@@ -106,6 +128,7 @@ function deck(): DeckList {
       ...Array.from({ length: 3 }, () => REBUKE.id),
       ...Array.from({ length: 3 }, () => ATTENDANT.id),
       ...Array.from({ length: 3 }, () => DRUMMER.id),
+      ...Array.from({ length: 3 }, () => NECROMANCER.id),
     ],
     runes: Array.from({ length: 8 }, () => RUNE.id),
     battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
@@ -305,7 +328,7 @@ describe("retrieving a card from the trash", () => {
 
     const targets = legalTargets(state, player, {
       kind: "trashCard",
-      cardType: "unit",
+      cardTypes: ["unit"],
     });
 
     expect(targets).toContain(unit);
@@ -344,5 +367,97 @@ describe("Recycle (rule 416)", () => {
 
     expect(recycled.players[player]!.zones.runeDeck).toContain(rune);
     expect(recycled.players[player]!.zones.mainDeck).not.toContain(rune);
+  });
+});
+
+describe("playing a card out of the trash (354, 355.2)", () => {
+  /** Put a Unit of `id` into the active player's trash. */
+  const inTrash = (state: GameState, id: CardDefinition["id"]): [GameState, EntityId] => {
+    const player = state.activePlayer;
+    const card = state.players[player]!.zones.mainDeck.find(
+      (candidate) => state.entities[candidate]!.card === id,
+    );
+    if (card === undefined) {
+      throw new Error(`No ${id} left in the deck`);
+    }
+    return [moveEntity(state, card, playerLocation(player, "trash")), card];
+  };
+
+  it("354: the card comes out of its current zone and reaches the Board", () => {
+    let state = inMainPhase("from-trash");
+    const me = state.activePlayer;
+    const [a, buried] = inTrash(state, PLAIN.id);
+    state = a;
+    const [b, necromancer] = inHand(state, NECROMANCER.id);
+    state = b;
+
+    let next = reduce(state, { type: "playCard", card: necromancer }).state;
+    // The Play Effect is pending at 402.2: one action per (target, Location).
+    const offers = currentLegalActions(next).filter(
+      (action) => action.type === "resolveTrigger" && action.perform,
+    ) as { targets?: readonly EntityId[]; destination?: Location }[];
+    expect(offers.length).toBeGreaterThan(0);
+    expect(offers.every((offer) => offer.targets?.[0] === buried)).toBe(true);
+    // 355.2.a: the Base and every Battlefield this player Controls.
+    expect(new Set(offers.map((offer) => JSON.stringify(offer.destination))).size).toBe(
+      offers.length,
+    );
+
+    next = reduce(next, {
+      type: "resolveTrigger",
+      perform: true,
+      targets: [buried],
+      destination: playerLocation(me, "base"),
+    }).state;
+    while (next.chain.length > 0) {
+      next = reduce(next, { type: "pass" }).state;
+    }
+
+    expect(next.players[me]!.zones.base).toContain(buried);
+    expect(next.players[me]!.zones.trash).not.toContain(buried);
+    // 359.2.c: a Unit enters exhausted however it was played.
+    expect(getEntity(next, buried).exhausted).toBe(true);
+    checkInvariants(next);
+  });
+
+  it("356.1.c: a cost bound reads the printed cost, so an expensive card is not offered", () => {
+    let state = inMainPhase("cost-bound");
+    const [a, buried] = inTrash(state, PLAIN.id);
+    state = a;
+
+    // PLAIN costs 1, so a bound of 0 excludes it and a bound of 1 admits it.
+    expect(
+      legalTargets(state, state.activePlayer, {
+        kind: "trashCard",
+        cardTypes: ["unit"],
+        maxEnergy: 0,
+      }),
+    ).not.toContain(buried);
+    expect(
+      legalTargets(state, state.activePlayer, {
+        kind: "trashCard",
+        cardTypes: ["unit"],
+        maxEnergy: 1,
+      }),
+    ).toContain(buried);
+  });
+
+  it("admits either type when the card names a disjunction", () => {
+    let state = inMainPhase("either-type");
+    const [a, unit] = inTrash(state, PLAIN.id);
+    state = a;
+    const [b, spell] = inTrash(state, REBUKE.id);
+    state = b;
+
+    const both = legalTargets(state, state.activePlayer, {
+      kind: "trashCard",
+      cardTypes: ["unit", "spell"],
+    });
+    expect(both).toContain(unit);
+    expect(both).toContain(spell);
+    // A single-type spec still narrows.
+    expect(
+      legalTargets(state, state.activePlayer, { kind: "trashCard", cardTypes: ["unit"] }),
+    ).not.toContain(spell);
   });
 });
