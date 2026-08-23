@@ -274,6 +274,9 @@ export function determinize(view: GameView, knowledge: Knowledge, seed: number |
     nextEntityId: nextId,
     definitions,
     chain,
+    // 390.4: public like the rest of the Chain — a Delayed Passive is
+    // announced when it is created, so a searching agent may see it.
+    turnEffects: view.turnEffects,
     priority: view.priority,
     showdown:
       view.showdown === null

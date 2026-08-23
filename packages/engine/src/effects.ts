@@ -1130,6 +1130,29 @@ function applyEffect(
       );
     }
 
+    /**
+     * 390.4: register a Delayed Passive Ability for the rest of this turn.
+     *
+     * Nothing is written onto any Game Object — a Passive is *consulted*, and
+     * that discipline is what makes the window work: 317.2.c drops the entry
+     * and every effect it was having stops at once, with nothing to unwind.
+     */
+    case 'thisTurn': {
+      return {
+        ...state,
+        turnEffects: [
+          ...state.turnEffects,
+          {
+            source,
+            controller,
+            ...(effect.static === undefined ? {} : { ability: effect.static }),
+            ...(effect.costModifier === undefined ? {} : { costModifier: effect.costModifier }),
+            uses: effect.uses ?? null,
+          },
+        ],
+      };
+    }
+
     // 180-184: Create Tokens. Not a Move and not a play from hand — a Token is
     // Created directly on the Board (186), so nothing is Contested and no
     // Showdown opens. A card that wants the token to arrive fighting says

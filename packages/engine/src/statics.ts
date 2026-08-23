@@ -81,6 +81,24 @@ export function activeStatics(state: GameState): readonly ActiveStatic[] {
       collect(entity);
     }
   }
+  // 390.4: a Delayed Passive is an ordinary Passive with a window, so it joins
+  // the sweep rather than being consulted separately. Its condition and
+  // dependency are asked here for the same reason a Board static's are — both
+  // can stop holding after the effect that created it resolved.
+  for (const delayed of state.turnEffects) {
+    if (delayed.ability === undefined || delayed.uses === 0) {
+      continue;
+    }
+    if (!conditionMet(state, delayed.controller, delayed.source, delayed.ability.condition)) {
+      continue;
+    }
+    found.push({
+      source: delayed.source,
+      controller: delayed.controller,
+      ability: delayed.ability,
+    });
+  }
+
   for (const battlefield of state.battlefields) {
     // 170.8: a Battlefield can have Passive Abilities, and 170.5 puts its own
     // Game Object at its Location — so `here` on one of its statics resolves to

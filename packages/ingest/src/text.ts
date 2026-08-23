@@ -31,6 +31,7 @@ import {
   type DestinationSpec,
   type AdditionalCost,
   type CostModifier,
+  type CostTarget,
   type CostPayment,
   type Effect,
   type Keyword,
@@ -1139,6 +1140,25 @@ const CLAUSES: readonly ClauseRule[] = [
         : { effects: [{ kind: 'gainXp', amount: n }], target: NO_TARGET };
     },
   },
+  {
+    /**
+     * 390.4: a Delayed Passive Ability — a Passive with a stated window.
+     *
+     * "Units you play this turn enter ready", "opponents can't play cards this
+     * turn", "the next spell you play this turn costs 5 less". Listed late,
+     * because "this turn" also ends an ordinary Might grant and those clauses
+     * must keep winning: `matchClause` takes the first rule that consumes the
+     * line whole, so every "+N Might this turn" shape is already spoken for.
+     */
+    pattern: /^(the next )?(.+?) this turn(.*)$/i,
+    build: (m) => {
+      // "The next spell you play this turn costs 5 less" states the window in
+      // the middle; every other wording puts it at the end.
+      const body = `${m[2] ?? ''} ${m[3] ?? ''}`.replace(/\s+/g, ' ').trim();
+      const delayed = parseDelayedPassive(m[1] === undefined ? body : `the next ${body}`);
+      return delayed === undefined ? undefined : { effects: [delayed], target: NO_TARGET };
+    },
+  },
 ];
 
 /**
@@ -1456,6 +1476,42 @@ const COST_MODIFIERS: readonly {
             applies: { scope: 'self' },
             change: { kind: 'discount', per: { count: { kind: 'cardsInTrash' }, energy } },
           };
+    },
+  },
+  {
+    /**
+     * "**Spells you play** cost 5 less", "your Dragons' Energy costs are
+     * reduced by 2, to a minimum of 1" — a discount on a *scope* rather than on
+     * the card printing it.
+     *
+     * `scope: 'controller'` rather than `'self'`: 366.2.a applies a
+     * cost-altering Passive "at all times in any zone from which the card with
+     * the ability can be played", and this one is about the cards its
+     * controller plays, not about its own cost.
+     */
+    pattern:
+      /^(?:the next )?(spells?|units?|gears?|cards?) you play costs? (\d+) less(?:, to a minimum of (\d+))?$/i,
+    build: (m) => {
+      const energy = count(m[2] ?? '');
+      if (energy === undefined) {
+        return undefined;
+      }
+      const minimum = m[3] === undefined ? undefined : count(m[3]);
+      if (m[3] !== undefined && minimum === undefined) {
+        return undefined;
+      }
+      const noun = (m[1] ?? 'card').toLowerCase().replace(/s$/, '');
+      return {
+        applies: {
+          scope: 'friendly' as const,
+          ...(noun === 'card' ? {} : { types: [noun as CostTarget] }),
+        },
+        change: {
+          kind: 'discount' as const,
+          energy,
+          ...(minimum === undefined ? {} : { minimumEnergy: minimum }),
+        },
+      };
     },
   },
   {
@@ -1800,6 +1856,10 @@ const STATIC_SCOPES: readonly { readonly pattern: RegExp; readonly scope: Static
   // 185: "Your tokens enter ready". Listed before the tag rule below so the
   // noun is never mistaken for a tag.
   { pattern: /^your tokens$/i, scope: { who: 'friendly', token: true } },
+  // "**Units you play** this turn enter ready" — the same friendly scope said
+  // from the entering card's side. 359.2.c is about how a card enters, so the
+  // wording can only ever be about the player doing the playing.
+  { pattern: /^(?:the next )?units? you play$/i, scope: { who: 'friendly' } },
 ];
 
 /**
@@ -1998,6 +2058,12 @@ const RESTRICTIONS: readonly {
     build: () => ({ affects: { who: 'enemy' }, grant: { forbid: [{ kind: 'score' }] } }),
   },
   {
+    // 358.4 with rule 002: "opponents can't play cards". Player-facing, like
+    // `score` — it is about who may act, not about a Game Object.
+    pattern: /^opponents? can'?t play cards$/i,
+    build: () => ({ affects: { who: 'enemy' }, grant: { forbid: [{ kind: 'playCards' }] } }),
+  },
+  {
     // 355.2: "opponents can only play units to their base" — the inverse of
     // 355.2.b's permission.
     pattern: /^opponents? can only play units to (?:their|your) base$/i,
@@ -2035,6 +2101,51 @@ function parseSourcePredicate(phrase: string): Condition | undefined {
   // A static has no chosen target, so a `targetIs` predicate could never hold
   // — the same reason a source-relative condition is refused without a source.
   return state?.kind === 'targetIs' ? undefined : state;
+}
+
+/** The first `COST_MODIFIERS` rule that reads `body` whole, if any. */
+function parseCostModifier(body: string): CostModifier | undefined {
+  for (const rule of COST_MODIFIERS) {
+    const match = body.match(rule.pattern);
+    if (match !== null) {
+      return rule.build(match);
+    }
+  }
+  return undefined;
+}
+
+/**
+ * "<passive> this turn" (390.4) — a Delayed Passive Ability.
+ *
+ * Delegates to the ordinary Passive and cost-modifier grammars rather than
+ * having one of its own: 390.1 says a Delayed Ability "can be any other type of
+ * Ability, and contains all of the properties of that type in addition to the
+ * properties of Delayed Abilities". The window is the only thing this adds.
+ */
+function parseDelayedPassive(body: string): Effect | undefined {
+  const next = /^the next (.+)$/i.exec(body.trim());
+  const inner = (next?.[1] ?? body).trim();
+  // "The next" is a counted window. Reading it as uncounted would make the card
+  // strictly stronger than printed, so the count is carried, never dropped.
+  const uses = next === null ? undefined : 1;
+
+  // A cost wording is tried first: it would otherwise reach `parseStatic` and
+  // fail there, since a discount is not a scope-plus-grant.
+  const costModifier = parseCostModifier(inner);
+  if (costModifier !== undefined) {
+    return { kind: 'thisTurn', costModifier, ...(uses === undefined ? {} : { uses }) };
+  }
+  const asStatic = parseStatic(inner);
+  if (asStatic === undefined) {
+    return undefined;
+  }
+  // A `self` scope is about the card that opened the window, which for a Spell
+  // is in the trash before anything reads it. Refused rather than registered as
+  // a Passive that can never apply.
+  if (asStatic.affects.who === 'self') {
+    return undefined;
+  }
+  return { kind: 'thisTurn', static: asStatic, ...(uses === undefined ? {} : { uses }) };
 }
 
 export function parseStatic(line: string): StaticAbility | undefined {
@@ -2560,7 +2671,16 @@ function parseLine(line: string): {
     // 377.1 puts the effect after the colon, but an Add ability prints its own
     // timing marker there first — "Exhaust: REACTION - ADD 1". The marker is
     // timing, not effect, so it comes off before the body is parsed.
-    const effect = parseEffects(body.replace(/^(?:action|reaction)\s*[-—]\s*/i, ''));
+    //
+    // 812.1.b: Legion runs from the keyword to the end of the *clause*, and for
+    // "Exhaust: LEGION - …" the clause is this ability's effect — so the gate is
+    // peeled off here as well as at the start of a line.
+    let inner = body.replace(/^(?:action|reaction)\s*[-—]\s*/i, '');
+    const gated = /^legion\s*[-—>]?\s*(.+)$/i.exec(inner);
+    if (gated !== null) {
+      inner = gated[1] ?? '';
+    }
+    const effect = parseEffects(inner);
     // 377: an Activated Ability is not triggered by anything, so there is no
     // "it" for a pronoun to refer to.
     if (effect === undefined || effect.target.kind === 'triggerObject') {
@@ -2571,6 +2691,7 @@ function parseLine(line: string): {
         cost: abilityCost,
         exhaustSelf,
         ...(payments.length === 0 ? {} : { payments }),
+        ...(gated === null ? {} : { dependsOn: { kind: 'legion' as const } }),
         effect,
       },
     };

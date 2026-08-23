@@ -1,8 +1,10 @@
 import type { CardType } from './card.js';
 import type { Condition } from './condition.js';
 import type { Count } from './count.js';
+import type { CostModifier } from './cost-modifier.js';
 import type { Domain } from './domain.js';
 import type { Keyword } from './keyword.js';
+import type { StaticAbility } from './static.js';
 
 /**
  * Card effects as data, not code.
@@ -368,6 +370,27 @@ export type Effect =
    * card free.
    */
   | { readonly kind: 'playFromTrash'; readonly ignore: 'all' | 'energy' }
+  /**
+   * Rule 390.4: a **Delayed Passive Ability** — a Passive that applies only
+   * during a stated window, here "this turn".
+   *
+   * "Units you play this turn enter ready", "opponents can't play cards this
+   * turn", "the next spell you play this turn costs 5 less". Carried as the
+   * ordinary `StaticAbility` / `CostModifier` it *is*, plus the window, so
+   * everything a Board static can already say becomes turn-scopable with no
+   * second vocabulary — and the two sweeps that gather statics and cost
+   * modifiers each grew one branch rather than a parallel system.
+   *
+   * `uses` is the "**the next** spell you play" wording: how many times it may
+   * still apply before it is spent. Omitted means every time this turn.
+   * 317.2.c expires whatever is left at the Cleanup either way.
+   */
+  | {
+      readonly kind: 'thisTurn';
+      readonly static?: StaticAbility | undefined;
+      readonly costModifier?: CostModifier | undefined;
+      readonly uses?: number | undefined;
+    }
   /** Rule 429: Add resources to the controller's Rune Pool. */
   | { readonly kind: 'addEnergy'; readonly count: number }
   | { readonly kind: 'addPower'; readonly domain: Domain; readonly count: number }

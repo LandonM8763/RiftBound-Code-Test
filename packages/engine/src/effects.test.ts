@@ -226,6 +226,38 @@ const TRIUMPH = makeSpell(['fury'], {
   },
 });
 
+/** "Units you play this turn enter ready." — 390.4's Delayed Passive. */
+const CONFRONT = makeSpell(['fury'], {
+  id: cardId('E-044'),
+  name: 'Confront',
+  cost: cost(1),
+  timing: 'action',
+  effect: {
+    target: { kind: 'none' },
+    effects: [
+      { kind: 'thisTurn', static: { affects: { who: 'friendly' }, grant: { entersReady: true } } },
+    ],
+  },
+});
+
+/** "The next unit you play this turn enters ready." — a counted window. */
+const ONE_SHOT = makeSpell(['fury'], {
+  id: cardId('E-045'),
+  name: 'One Shot',
+  cost: cost(1),
+  timing: 'action',
+  effect: {
+    target: { kind: 'none' },
+    effects: [
+      {
+        kind: 'thisTurn',
+        uses: 1,
+        static: { affects: { who: 'friendly' }, grant: { entersReady: true } },
+      },
+    ],
+  },
+});
+
 const FURY_RUNE = makeRune('fury', { id: cardId('E-100') });
 const BATTLEFIELDS = Array.from({ length: 3 }, (_, i) =>
   makeBattlefield({ id: cardId(`E-20${i}`) }),
@@ -251,6 +283,8 @@ const REGISTRY = CardRegistry.from([
   BLESSING,
   REPRISAL,
   TRIUMPH,
+  CONFRONT,
+  ONE_SHOT,
   FURY_RUNE,
   ...BATTLEFIELDS,
 ] as CardDefinition[]);
@@ -277,6 +311,8 @@ function deck(): DeckList {
       ...Array.from({ length: 2 }, () => BLESSING.id),
       ...Array.from({ length: 2 }, () => REPRISAL.id),
       ...Array.from({ length: 2 }, () => TRIUMPH.id),
+      ...Array.from({ length: 2 }, () => CONFRONT.id),
+      ...Array.from({ length: 2 }, () => ONE_SHOT.id),
     ],
     runes: Array.from({ length: 8 }, () => FURY_RUNE.id),
     battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
@@ -1126,5 +1162,75 @@ describe('object filters (417, 414, 423, 702, 133.8)', () => {
         filter: { tag: 'Mech' },
       }),
     ).toEqual([]);
+  });
+});
+
+describe('Delayed Passive Abilities (rule 390.4)', () => {
+  /** Play a Unit from hand and let the Chain settle. */
+  const playUnit = (state: GameState): [GameState, EntityId] => {
+    const [withCard, card] = toHand(state, PLAIN);
+    let next = reduce(withCard, {
+      type: 'playCard',
+      card,
+      location: playerLocation(next0(withCard), 'base'),
+    }).state;
+    while (next.chain.length > 0) {
+      next = reduce(next, { type: 'pass' }).state;
+    }
+    return [next, card];
+  };
+  const next0 = (state: GameState) => state.activePlayer;
+
+  it('359.2.c: a Unit enters exhausted, and the window changes that', () => {
+    let state = withEnergy(inMainPhase('window'), 3);
+    // Without the window, 359.2.c applies.
+    const [before, plain] = playUnit(state);
+    expect(getEntity(before, plain).exhausted).toBe(true);
+
+    const [a, confront] = toHand(state, CONFRONT);
+    state = castSpell(a, confront);
+    const [after, wide] = playUnit(state);
+    expect(getEntity(after, wide).exhausted).toBe(false);
+    checkInvariants(after);
+  });
+
+  it('"the next" spends one use and then stops applying', () => {
+    let state = withEnergy(inMainPhase('one-shot'), 6);
+    const [a, spell] = toHand(state, ONE_SHOT);
+    state = castSpell(a, spell);
+    expect(state.turnEffects).toHaveLength(1);
+
+    const [first, one] = playUnit(state);
+    expect(getEntity(first, one).exhausted).toBe(false);
+    expect(first.turnEffects[0]?.uses).toBe(0);
+
+    // Spent: the second Unit enters exhausted like any other.
+    // Top the pool up directly: `withEnergy` exhausts Runes, and by now they
+    // are spent.
+    const topped: GameState = {
+      ...first,
+      players: first.players.map((seat) =>
+        seat.id === first.activePlayer ? { ...seat, pool: { ...seat.pool, energy: 5 } } : seat,
+      ) as typeof first.players,
+    };
+    const [second, two] = playUnit(topped);
+    expect(getEntity(second, two).exhausted).toBe(true);
+    checkInvariants(second);
+  });
+
+  it('317.2.c: the window expires with the turn, with nothing to unwind', () => {
+    let state = withEnergy(inMainPhase('expire'), 3);
+    const [a, confront] = toHand(state, CONFRONT);
+    state = castSpell(a, confront);
+    expect(state.turnEffects).toHaveLength(1);
+
+    // Run the turn out. A Passive is consulted, never written onto anything,
+    // so dropping the entry is the whole of expiring it.
+    let next = state;
+    for (let i = 0; i < 60 && next.turnEffects.length > 0 && !isOver(next); i += 1) {
+      next = reduce(next, currentLegalActions(next)[0] as never).state;
+    }
+    expect(next.turnEffects).toEqual([]);
+    checkInvariants(next);
   });
 });

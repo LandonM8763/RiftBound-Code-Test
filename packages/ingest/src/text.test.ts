@@ -995,12 +995,12 @@ describe("cost modifiers (rules 356, 363)", () => {
 
   it("refuses the cost clauses that want a mechanic instead", () => {
     // Every one of these is a real card. Each needs something the model has no
-    // representation for — a zone condition, a duration, a count of something
-    // invisible, a Battlefield static — so each is refused rather than
-    // approximated into a discount that fires at the wrong time.
+    // representation for — a zone condition, a count of something invisible, a
+    // Battlefield static — so each is refused rather than approximated into a
+    // discount that fires at the wrong time. A *duration* is no longer here:
+    // 390.4's Delayed Passive is built.
     const beyond = [
       "I cost 2 less to play from anywhere other than your hand.",
-      "When you play me, the next spell you play this turn costs 5 less.",
       "I cost 2 less for each of your MIGHTY units.",
       "While you control this battlefield, friendly gear costs 1 less.",
     ];
@@ -1137,15 +1137,14 @@ describe("static abilities (rules 363-365)", () => {
   });
 
   it("refuses the static clauses that want a mechanic instead", () => {
-    // Each is a real card. A duration, a scope the model cannot name, or a
-    // rule change — none is a scope-plus-grant, so each is refused rather than
-    // bent into one. A *dynamic* Might is no longer here: "increased by your
-    // points" is now the same statement as "+1 Might for each …".
+    // Each is a real card. A scope the model cannot name or a rule change —
+    // neither is a scope-plus-grant, so each is refused rather than bent into
+    // one. A *dynamic* Might is no longer here ("increased by your points" is
+    // "+1 Might for each …"), nor is a *duration* (390.4 is built).
     const beyond = [
       // "on your trash" is not "in your trash", and a near miss is refused
       // rather than read as the rule it nearly is.
       "My Might is increased by the number of cards on your trash.",
-      "Units you play this turn enter ready.",
       "I can have any number of buffs.",
       "Stunned enemy units here have -8 Might, to a minimum of 1 Might.",
     ];
@@ -2566,5 +2565,66 @@ describe("playing a card out of the trash (354, 355.2)", () => {
     const parsed = parseCardText("Return a unit or gear from your trash to your hand.");
     expect(parsed.unparsed).toEqual([]);
     expect(parsed.effect?.target).toEqual({ kind: "trashCard", cardTypes: ["unit", "gear"] });
+  });
+});
+
+describe("Delayed Passive Abilities (rule 390.4)", () => {
+  it("reads a turn-scoped static through the ordinary Passive grammar", () => {
+    const parsed = parseCardText("Units you play this turn enter ready.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.effect?.effects).toEqual([
+      {
+        kind: "thisTurn",
+        static: { affects: { who: "friendly" }, grant: { entersReady: true } },
+      },
+    ]);
+  });
+
+  it("002: a turn-scoped restriction is the same shape with the opposite sign", () => {
+    const parsed = parseCardText("When you play me, opponents can't play cards this turn.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.triggered?.[0]?.effect.effects).toEqual([
+      {
+        kind: "thisTurn",
+        static: { affects: { who: "enemy" }, grant: { forbid: [{ kind: "playCards" }] } },
+      },
+    ]);
+  });
+
+  it('"the next" is a counted window, never dropped', () => {
+    // Read as uncounted it would be every spell this turn — strictly stronger
+    // than the card printed.
+    const parsed = parseCardText(
+      "When you play me, the next spell you play this turn costs 5 less.",
+    );
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.triggered?.[0]?.effect.effects).toEqual([
+      {
+        kind: "thisTurn",
+        uses: 1,
+        costModifier: {
+          applies: { scope: "friendly", types: ["spell"] },
+          change: { kind: "discount", energy: 5 },
+        },
+      },
+    ]);
+  });
+
+  it("812.1.b: LEGION inside an ability body gates that ability", () => {
+    const parsed = parseCardText("Exhaust: LEGION - The next unit you play this turn enters ready.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.activated?.[0]?.dependsOn).toEqual({ kind: "legion" });
+  });
+
+  it("leaves an ordinary Might grant alone, which the window pattern could have eaten", () => {
+    // `CLAUSES` is first-match-wins and this rule matches almost any line with
+    // "this turn" in it, so it is listed last. Ordered earlier it shadowed
+    // eleven cards that were already parsing.
+    const parsed = parseCardText("Give a friendly unit +2 Might this turn.");
+    expect(parsed.effect?.effects).toEqual([{ kind: "giveMight", amount: 2 }]);
+  });
+
+  it("refuses a `self` window, which would be about a card already in the trash", () => {
+    expect(parseCardText("I have +1 Might this turn.").unparsed).not.toEqual([]);
   });
 });

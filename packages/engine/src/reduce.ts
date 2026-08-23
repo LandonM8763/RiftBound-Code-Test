@@ -5,8 +5,10 @@ import {
   needsTargetChoice,
   type AdditionalCost,
   type ActivatedAbility,
+  modifierApplies,
   type CardDefinition,
   type CardType,
+  type CostTarget,
   type CostPayment,
   type TriggeredAbility,
   type Cost,
@@ -458,6 +460,7 @@ function playCard(
     // A Spell has no Play Effect of its own (383.4.a is about Permanents), but
     // "when you play a spell" watches this same moment. The trigger goes on the
     // Chain above the Spell and so resolves before it.
+    next = spendDelayed(next, player, definition, false);
     next = raiseEvent(next, played, events);
     next = raiseChosen(next, player, targets, events, definition.type);
     return { state: next, events };
@@ -482,6 +485,12 @@ function playCard(
   }));
 
   events.push({ type: 'cardPlayed', player, entity: card, onChain: false });
+
+  // 390.4: spend a use of any Delayed Passive that applied. Done before the
+  // card's own rules text runs, so a Play Effect that registers a *new* one
+  // ("the next unit you play this turn enters ready") does not immediately
+  // spend it on the card that created it.
+  next = spendDelayed(next, player, definition, definition.type === 'unit' && ready);
 
   // 359.2.b: execute all rules text on the card, top to bottom.
   if (effect !== undefined) {
@@ -760,6 +769,50 @@ function afterChainPriority(state: GameState): PlayerId | null {
  * "when **you** choose me" wording — an opponent choosing the same Unit is a
  * different event and must not fire it.
  */
+/**
+ * Spend one use of every Delayed Passive that applied to this play (390.4).
+ *
+ * "The **next** spell you play this turn costs 5 less" has to stop after one
+ * spell. Read as "every spell" it would be a card strictly stronger than
+ * printed, which is why the wording is either counted or refused.
+ *
+ * A use is spent when the entry *would have applied*, asked with the same
+ * predicates the cost machinery and `entersReady` use — not by watching whether
+ * the number moved, since a discount that hits an already-zero cost still
+ * applied.
+ */
+function spendDelayed(
+  state: GameState,
+  player: PlayerId,
+  card: CardDefinition,
+  enteredReady: boolean,
+): GameState {
+  if (state.turnEffects.every((delayed) => delayed.uses === null)) {
+    return state;
+  }
+  const target: CostTarget = card.type === 'spell' ? 'spell' : card.type;
+  return {
+    ...state,
+    turnEffects: state.turnEffects.map((delayed) => {
+      if (delayed.uses === null || delayed.uses <= 0) {
+        return delayed;
+      }
+      const byCost =
+        delayed.costModifier !== undefined &&
+        modifierApplies(
+          delayed.costModifier.applies,
+          target,
+          delayed.controller === player ? 'controller' : 'opponent',
+        );
+      // 359.2.c: only a Unit can be *entered* ready by one of these, and the
+      // caller has already asked whether it was.
+      const byEntry =
+        enteredReady && delayed.ability?.grant.entersReady === true && delayed.controller === player;
+      return byCost || byEntry ? { ...delayed, uses: delayed.uses - 1 } : delayed;
+    }),
+  };
+}
+
 function raiseChosen(
   state: GameState,
   player: PlayerId,
@@ -2220,6 +2273,12 @@ function ending(state: GameState): ReduceResult {
   next = emptyPools(next, events);
   // 383.3.e: "N times each turn" counters reset with the turn.
   next = { ...next, triggersUsed: {} };
+  // 317.2.c again: a Delayed Passive scoped to this turn expires with the rest.
+  // Nothing to unwind — a Passive is consulted, never written onto anything,
+  // so dropping the entry stops every effect it was having at once.
+  if (next.turnEffects.length > 0) {
+    next = { ...next, turnEffects: [] };
+  }
   // 812.1.c scopes Legion to "the same turn", so the record of what was
   // Finalized resets here too.
   next = {

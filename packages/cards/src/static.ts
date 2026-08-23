@@ -118,7 +118,12 @@ export type Restriction =
    * card in the corpus has two Activated Abilities with only one gated — so
    * narrowing it would need an index the text does not supply.
    */
-  | { readonly kind: 'activateAbility' };
+  | { readonly kind: 'activateAbility' }
+  /**
+   * "Opponents can't play cards this turn" (358.4 with rule 002).
+   * Player-facing, like `score`.
+   */
+  | { readonly kind: 'playCards' };
 
 /** What a static does to the objects in its scope. */
 export interface StaticGrant {

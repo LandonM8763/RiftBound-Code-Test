@@ -2,6 +2,7 @@ import type { AbilityRef, CardId, Keyword } from '@riftbound/cards';
 
 import type {
   BattlefieldState,
+  DelayedPassive,
   EntityId,
   GameState,
   Outcome,
@@ -168,6 +169,14 @@ export interface GameView {
   readonly battlefields: readonly BattlefieldView[];
   /** The Chain, bottom to top. Its contents are public (rule 328). */
   readonly chain: readonly ChainItemView[];
+  /**
+   * 390.4's Delayed Passive Abilities for this turn.
+   *
+   * Public: creating one is announced at the table, and an agent that could not
+   * see "opponents can't play cards this turn" would keep offering plays the
+   * reducer then refuses.
+   */
+  readonly turnEffects: readonly DelayedPassive[];
   /** Rule 115.1.b.1, and 485.7's extra Rune for the player going second. */
   readonly firstPlayer: PlayerId;
   /**
@@ -289,6 +298,7 @@ export function observe(state: GameState, viewer: PlayerId): GameView {
     players,
     battlefields,
     // 328: the Chain is public, so every item is exposed in full.
+    turnEffects: state.turnEffects,
     chain: state.chain.map((item) => ({
       entity: reveal(item.entity, true),
       controller: item.controller,

@@ -203,6 +203,7 @@ export function createGame(options: CreateGameOptions): ReduceResult {
     nextEntityId,
     definitions,
     chain: [],
+    turnEffects: [],
     // The Mulligan is a choice, so the First Player acts immediately (117).
     priority: startingPlayer,
     showdown: null,

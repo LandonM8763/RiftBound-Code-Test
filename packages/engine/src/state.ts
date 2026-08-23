@@ -3,8 +3,10 @@ import {
   type AbilityRef,
   type CardDefinition,
   type CardId,
+  type CostModifier,
   type Domain,
   type Keyword,
+  type StaticAbility,
   type TriggerEvent,
 } from '@riftbound/cards';
 
@@ -291,6 +293,26 @@ export interface PlayerState {
  * that process atomically, so an item is only ever observed Finalized — the
  * flag exists so the distinction survives when Pending windows arrive.
  */
+/**
+ * One Delayed Passive Ability (390.4): an ordinary Passive with a window.
+ *
+ * Carries the same `source` and `controller` a Board static does, so the
+ * sweeps that gather statics and cost modifiers treat it identically — a
+ * `here` scope still measures from the card that created it, and a `self`
+ * scope still means that card.
+ */
+export interface DelayedPassive {
+  readonly source: EntityId;
+  readonly controller: PlayerId;
+  readonly ability?: StaticAbility | undefined;
+  readonly costModifier?: CostModifier | undefined;
+  /**
+   * "The **next** spell you play this turn" — how many applications are left,
+   * or `null` for every one this turn.
+   */
+  readonly uses: number | null;
+}
+
 export interface ChainItem {
   /** The played card, or the source of the ability. */
   readonly entity: EntityId;
@@ -534,6 +556,14 @@ export interface GameState {
    * The last element is the top: the next item to resolve.
    */
   readonly chain: readonly ChainItem[];
+  /**
+   * Rule 390.4's Delayed Passive Abilities, scoped to this turn.
+   *
+   * Held on the game rather than on a player because `activeStatics` and
+   * `activeModifiers` both sweep globally and each carries its own controller
+   * — the same shape a Board static has. 317.2.c empties this at the Cleanup.
+   */
+  readonly turnEffects: readonly DelayedPassive[];
   /** Who may take Discretionary Actions right now (rule 312). */
   readonly priority: PlayerId | null;
   /** The open Showdown, if any (rule 341). */

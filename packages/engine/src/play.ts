@@ -276,6 +276,13 @@ export function playableFromHand(
 ): { readonly entity: Entity; readonly check: PlayableCheck }[] {
   const results: { entity: Entity; check: PlayableCheck }[] = [];
 
+  // Rule 002 with 358.4: "opponents can't play cards this turn" removes the
+  // permission outright, so nothing from the hand is offered at all. Asked once
+  // rather than per card, since it is about the player.
+  if (playerForbidden(state, player, 'playCards')) {
+    return results;
+  }
+
   for (const id of getPlayer(state, player).zones.hand) {
     const card = entityCard(state, id);
     if (!timingAllows(card, timing)) {

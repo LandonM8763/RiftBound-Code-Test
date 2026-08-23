@@ -66,6 +66,23 @@ export interface ActiveModifier {
  */
 export function activeModifiers(state: GameState): readonly ActiveModifier[] {
   const found: ActiveModifier[] = [];
+  // 390.4: "the next spell you play this turn costs 5 less" is an ordinary
+  // cost modifier with a window, so it joins the sweep. 366.2.a is why it
+  // applies to a card still in hand: a cost-altering Passive applies "at all
+  // times in any zone from which the card with the ability can be played".
+  for (const delayed of state.turnEffects) {
+    if (delayed.costModifier === undefined || delayed.uses === 0) {
+      continue;
+    }
+    if (!conditionMet(state, delayed.controller, delayed.source, delayed.costModifier.condition)) {
+      continue;
+    }
+    found.push({
+      controller: delayed.controller,
+      modifier: delayed.costModifier,
+      source: delayed.source,
+    });
+  }
   // Computed once: `grantedAbilities` sweeps the Board, and this walk already
   // visits every entity on it.
   const granting = grantingStatics(state);

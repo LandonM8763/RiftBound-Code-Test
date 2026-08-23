@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 254 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 258 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -1278,6 +1278,7 @@ check at the one place that rule lives:
 | `score` | 467 | `conquer`, the Scoring Step, and the `score` effect |
 | `readyByEffect` | 419 | the `ready` effect |
 | `playAwayFromBase` | 355.2 | `validUnitLocations` |
+| `playCards` | 358.4 | `playableFromHand` |
 | `activateAbility` | 377, 380 | `activatableAbilities` |
 
 Three things are load-bearing:
@@ -1540,6 +1541,46 @@ narrows. What a Gear cannot be is *damaged*, and no card says "deal 3 to a
 gear", so the narrowing lives on the spec rather than on each effect. This is
 separate from `TargetSpec.gear`, which is 821.1.c's "a Card **you control** with
 the Equipment tag" and admits an already-Attached one.
+
+### Delayed Passive Abilities
+
+Rule 390.4, with `Effect.thisTurn` in `cards/effect.ts` and
+`GameState.turnEffects` in the engine.
+
+**A duration is a Passive with a window, and 390.1 is why that is the whole
+design.** "A Delayed Ability can be any other type of Ability, and contains all
+of the properties of that type in addition to the properties of Delayed
+Abilities" — so `thisTurn` carries the ordinary `StaticAbility` or
+`CostModifier` it *is*, and the window is the only thing it adds. Everything a
+Board static can already say became turn-scopable with no second vocabulary:
+`activeStatics` and `activeModifiers` each grew one branch rather than a
+parallel system.
+
+Four things are load-bearing:
+
+- **Nothing is written onto any Game Object, and that is what makes expiry
+  free.** A Passive is *consulted*, so 317.2.c drops the entry and every effect
+  it was having stops at once, with nothing to unwind. The same discipline
+  `staticMight` follows.
+- **"The next" is a counted window and the count is never dropped.** Read as
+  uncounted, "the next spell you play this turn costs 5 less" becomes every
+  spell — strictly stronger than printed. `uses` is spent by `spendDelayed`
+  when the entry *would have applied*, asked with the same predicates the cost
+  machinery and `entersReady` use, because a discount that hits an already-zero
+  cost still applied.
+- **A use is spent before the played card's own rules text runs.** Otherwise a
+  Play Effect that opens a window ("the next unit you play this turn enters
+  ready") would immediately spend it on the card that created it.
+- **A `self` window is refused.** It would be about the card that opened it,
+  which for a Spell is in the trash before anything reads it — a Passive that
+  can never apply.
+
+**The clause rule is listed last in `CLAUSES`, and that is not tidiness.** Its
+pattern matches almost any line containing "this turn", and `matchClause` takes
+the first rule that consumes the line whole — so ordered earlier it shadowed
+eleven cards that were already parsing, dropping coverage from 254 to 243
+before the order was fixed. A test pins that an ordinary "+2 Might this turn"
+still wins.
 
 **Playing a card out of the trash is the ordinary Process of Play**, not a new
 action: 354 moves a card to the Chain "from its current zone", so the only
@@ -2126,15 +2167,15 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 254 of the 468 cards that have text** — 246 parsed and 8 hand-authored, and the shape of what is
+**Coverage is 258 of the 468 cards that have text** — 250 parsed and 8 hand-authored, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 246 |
+| Fully parsed | 250 |
 | Hand-authored | 8 |
-| Blocked | 214 |
+| Blocked | 210 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 4 times, the next 2, and every one of
@@ -2317,6 +2358,7 @@ What each round actually delivered, for calibrating the next projection:
 | Five trigger events and six trigger filters | **+10** delivered |
 | The triggering object as a target, and a floored static grant | **+3** delivered |
 | Playing a card out of the trash (354, 355.2) | +5 projected, **+3** delivered |
+| Delayed Passive Abilities (390.4) | +5 projected, **+4** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic
