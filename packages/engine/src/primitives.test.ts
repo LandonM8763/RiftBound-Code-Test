@@ -183,6 +183,7 @@ function run(
     // and `move` gets its Contest/Cleanup coverage through a played card below.
     afterMove: (current) => current,
     raise: (current) => current,
+    queueLinked: (current) => current,
   };
   return {
     state: executeEffect(
@@ -238,6 +239,7 @@ describe('kill (rule 428)', () => {
       },
       afterMove: (current) => current,
       raise: (current) => current,
+      queueLinked: (current) => current,
     };
     executeEffect(
       state,

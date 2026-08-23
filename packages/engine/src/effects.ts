@@ -91,6 +91,14 @@ export interface EffectInvocation {
    */
   readonly triggerObject?: EntityId | undefined;
   /**
+   * 424: the cards this effect's generator looked at, for a `revealed` target
+   * and for "recycle the rest".
+   *
+   * Noted rather than moved — 424.1.a.2 leaves them in the deck — so a card
+   * that has since gone elsewhere is simply no longer among them.
+   */
+  readonly revealed?: readonly EntityId[] | undefined;
+  /**
    * 808.1.d.3: the Battlefield noted when this ability's source left the Board.
    *
    * "Deal 4 to all units at my battlefield" printed as a Deathknell resolves
@@ -145,6 +153,22 @@ export interface EffectContext {
    * Supplied rather than done here for the same reason as `queueDeaths`: this
    * layer executes effects and the Chain lives above it.
    */
+  /**
+   * 390.5: put a Delayed Linked Ability on the Chain, carrying the cards its
+   * generator looked at.
+   *
+   * Supplied rather than done here for the same reason `raise` is: this layer
+   * executes effects and the Chain lives above it.
+   */
+  readonly queueLinked: (
+    state: GameState,
+    controller: PlayerId,
+    source: EntityId,
+    effect: CardEffect,
+    revealed: readonly EntityId[],
+    revealedToAll: boolean,
+    events: GameEvent[],
+  ) => GameState;
   readonly raise: (
     state: GameState,
     instance: TriggerEventInstance,
@@ -169,7 +193,22 @@ export function legalTargets(
   spec: TargetSpec,
   /** The effect's source, for the source-relative `here` and `excludeSelf`. */
   source?: EntityId | undefined,
+  /** 424: the cards this effect's generator looked at (390.5). */
+  revealed?: readonly EntityId[] | undefined,
 ): EntityId[] {
+  // 390.5: one of the cards the generating look revealed. The set exists only
+  // on the Chain item, which is why it is passed in rather than swept for.
+  if (spec.kind === 'revealed') {
+    return (revealed ?? []).filter((card) => {
+      if (state.entities[card] === undefined) {
+        return false;
+      }
+      return (
+        spec.cardTypes === undefined || spec.cardTypes.includes(entityCard(state, card).type)
+      );
+    });
+  }
+
   // "A unit from your trash" — a card in a Non-Board Zone, not a Game Object on
   // the Board, so this walks the trash rather than the Battlefields and Bases.
   if (spec.kind === 'trashCard') {
@@ -436,7 +475,7 @@ function consumesTarget(kind: Effect['kind']): boolean {
     case 'spendBuff':
     case 'move':
     case 'toHand':
-    case 'playFromTrash':
+    case 'play':
     case 'grantKeyword':
     case 'attach':
     case 'equip':
@@ -472,6 +511,8 @@ export function isValidTarget(
   spec: TargetSpec,
   targets: readonly EntityId[] | undefined,
   source?: EntityId | undefined,
+  /** 424: the cards a Linked Ability's generator looked at (390.5). */
+  revealed?: readonly EntityId[] | undefined,
 ): boolean {
   const chosen = targets ?? [];
   // A self-targeting card takes no chosen target; supplying one is an error,
@@ -488,7 +529,7 @@ export function isValidTarget(
   if (new Set(chosen).size !== chosen.length) {
     return false;
   }
-  const legal = legalTargets(state, controller, spec, source);
+  const legal = legalTargets(state, controller, spec, source, revealed);
   return chosen.every((one) => legal.includes(one));
 }
 
@@ -593,6 +634,7 @@ export function executeEffect(
           events,
           context,
           invocation.noted,
+          invocation.revealed,
         );
       }
       continue;
@@ -609,6 +651,7 @@ export function executeEffect(
       events,
       context,
       invocation.noted,
+      invocation.revealed,
     );
   }
   return next;
@@ -644,6 +687,8 @@ function applyEffect(
   context: EffectContext,
   /** 808.1.d.3's noted Battlefield, for a "here" whose source has left the Board. */
   noted?: number | undefined,
+  /** 424: the cards this effect's generator looked at (390.5). */
+  invocationRevealed: readonly EntityId[] = [],
 ): GameState {
   const target = choices.targets?.[0];
   switch (effect.kind) {
@@ -1082,6 +1127,76 @@ function applyEffect(
     }
 
     /**
+     * 424 with 390.5: look at (or reveal) the top cards, then queue the Linked
+     * Ability that acts on them.
+     *
+     * 424.1.a.2 keeps the cards where they are, so nothing moves here: the set
+     * is noted onto the Chain item, and the choice among it is made at 402.2
+     * through the machinery a Triggered Ability already uses.
+     *
+     * 431.1.c: running short looks at as many as possible and is explicitly
+     * **not** a Burn Out — which is why this takes what it can and stops.
+     */
+    case 'look': {
+      const deck = getPlayer(state, controller).zones.mainDeck;
+      const looked: EntityId[] = [];
+      for (const card of deck) {
+        if (looked.length >= Math.max(0, effect.count)) {
+          break;
+        }
+        looked.push(card);
+        // "Reveal cards … until you reveal a unit": the count is a cap, and
+        // the first match ends the look.
+        if (effect.until !== undefined && entityCard(state, card).type === effect.until) {
+          break;
+        }
+      }
+      if (looked.length === 0) {
+        return state;
+      }
+      events.push({
+        type: 'cardsLookedAt',
+        player: controller,
+        count: looked.length,
+        revealed: effect.reveal === true,
+      });
+      return context.queueLinked(
+        state,
+        controller,
+        source,
+        effect.then,
+        looked,
+        effect.reveal === true,
+        events,
+      );
+    }
+
+    // 416.1: to the bottom of its *owner's* Main Deck — 416.1.c is explicit
+    // that each player Recycles to their own deck however the instruction read.
+    case 'recycle': {
+      if (target === undefined || state.entities[target] === undefined) {
+        return state;
+      }
+      const owner = getEntity(state, target).controller;
+      return sendToNonBoardZone(state, target, playerLocation(owner, 'mainDeck'), 'bottom');
+    }
+
+    // "Then recycle the rest": everything looked at that was not chosen. The
+    // complement of a choice, which no `TargetSpec` can name.
+    case 'recycleRest': {
+      const chosen = new Set(choices.targets ?? []);
+      let next = state;
+      for (const card of invocationRevealed) {
+        if (chosen.has(card) || next.entities[card] === undefined) {
+          continue;
+        }
+        const owner = getEntity(next, card).controller;
+        next = sendToNonBoardZone(next, card, playerLocation(owner, 'mainDeck'), 'bottom');
+      }
+      return next;
+    }
+
+    /**
      * 354 with 355.2: play the chosen card out of the trash.
      *
      * Rule 354 moves a card to the Chain "from its current zone", so this is
@@ -1095,7 +1210,7 @@ function applyEffect(
      * point during resolution the engine does not have — so the parser refuses
      * that wording rather than resolving it into nothing.
      */
-    case 'playFromTrash': {
+    case 'play': {
       if (target === undefined) {
         return state;
       }

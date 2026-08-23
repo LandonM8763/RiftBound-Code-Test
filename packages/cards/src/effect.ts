@@ -243,6 +243,22 @@ export type TargetSpec =
    */
   | { readonly kind: 'gear'; readonly scope: 'friendly' }
   /**
+   * One of the cards this effect's Linked Ability looked at or revealed
+   * (390.5, 424) — "look at the top 3, put **one** into your hand".
+   *
+   * A choice among a set that does not exist until the look happens, which is
+   * why it can only appear inside a `look`'s `then`: the set rides on the Chain
+   * item the look created, and 424.1.a.2 leaves the cards in the deck while it
+   * does.
+   */
+  | {
+      readonly kind: 'revealed';
+      /** "a **gear** from among them" — narrows the set, never widens it. */
+      readonly cardTypes?: readonly CardType[] | undefined;
+      /** "you may recycle **one or both** of them" (355.6). */
+      readonly count?: TargetCount | undefined;
+    }
+  /**
    * The Game Object the event that triggered this ability was about — the "it"
    * of "When a friendly unit dies, buff **it**".
    *
@@ -355,11 +371,12 @@ export type Effect =
       readonly per?: Count | undefined;
     }
   /**
-   * Play the chosen card out of the trash (354, 355.2).
+   * Play the chosen card, wherever it currently is (354, 355.2).
    *
-   * Rule 354 moves a card to the Chain "from its current zone", so playing one
-   * out of the trash is the ordinary Process of Play with a different starting
-   * zone — not a new kind of action. The engine's existing simplification
+   * Rule 354 moves a card to the Chain "from its current zone", so this is the
+   * ordinary Process of Play with a different starting zone — not a new kind of
+   * action, and not specific to the trash: the same verb plays a card a `look`
+   * revealed on top of the Main Deck. The engine's existing simplification
    * applies: 359.2 takes a Permanent off the Chain the moment it is Finalized,
    * so a Unit goes straight to the Board and nothing can respond in between.
    *
@@ -369,7 +386,7 @@ export type Effect =
    * does not have — so the parser refuses that wording rather than making the
    * card free.
    */
-  | { readonly kind: 'playFromTrash'; readonly ignore: 'all' | 'energy' }
+  | { readonly kind: 'play'; readonly ignore: 'all' | 'energy' }
   /**
    * Rule 390.4: a **Delayed Passive Ability** — a Passive that applies only
    * during a stated window, here "this turn".
@@ -391,6 +408,48 @@ export type Effect =
       readonly costModifier?: CostModifier | undefined;
       readonly uses?: number | undefined;
     }
+  /**
+   * Rules 424 and 390.5: look at (or reveal) cards from the top of the Main
+   * Deck, then run a Linked Ability that may choose among them.
+   *
+   * 424.1.a.2 is the whole reason this is not a zone move: revealed cards stay
+   * where they were, so the looked-at set is *noted*, not relocated. It rides
+   * on the Chain item `then` becomes, which is what lets `TargetSpec.revealed`
+   * enumerate it at 402.2 through the machinery a Triggered Ability already
+   * uses — no mid-resolution decision point required.
+   *
+   * `reveal` is 424.1's presentation to all players; without it the cards are
+   * Private to the looking player (128.4), and the view redacts accordingly.
+   *
+   * 431.1.c: looking at more cards than the deck holds looks at as many as
+   * possible and is explicitly **not** a Burn Out.
+   */
+  | {
+      readonly kind: 'look';
+      readonly count: number;
+      readonly reveal?: boolean | undefined;
+      /** "reveal cards … **until you reveal a unit**" — the count is a cap. */
+      readonly until?: CardType | undefined;
+      readonly then: CardEffect;
+    }
+  /**
+   * Rule 416: Recycle the chosen card to the bottom of its **owner's** Main
+   * Deck.
+   *
+   * 416.1.c is explicit that each player Recycles to their own deck regardless
+   * of who was instructed, which matters the moment an effect reaches a card
+   * an opponent owns.
+   */
+  | { readonly kind: 'recycle' }
+  /**
+   * "Then recycle **the rest**" — every card the Linked Ability looked at and
+   * did not choose.
+   *
+   * Its own verb rather than a filter on `recycle`, because the set it names is
+   * the complement of a choice, which no `TargetSpec` can state: a target spec
+   * says what may be chosen, and this is what was not.
+   */
+  | { readonly kind: 'recycleRest' }
   /** Rule 429: Add resources to the controller's Rune Pool. */
   | { readonly kind: 'addEnergy'; readonly count: number }
   | { readonly kind: 'addPower'; readonly domain: Domain; readonly count: number }
@@ -651,6 +710,7 @@ export function needsTargetChoice(spec: TargetSpec | undefined): boolean {
     (spec.kind === 'unit' ||
       spec.kind === 'trashCard' ||
       spec.kind === 'gear' ||
+      spec.kind === 'revealed' ||
       spec.kind === 'chainItem')
   );
 }
@@ -660,7 +720,10 @@ export function needsTargetChoice(spec: TargetSpec | undefined): boolean {
  * exactly one, so this is where the default lives rather than at each caller.
  */
 export function targetCount(spec: TargetSpec | undefined): TargetCount {
-  return spec?.kind === 'unit' && spec.count !== undefined ? spec.count : { min: 1, max: 1 };
+  if ((spec?.kind === 'unit' || spec?.kind === 'revealed') && spec.count !== undefined) {
+    return spec.count;
+  }
+  return { min: 1, max: 1 };
 }
 
 /** True when playing this card requires the player to choose a Destination. */

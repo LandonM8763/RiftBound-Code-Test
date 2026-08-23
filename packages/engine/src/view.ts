@@ -1,4 +1,4 @@
-import type { AbilityRef, CardId, Keyword } from '@riftbound/cards';
+import type { AbilityRef, CardEffect, CardId, Keyword } from '@riftbound/cards';
 
 import type {
   BattlefieldState,
@@ -67,6 +67,15 @@ export interface ChainItemView {
   readonly targets: readonly EntityId[];
   /** The "it" of a Triggered Ability's effect — public like the rest (328). */
   readonly triggerObject: EntityId | null;
+  /** 390.5: the Linked Ability's effect, when this item is one. */
+  readonly linked: CardEffect | null;
+  /**
+   * 424: the cards this item looked at. Their *identities* are redacted unless
+   * 424.1 presented them to all players or the viewer did the looking (128.4);
+   * how many there are is public either way, because the act is visible.
+   */
+  readonly revealed: readonly EntityView[];
+  readonly revealedToAll: boolean;
   /** 377.3.a.1: which ability, when this item is one rather than a card. */
   readonly ability: AbilityRef | null;
   /**
@@ -305,6 +314,12 @@ export function observe(state: GameState, viewer: PlayerId): GameView {
       pending: item.pending,
       targets: item.targets,
       triggerObject: item.triggerObject,
+      linked: item.linked,
+      revealedToAll: item.revealedToAll,
+      // 128.4: a look is Private to the looking player; 424.1's reveal is not.
+      revealed: item.revealed.map((id) =>
+        reveal(id, item.revealedToAll || item.controller === viewer),
+      ),
       ability: item.ability,
       noted: item.noted,
     })),

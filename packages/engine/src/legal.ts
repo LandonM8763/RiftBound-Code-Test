@@ -5,6 +5,7 @@ import {
   targetCount,
   type CardEffect,
   type TargetSpec,
+  type TriggeredAbility,
 } from '@riftbound/cards';
 
 import { abilityFor, activatableAbilities, triggerCostPayable } from './abilities.js';
@@ -46,11 +47,13 @@ export function targetChoices(
   spec: TargetSpec | undefined,
   source: EntityId,
   filter?: (target: EntityId) => boolean,
+  /** 424: the cards a Linked Ability's generator looked at (390.5). */
+  revealed?: readonly EntityId[],
 ): readonly (readonly EntityId[])[] {
   if (!needsTargetChoice(spec)) {
     return [[]];
   }
-  const pool = legalTargets(state, player, spec as TargetSpec, source).filter(
+  const pool = legalTargets(state, player, spec as TargetSpec, source, revealed).filter(
     (one) => filter === undefined || filter(one),
   );
   const { min, max } = targetCount(spec);
@@ -105,19 +108,29 @@ export function legalActions(state: GameState, player: PlayerId): readonly Actio
   // in one step.
   const top = state.chain[state.chain.length - 1];
   if (top !== undefined && top.pending && top.controller === player) {
-    // Only an Ability is ever pending: 359 finalizes a card atomically, so a
-    // Chain item with no `ability` cannot be waiting at step 2.
-    const ability = top.ability === null ? undefined : abilityFor(state, top.entity, top.ability);
+    // A pending item is either an Ability (359 finalizes a card atomically) or
+    // 390.5's Delayed Linked Ability, which carries its effect inline because
+    // it is on no card's ability list.
+    const ability =
+      top.linked !== null
+        ? { effect: top.linked }
+        : top.ability === null
+          ? undefined
+          : abilityFor(state, top.entity, top.ability);
     if (ability === undefined) {
       return [];
     }
     const spec = ability.effect.target;
-    const choices = targetChoices(state, player, spec, top.entity);
+    const choices = targetChoices(state, player, spec, top.entity, undefined, top.revealed);
     const pendingActions: Action[] = [];
     // 403 with 356.7: an ability whose price cannot be met is not performable,
     // so only the decline is offered. 402.4.b then makes that mandatory rather
     // than a choice — which is right, since there is nothing else to do.
-    const affordablePrice = triggerCostPayable(state, player, ability, top.entity);
+    // 390.5's Linked Ability has no price of its own; only a Triggered Ability
+    // can carry one (403).
+    const affordablePrice =
+      top.linked !== null ||
+      triggerCostPayable(state, player, ability as TriggeredAbility, top.entity);
     for (const targets of affordablePrice ? choices : []) {
       for (const destination of choicesOfDestination(state, player, ability.effect)) {
         pendingActions.push({

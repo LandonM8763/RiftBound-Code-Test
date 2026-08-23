@@ -601,6 +601,7 @@ describe("scoring by effect (467-471)", () => {
         queueDeaths: (current) => current,
         afterMove: (current) => current,
         raise: (current) => current,
+        queueLinked: (current) => current,
       },
     );
 

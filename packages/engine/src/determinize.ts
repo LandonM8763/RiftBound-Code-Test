@@ -198,6 +198,11 @@ export function determinize(view: GameView, knowledge: Knowledge, seed: number |
       pending: item.pending,
       targets: item.targets,
       triggerObject: item.triggerObject,
+      linked: item.linked,
+      // 424.1.a.2: the cards stay in the deck, so a determinized world keeps
+      // the note. A viewer who may not see their faces still knows how many.
+      revealed: item.revealed.map((card) => card.id),
+      revealedToAll: item.revealedToAll,
       destination: null,
       ability: item.ability,
     };

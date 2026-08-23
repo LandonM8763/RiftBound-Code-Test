@@ -2,6 +2,7 @@ import {
   DOMAINS,
   type AbilityRef,
   type CardDefinition,
+  type CardEffect,
   type CardId,
   type CostModifier,
   type Domain,
@@ -351,6 +352,28 @@ export interface ChainItem {
    * trash, a resolved ability leaves its source alone.
    */
   readonly ability: AbilityRef | null;
+  /**
+   * The effect of a **Delayed Linked Ability** (390.5), inline rather than
+   * looked up on a card.
+   *
+   * A look-and-choose generates it: "look at the top 3, put one into your hand"
+   * is one ability that reveals and a linked one that chooses among what it
+   * revealed. It is not in the source card's ability list, so there is no index
+   * to reference — which is why the effect rides here.
+   */
+  readonly linked: CardEffect | null;
+  /**
+   * The cards this item's Linked Ability looked at (424).
+   *
+   * 424.1.a.2 keeps them in the zone they were revealed from, so this is a
+   * *note* of which cards, not a zone. Empty for every other kind of item.
+   */
+  readonly revealed: readonly EntityId[];
+  /**
+   * 424.1 versus 128.4: whether the look was presented to all players or seen
+   * by the looking player alone. The view redacts on this.
+   */
+  readonly revealedToAll: boolean;
   /**
    * Rule 356.2.b: whether the optional Additional Cost was declared when this
    * was played.

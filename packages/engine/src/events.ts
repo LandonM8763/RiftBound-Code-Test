@@ -153,6 +153,20 @@ export type GameEvent =
   | { readonly type: 'attached'; readonly card: EntityId; readonly topMost: EntityId }
   /** Rule 801.3.a: a keyword was granted to a Unit until end of turn. */
   | { readonly type: 'keywordGranted'; readonly unit: EntityId; readonly keyword: Keyword }
+  /**
+   * Rule 424: cards were looked at, or revealed, from the top of a Main Deck.
+   *
+   * Only the count, never the identities: 128.4 keeps a look Private to the
+   * looking player, and the event log is read by everyone. `revealed` says
+   * which of the two happened, so a consumer can render 424.1's presentation
+   * differently from a private look.
+   */
+  | {
+      readonly type: 'cardsLookedAt';
+      readonly player: PlayerId;
+      readonly count: number;
+      readonly revealed: boolean;
+    }
   /** Cards were put into their owner's hand — a bounce or a retrieval. */
   | {
       readonly type: 'returnedToHand';

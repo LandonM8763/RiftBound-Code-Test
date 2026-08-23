@@ -457,6 +457,7 @@ function executeEffectFor(
       queueDeaths: (current) => current,
       afterMove: (current) => current,
       raise: (current) => current,
+      queueLinked: (current) => current,
     },
   );
 }

@@ -2539,7 +2539,7 @@ describe("playing a card out of the trash (354, 355.2)", () => {
     expect(parsed.abilities?.triggered?.[0]?.effect).toEqual({
       target: { kind: "trashCard", cardTypes: ["unit"], maxEnergy: 3, maxPower: 1 },
       destination: { kind: "unitEntry" },
-      effects: [{ kind: "playFromTrash", ignore: "all" }],
+      effects: [{ kind: "play", ignore: "all" }],
     });
     expect(parsed.abilities?.triggered?.[0]?.optional).toBe(true);
   });
@@ -2549,7 +2549,7 @@ describe("playing a card out of the trash (354, 355.2)", () => {
       "When you play me, you may play a unit from your trash, ignoring its Energy cost.",
     );
     expect(energyOnly.abilities?.triggered?.[0]?.effect.effects).toEqual([
-      { kind: "playFromTrash", ignore: "energy" },
+      { kind: "play", ignore: "energy" },
     ]);
   });
 
@@ -2626,5 +2626,75 @@ describe("Delayed Passive Abilities (rule 390.4)", () => {
 
   it("refuses a `self` window, which would be about a card already in the trash", () => {
     expect(parseCardText("I have +1 Might this turn.").unparsed).not.toEqual([]);
+  });
+});
+
+describe("looking at the top of the deck (424, 390.5)", () => {
+  it("reads the look and its Linked Ability as one statement", () => {
+    const parsed = parseCardText(
+      "Look at the top 3 cards of your Main Deck. Put 1 into your hand and recycle the rest.",
+    );
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.effect?.effects).toEqual([
+      {
+        kind: "look",
+        count: 3,
+        then: {
+          target: { kind: "revealed" },
+          effects: [{ kind: "toHand" }, { kind: "recycleRest" }],
+        },
+      },
+    ]);
+  });
+
+  it("424.1: distinguishes a reveal from a private look", () => {
+    const revealed = parseCardText(
+      "When I attack, you may reveal the top 2 cards of your Main Deck. You may play one. Then recycle the rest.",
+    );
+    expect(revealed.unparsed).toEqual([]);
+    const effect = revealed.abilities?.triggered?.[0]?.effect.effects[0];
+    expect(effect).toMatchObject({ kind: "look", count: 2, reveal: true });
+    // "You may play one" is a choice of zero or one, not a refusal.
+    expect((effect as { then: { target: unknown } }).then.target).toEqual({
+      kind: "revealed",
+      count: { min: 0, max: 1 },
+    });
+  });
+
+  it("reads a guarded disposition, with `otherwise` negating the branch before", () => {
+    const parsed = parseCardText(
+      "When I move, reveal the top card of your Main Deck. If it's a gear, draw it. Otherwise, recycle it.",
+    );
+    expect(parsed.unparsed).toEqual([]);
+    const then = (
+      parsed.abilities?.triggered?.[0]?.effect.effects[0] as { then: { effects: unknown } }
+    ).then;
+    expect(then.effects).toEqual([
+      { kind: "toHand", condition: { kind: "targetIs", cardType: "gear" } },
+      {
+        kind: "recycle",
+        condition: { kind: "not", condition: { kind: "targetIs", cardType: "gear" } },
+      },
+    ]);
+  });
+
+  it("424.3: reads a look bounded by what it finds rather than by a count", () => {
+    const parsed = parseCardText(
+      "At the end of your turn, reveal cards from the top of your Main Deck until you reveal a unit. Play it, ignoring its cost, and recycle the rest.",
+    );
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.triggered?.[0]?.effect.effects[0]).toMatchObject({
+      kind: "look",
+      until: "unit",
+      reveal: true,
+    });
+  });
+
+  it("refuses a disposition that is not about the cards just looked at", () => {
+    // The Linked Ability references what its generator affected (390.5); a body
+    // choosing something else is a different card, not this shape.
+    expect(
+      parseCardText("Look at the top 3 cards of your Main Deck. Kill an enemy unit.").unparsed,
+    ).not.toEqual([]);
   });
 });

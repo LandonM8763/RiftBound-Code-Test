@@ -30,10 +30,12 @@ import { moveEntity, withEntity, withPlayer } from "./mutate.js";
 import { reduce } from "./reduce.js";
 import { createGame, type DeckList } from "./setup.js";
 import { isToken } from "./token.js";
+import { observe } from "./view.js";
 import {
   battlefieldLocation,
   getEntity,
   isOver,
+  playerId,
   playerLocation,
   type EntityId,
   type GameState,
@@ -95,7 +97,28 @@ const NECROMANCER = makeUnit(2, ["fury"], {
         effect: {
           target: { kind: "trashCard", cardTypes: ["unit"] },
           destination: { kind: "unitEntry" },
-          effects: [{ kind: "playFromTrash", ignore: "energy" }],
+          effects: [{ kind: "play", ignore: "energy" }],
+        },
+      },
+    ],
+  },
+});
+
+/** "Look at the top 3 of your Main Deck. Put 1 into your hand and recycle the rest." */
+const STACKED = makeSpell(["fury"], {
+  id: cardId("Z-016"),
+  name: "Stacked Deck",
+  cost: cost(1),
+  timing: "action",
+  effect: {
+    target: { kind: "none" },
+    effects: [
+      {
+        kind: "look",
+        count: 3,
+        then: {
+          target: { kind: "revealed" },
+          effects: [{ kind: "toHand" }, { kind: "recycleRest" }],
         },
       },
     ],
@@ -115,6 +138,7 @@ const REGISTRY = CardRegistry.from([
   ATTENDANT,
   DRUMMER,
   NECROMANCER,
+  STACKED,
   RUNE,
   ...BATTLEFIELDS,
 ] as CardDefinition[]);
@@ -129,6 +153,7 @@ function deck(): DeckList {
       ...Array.from({ length: 3 }, () => ATTENDANT.id),
       ...Array.from({ length: 3 }, () => DRUMMER.id),
       ...Array.from({ length: 3 }, () => NECROMANCER.id),
+      ...Array.from({ length: 3 }, () => STACKED.id),
     ],
     runes: Array.from({ length: 8 }, () => RUNE.id),
     battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
@@ -459,5 +484,94 @@ describe("playing a card out of the trash (354, 355.2)", () => {
     expect(
       legalTargets(state, state.activePlayer, { kind: "trashCard", cardTypes: ["unit"] }),
     ).not.toContain(spell);
+  });
+});
+
+describe("looking at the top of the deck (424, 390.5)", () => {
+  /** Play the Spell and let the look resolve, stopping at the pending choice. */
+  const cast = (state: GameState): GameState => {
+    const [withCard, card] = inHand(state, STACKED.id);
+    let next = reduce(withCard, { type: "playCard", card }).state;
+    next = reduce(next, { type: "pass" }).state;
+    return reduce(next, { type: "pass" }).state;
+  };
+
+  it("424.1.a.2: the cards stay in the deck while they are looked at", () => {
+    const state = inMainPhase("look");
+    const me = state.activePlayer;
+    const top3 = state.players[me]!.zones.mainDeck.slice(0, 3);
+
+    const after = cast(state);
+    const item = after.chain[after.chain.length - 1];
+    expect(item?.pending).toBe(true);
+    expect(item?.revealed).toEqual(top3);
+    // Still in the Main Deck: a look is not a zone change.
+    for (const card of top3) {
+      expect(after.players[me]!.zones.mainDeck).toContain(card);
+    }
+    checkInvariants(after);
+  });
+
+  it("390.5: the Linked Ability offers one choice per card it looked at", () => {
+    const state = cast(inMainPhase("choices"));
+    const offers = currentLegalActions(state).filter(
+      (action) => action.type === "resolveTrigger",
+    ) as { targets?: readonly EntityId[] }[];
+    const revealed = state.chain[state.chain.length - 1]?.revealed ?? [];
+    expect(offers).toHaveLength(revealed.length);
+    expect(new Set(offers.map((offer) => offer.targets?.[0]))).toEqual(new Set(revealed));
+  });
+
+  it("takes the chosen card and recycles the rest to the bottom (416.1)", () => {
+    let state = cast(inMainPhase("resolve"));
+    const me = state.activePlayer;
+    const revealed = [...(state.chain[state.chain.length - 1]?.revealed ?? [])];
+    const deckBefore = state.players[me]!.zones.mainDeck.length;
+    const handBefore = state.players[me]!.zones.hand.length;
+    const chosen = revealed[1] as EntityId;
+
+    state = reduce(state, { type: "resolveTrigger", perform: true, targets: [chosen] }).state;
+    while (state.chain.length > 0) {
+      state = reduce(state, { type: "pass" }).state;
+    }
+
+    expect(state.players[me]!.zones.hand).toContain(chosen);
+    expect(state.players[me]!.zones.hand).toHaveLength(handBefore + 1);
+    expect(state.players[me]!.zones.mainDeck).toHaveLength(deckBefore - 1);
+    // The two it did not take went to the bottom, in the order they were seen.
+    const bottom = state.players[me]!.zones.mainDeck.slice(-2);
+    expect(new Set(bottom)).toEqual(new Set(revealed.filter((id) => id !== chosen)));
+    checkInvariants(state);
+  });
+
+  it("128.4: a look is Private to the looking player, and 424.1's reveal is not", () => {
+    const state = cast(inMainPhase("privacy"));
+    const me = state.activePlayer;
+    const them = playerId((me + 1) % state.players.length);
+
+    const mine = observe(state, me).chain.at(-1);
+    const theirs = observe(state, them).chain.at(-1);
+    // Both see *that* three cards were looked at — the act is visible.
+    expect(mine?.revealed).toHaveLength(3);
+    expect(theirs?.revealed).toHaveLength(3);
+    // Only the looking player sees which.
+    expect(mine?.revealed.every((card) => card.card !== null)).toBe(true);
+    expect(theirs?.revealed.every((card) => card.card === null)).toBe(true);
+  });
+
+  it("431.1.c: looking at more than the deck holds is not a Burn Out", () => {
+    let state = inMainPhase("short-deck");
+    const me = state.activePlayer;
+    // Leave one card in the deck, then look at three.
+    const deck = state.players[me]!.zones.mainDeck;
+    let trimmed = state;
+    for (const card of deck.slice(1)) {
+      trimmed = moveEntity(trimmed, card, playerLocation(me, "trash"));
+    }
+    state = cast(trimmed);
+
+    expect(state.chain[state.chain.length - 1]?.revealed).toHaveLength(1);
+    expect(state.players[me]!.points).toBe(0);
+    checkInvariants(state);
   });
 });
