@@ -295,6 +295,51 @@ export function unitHasKeyword(
   return hasKeyword(keywordsOf(state, unit), kind);
 }
 
+/**
+ * Rules 712-715: the Bonus Damage a Deal action gets, summed over every static
+ * that reaches it (714).
+ *
+ * The scope reads differently from `might`'s, and has to: `who` is about the
+ * player *dealing* the damage — "**Your** spells and abilities deal 1 Bonus
+ * Damage" — while `here` is about where the damaged Unit is, as in "spells and
+ * abilities affecting units **here**". That is the same split `objectForbidden`
+ * and `placeForbidden` already make for restrictions.
+ *
+ * 714.1: only a positive total applies, so a negative sum contributes nothing.
+ */
+export function bonusDamage(state: GameState, dealer: PlayerId, target: EntityId): number {
+  let total = 0;
+  for (const { source, controller, ability } of activeStatics(state)) {
+    const bonus = ability.grant.bonusDamage;
+    if (bonus === undefined || bonus === 0) {
+      continue;
+    }
+    const who = ability.affects.who;
+    const friendly = controller === dealer;
+    if (who === 'friendly' && !friendly) {
+      continue;
+    }
+    if (who === 'enemy' && friendly) {
+      continue;
+    }
+    // 355.9's "here", about the *damaged* Unit rather than the dealer.
+    if (ability.affects.here === true && !sameBattlefield(state, source, target)) {
+      continue;
+    }
+    total += bonus;
+  }
+  return Math.max(0, total);
+}
+
+/** Are these two Game Objects at the same Battlefield (355.9)? */
+function sameBattlefield(state: GameState, a: EntityId, b: EntityId): boolean {
+  const at = state.entities[a]?.location;
+  const to = state.entities[b]?.location;
+  return (
+    at?.kind === 'battlefield' && to?.kind === 'battlefield' && at.index === to.index
+  );
+}
+
 /** `keywordValue` over the printed *and* granted set; grants sum (807.2). */
 export function unitKeywordValue(
   state: GameState,

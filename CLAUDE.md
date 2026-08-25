@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 263 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 266 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -1542,6 +1542,44 @@ gear", so the narrowing lives on the spec rather than on each effect. This is
 separate from `TargetSpec.gear`, which is 821.1.c's "a Card **you control** with
 the Equipment tag" and admits an already-Attached one.
 
+### Bonus Damage
+
+Rules 712-715, with `StaticGrant.bonusDamage` and `bonusDamage` in
+`engine/statics.ts`.
+
+**The scope reads differently from `might`'s, and has to.** `who` is about the
+player *dealing* — "**Your** spells and abilities deal 1 Bonus Damage" — while
+`here` is about where the *damaged* Unit is, as in "spells and abilities
+affecting units **here**". That is the same split `objectForbidden` and
+`placeForbidden` already make for restrictions, and a fourth reading of the same
+scope shape.
+
+Four rules land as one line each:
+
+- **714**: every instance sums and applies once, which is what a single summing
+  sweep gives.
+- **714.1**: only a positive total applies, so `Math.max(0, …)`.
+- **715.2**: a multi-target Deal gets the bonus *per target*, which falls out of
+  asking inside the executor's per-target loop rather than outside it.
+- **715.4**: no damage Dealt means no Bonus Damage — the same `dealt < 1` guard
+  417.1.e already needed, so a 0-damage Deal is not turned into a 1.
+
+**It reaches `dealDamage` and nothing else**, which is exactly the "spells and
+abilities" every printing scopes it to: combat damage is assigned in
+`combat.ts` and never passes through the effect interpreter.
+
+**"The next spell you play deals 1 Bonus Damage" is a Delayed Passive with no
+"this turn" printed**, and the rulebook says so in as many words — "The next
+spell is a specific time, and the 1 Bonus Damage is a passive ability". So it
+reuses `thisTurn` with `uses: 1`, and `spendDelayed` closes the window when the
+spell is *played* rather than when it deals damage: a window on a spell that
+deals none would otherwise never close.
+
+Adding it also widened `parseStatic`'s verb list to include "deal", because
+712 states this grant as a verb where every other is a possession. An effect
+clause cannot be caught by that: "Deal 2 to a unit" has nothing before the verb
+to read as a scope, and a test pins it.
+
 ### Looking at the top of the deck
 
 Rules 424 and 390.5, with `Effect.look` and `TargetSpec.revealed` in
@@ -2220,15 +2258,15 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 263 of the 468 cards that have text** — 255 parsed and 8 hand-authored, and the shape of what is
+**Coverage is 266 of the 468 cards that have text** — 258 parsed and 8 hand-authored, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 255 |
+| Fully parsed | 258 |
 | Hand-authored | 8 |
-| Blocked | 205 |
+| Blocked | 202 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 4 times, the next 2, and every one of
@@ -2413,6 +2451,7 @@ What each round actually delivered, for calibrating the next projection:
 | Playing a card out of the trash (354, 355.2) | +5 projected, **+3** delivered |
 | Delayed Passive Abilities (390.4) | +5 projected, **+4** delivered |
 | Looking at the deck, with a Linked Ability to choose (424, 390.5) | +8 projected, **+5** delivered |
+| Bonus Damage (712-715) | +3 projected, **+3** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic

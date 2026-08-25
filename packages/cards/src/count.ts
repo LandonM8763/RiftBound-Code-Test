@@ -67,18 +67,6 @@ export type Count =
    * Might would recurse straight back through it.
    */
   | { readonly kind: 'sourceMight' }
-  /**
-   * "deal damage equal to **my ASSAULT**" (807) — the value of a keyword on
-   * the source.
-   *
-   * Also refused inside a `StaticGrant`: `keywordsOf` consults statics, so a
-   * static granting a keyword whose value counts a keyword would recurse the
-   * same way Might does. `readsMight` answers for both because it is asked at
-   * exactly one place — whether this count may appear in a grant.
-   *
-   * A *kind* rather than a `Keyword`, because only a valued keyword has a
-   * number to read: "equal to my TANK" is not a quantity.
-   */
   | { readonly kind: 'sourceKeyword'; readonly keyword: ValuedKeywordKind }
   /**
    * "My Might is increased by **your points**" — the controller's score.

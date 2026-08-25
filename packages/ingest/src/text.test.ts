@@ -2698,3 +2698,51 @@ describe("looking at the top of the deck (424, 390.5)", () => {
     ).not.toEqual([]);
   });
 });
+
+describe("Bonus Damage (rules 712-715)", () => {
+  it("reads it as a grant, with the scope saying whose Deal actions", () => {
+    const parsed = parseCardText("Your spells and abilities deal 1 Bonus Damage.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.statics?.[0]).toEqual({
+      affects: { who: "friendly" },
+      grant: { bonusDamage: 1 },
+    });
+  });
+
+  it("355.9: a `here` scope is about where the damaged Unit is", () => {
+    const parsed = parseCardText(
+      "Spells and abilities affecting units here each deal 1 Bonus Damage.",
+    );
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.statics?.[0]).toEqual({
+      affects: { who: "any", here: true },
+      grant: { bonusDamage: 1 },
+    });
+  });
+
+  it('390.4: "the next spell you play" is a window with no "this turn" printed', () => {
+    // The rulebook's own Ravenborn Tome example: "The next spell is a specific
+    // time, and the 1 Bonus Damage is a passive ability."
+    const parsed = parseCardText("Exhaust: The next spell you play deals 1 Bonus Damage.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.activated?.[0]?.effect.effects).toEqual([
+      {
+        kind: "thisTurn",
+        uses: 1,
+        static: { affects: { who: "friendly" }, grant: { bonusDamage: 1 } },
+      },
+    ]);
+  });
+
+  it("714.1: Bonus Damage is only ever positive", () => {
+    expect(parseCardText("Your spells and abilities deal 0 Bonus Damage.").unparsed).not.toEqual(
+      [],
+    );
+  });
+
+  it('does not mistake an effect clause for a static, now that "deal" is a grant verb', () => {
+    const parsed = parseCardText("Deal 2 to a unit at a battlefield.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.effect?.effects).toEqual([{ kind: "dealDamage", amount: 2 }]);
+  });
+});

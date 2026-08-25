@@ -1213,6 +1213,21 @@ const CLAUSES: readonly ClauseRule[] = [
       return delayed === undefined ? undefined : { effects: [delayed], target: NO_TARGET };
     },
   },
+  {
+    /**
+     * 390.4 with the rulebook's own Ravenborn Tome example: "**The next** spell
+     * you play deals 1 Bonus Damage" is a Delayed Passive whose window is the
+     * next spell rather than the turn — "The next spell is a specific time".
+     *
+     * Listed after the "this turn" rule so a wording carrying both still reads
+     * its printed duration.
+     */
+    pattern: /^the next (.+)$/i,
+    build: (m) => {
+      const delayed = parseDelayedPassive(`the next ${m[1] ?? ''}`);
+      return delayed === undefined ? undefined : { effects: [delayed], target: NO_TARGET };
+    },
+  },
 ];
 
 /**
@@ -1910,10 +1925,20 @@ const STATIC_SCOPES: readonly { readonly pattern: RegExp; readonly scope: Static
   // 185: "Your tokens enter ready". Listed before the tag rule below so the
   // noun is never mistaken for a tag.
   { pattern: /^your tokens$/i, scope: { who: 'friendly', token: true } },
+  // 712: "**Your spells and abilities** deal 1 Bonus Damage" — the scope names
+  // whose Deal actions, not which Game Objects.
+  { pattern: /^your spells and abilities$/i, scope: { who: 'friendly' } },
+  // "Spells and abilities affecting units **here** each deal 1 Bonus Damage."
+  {
+    pattern: /^spells and abilities affecting units here(?: each)?$/i,
+    scope: { who: 'any', here: true },
+  },
   // "**Units you play** this turn enter ready" — the same friendly scope said
   // from the entering card's side. 359.2.c is about how a card enters, so the
   // wording can only ever be about the player doing the playing.
-  { pattern: /^(?:the next )?units? you play$/i, scope: { who: 'friendly' } },
+  // "Units you play this turn enter ready", "the next spell you play deals 1
+  // Bonus Damage" — the same friendly scope said from the played card's side.
+  { pattern: /^(?:the next )?(?:units?|spells?|gears?|cards?) you play$/i, scope: { who: 'friendly' } },
 ];
 
 /**
@@ -2376,7 +2401,11 @@ export function parseStatic(line: string): StaticAbility | undefined {
 
   // "<scope> have/has <+N Might | KEYWORD…>". "an additional +1 Might" is the
   // same statement with a word of emphasis in it.
-  const have = text.match(/^(.+?) (?:have|has|gets?) (?:an additional )?(.+)$/i);
+  // "deal(s)" joins the list because 712's Bonus Damage is stated as a verb —
+  // "Your spells and abilities **deal** 1 Bonus Damage" — where every other
+  // grant is stated as a possession. An effect clause cannot be caught by it:
+  // "Deal 2 to a unit" has nothing before the verb to be a scope.
+  const have = text.match(/^(.+?) (?:have|has|gets?|deals?) (?:an additional )?(.+)$/i);
   if (have === null) {
     return undefined;
   }
@@ -2430,6 +2459,17 @@ function buildStatic(
     body = (dynamic[1] ?? '').trim();
     // "ASSAULT equal to N" prints no value, and 807.1.b.3 makes a bare keyword
     // 1 — which is exactly the per-unit value the count then scales.
+  }
+
+  // 712-715: "deal 1 Bonus Damage". A grant like any other, and the scope in
+  // front of it says whose Deal actions it reaches.
+  const bonus = body.match(/^(?:deals? )?(\d+) bonus damage$/i);
+  if (bonus !== null) {
+    const amount = count(bonus[1] ?? '');
+    // 714.1: Bonus Damage is only ever positive.
+    return amount === undefined || amount < 1
+      ? undefined
+      : { affects: scope, grant: { bonusDamage: amount }, ...(condition ? { condition } : {}) };
   }
 
   const might = body.match(/^([+-]\d+) might(?:, to a minimum of (\d+) might)?$/i);

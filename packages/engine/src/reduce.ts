@@ -826,7 +826,15 @@ function spendDelayed(
       // caller has already asked whether it was.
       const byEntry =
         enteredReady && delayed.ability?.grant.entersReady === true && delayed.controller === player;
-      return byCost || byEntry ? { ...delayed, uses: delayed.uses - 1 } : delayed;
+      // 712 with the rulebook's Ravenborn Tome example: "the next spell you
+      // play" closes when that spell is *played*, not when it deals damage —
+      // otherwise a window on a spell that deals none would never close.
+      const scope = delayed.ability?.affects.who;
+      const byBonus =
+        delayed.ability?.grant.bonusDamage !== undefined &&
+        (scope === 'any' ||
+          (scope === 'friendly') === (delayed.controller === player));
+      return byCost || byEntry || byBonus ? { ...delayed, uses: delayed.uses - 1 } : delayed;
     }),
   };
 }

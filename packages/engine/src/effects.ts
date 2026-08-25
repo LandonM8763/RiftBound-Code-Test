@@ -33,7 +33,13 @@ import { countOf } from './count.js';
 import type { GameEvent } from './events.js';
 import { moveEntity, withEntity, withPlayer } from './mutate.js';
 import { canPay, payFrom, validUnitLocations } from './play.js';
-import { entersReady, objectForbidden, playerForbidden, unitKeywordValue } from './statics.js';
+import {
+  bonusDamage,
+  entersReady,
+  objectForbidden,
+  playerForbidden,
+  unitKeywordValue,
+} from './statics.js';
 import { createTokens, sendToNonBoardZone } from './token.js';
 import type { EntityId, GameState, Location, PlayerId } from './state.js';
 import {
@@ -708,14 +714,19 @@ function applyEffect(
       // the count scales it, exactly as `draw`'s does.
       const dealt = effect.amount * scale(state, controller, source, effect.per);
       // 417.1.e: only a positive amount is Valid Damage, and only Valid Damage
-      // is Dealt.
+      // is Dealt. 715.4 hangs off the same check — no damage Dealt means no
+      // Bonus Damage either.
       if (dealt < 1) {
         return state;
       }
-      events.push({ type: 'damageDealt', unit: target, amount: dealt });
+      // 715.2: Bonus Damage applies to each target of a multi-target Deal
+      // individually, which is what asking here — inside the per-target loop —
+      // gives for free.
+      const total = dealt + bonusDamage(state, controller, target);
+      events.push({ type: 'damageDealt', unit: target, amount: total });
       return withEntity(state, target, (current) => ({
         ...current,
-        damage: current.damage + dealt,
+        damage: current.damage + total,
       }));
     }
 

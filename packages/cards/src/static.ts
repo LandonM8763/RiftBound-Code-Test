@@ -136,6 +136,18 @@ export interface StaticGrant {
    */
   readonly might?: number | undefined;
   /**
+   * Rules 712-715: Bonus Damage added to each Deal action in scope.
+   *
+   * 714 sums every instance and applies the total once; 714.1 keeps it
+   * positive, and 715.2 applies it to each target of a multi-target Deal
+   * *individually*. 715.4 withholds it when no damage was Dealt at all.
+   *
+   * Only reaches `dealDamage`, which is exactly the "spells and abilities" the
+   * corpus scopes it to — combat damage is assigned in `combat.ts` and never
+   * passes through the effect interpreter.
+   */
+  readonly bonusDamage?: number | undefined;
+  /**
    * "Stunned enemy units here have -8 Might, **to a minimum of 1 Might**"
    * (143.2).
    *

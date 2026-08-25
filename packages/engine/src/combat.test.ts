@@ -25,7 +25,16 @@ import { activatableAbilities } from "./abilities.js";
 import { assignDamage, combatResult, mightOf, sumMight } from "./combat.js";
 import { keywordsOf, playerForbidden, unitKeywordValue } from "./statics.js";
 import type { GameEvent } from "./events.js";
-import { legalTargets } from "./effects.js";
+import { executeEffect, legalTargets, type EffectContext } from "./effects.js";
+
+/** A context for effects that reach none of the machinery above this layer. */
+const NO_CONTEXT: EffectContext = {
+  drawCards: (current) => current,
+  queueDeaths: (current) => current,
+  afterMove: (current) => current,
+  raise: (current) => current,
+  queueLinked: (current) => current,
+};
 import { currentLegalActions } from "./legal.js";
 import { standardMoveDestinations } from "./move.js";
 import { checkInvariants } from "./invariants.js";
@@ -34,6 +43,7 @@ import { reduce } from "./reduce.js";
 import { createGame, type DeckList } from "./setup.js";
 import {
   battlefieldLocation,
+  getEntity,
   type EntityId,
   type GameState,
   isOver,
@@ -798,6 +808,16 @@ describe("static abilities (rules 363-365)", () => {
     },
   });
 
+  /** "Your spells and abilities deal 1 Bonus Damage" (712-715). */
+  const FIRESTARTER = makeUnit(2, ["fury"], {
+    id: cardId("C-029"),
+    name: "Firestarter",
+    cost: cost(1),
+    abilities: {
+      statics: [{ affects: { who: "friendly" }, grant: { bonusDamage: 1 } }],
+    },
+  });
+
   /** "Your Mechs have +1 Might" — a scope narrowed to a tag (133.8). */
   const FOREMAN = makeUnit(2, ["fury"], {
     id: cardId("C-023"),
@@ -836,6 +856,7 @@ describe("static abilities (rules 363-365)", () => {
     SCORE_DENIER,
     UNTOUCHABLE,
     SENTRY,
+    FIRESTARTER,
     FURY_RUNE,
     ...BATTLEFIELDS,
   ] as CardDefinition[]);
@@ -856,6 +877,7 @@ describe("static abilities (rules 363-365)", () => {
         ...Array.from({ length: 3 }, () => SCORE_DENIER.id),
         ...Array.from({ length: 3 }, () => UNTOUCHABLE.id),
         ...Array.from({ length: 3 }, () => SENTRY.id),
+        ...Array.from({ length: 3 }, () => FIRESTARTER.id),
       ],
       runes: Array.from({ length: 8 }, () => FURY_RUNE.id),
       battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
@@ -927,6 +949,56 @@ describe("static abilities (rules 363-365)", () => {
     const [b, atField] = place(state, me, SENTRY, 0);
     state = b;
     expect(offered(state, atField)).toBe(1);
+  });
+
+
+  it("712-715: Bonus Damage is summed once and applied to each target", () => {
+    let state = staticGame("bonus-damage");
+    const me = state.activePlayer;
+    const them = playerId((me + 1) % state.players.length);
+    const [a, victim] = place(state, them, SMALL, 0);
+    state = a;
+
+    const deal = (at: GameState, amount: number): GameState =>
+      executeEffect(
+        at,
+        { controller: me, source: victim, choices: { targets: [victim] } },
+        { target: { kind: "unit", scope: "any" }, effects: [{ kind: "dealDamage", amount }] },
+        [],
+        NO_CONTEXT,
+      );
+
+    // No static: the printed amount.
+    expect(getEntity(deal(state, 2), victim).damage).toBe(2);
+
+    const [b] = place(state, me, FIRESTARTER, 1);
+    state = b;
+    expect(getEntity(deal(state, 2), victim).damage).toBe(3);
+
+    // 714: a second instance sums rather than applying twice over.
+    const [c] = place(state, me, FIRESTARTER, 1);
+    expect(getEntity(deal(c, 2), victim).damage).toBe(4);
+  });
+
+  it("715.4: no damage Dealt means no Bonus Damage", () => {
+    let state = staticGame("bonus-none");
+    const me = state.activePlayer;
+    const them = playerId((me + 1) % state.players.length);
+    const [a, victim] = place(state, them, SMALL, 0);
+    state = a;
+    const [b] = place(state, me, FIRESTARTER, 1);
+    state = b;
+
+    // 417.1.e: 0 is not Valid Damage, so nothing is Dealt and the bonus does
+    // not turn it into 1.
+    const after = executeEffect(
+      state,
+      { controller: me, source: victim, choices: { targets: [victim] } },
+      { target: { kind: "unit", scope: "any" }, effects: [{ kind: "dealDamage", amount: 0 }] },
+      [],
+      NO_CONTEXT,
+    );
+    expect(getEntity(after, victim).damage).toBe(0);
   });
 
   it('002: "opponents can\'t score points" binds the opponent, not the printer', () => {
