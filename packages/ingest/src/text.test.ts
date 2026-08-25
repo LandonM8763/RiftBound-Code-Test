@@ -2746,3 +2746,68 @@ describe("Bonus Damage (rules 712-715)", () => {
     expect(parsed.effect?.effects).toEqual([{ kind: "dealDamage", amount: 2 }]);
   });
 });
+
+describe("a second chosen thing (rule 355.5)", () => {
+  it('reads "a friendly unit and an enemy unit" as two slots, not one wider one', () => {
+    const parsed = parseCardText("Stun a friendly unit and an enemy unit at the same battlefield.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.effect?.target).toEqual({ kind: "unit", scope: "friendly" });
+    expect(parsed.effect?.second).toEqual({
+      kind: "unit",
+      scope: "enemy",
+      sameLocation: true,
+    });
+    // One verb, run once per chosen object: both get stunned.
+    expect(parsed.effect?.effects).toEqual([{ kind: "stun" }]);
+  });
+
+  it('carries "another" onto the first slot and not the second', () => {
+    const parsed = parseCardText(
+      "When you play me, return another friendly unit and an enemy unit to their owners' hands.",
+    );
+    expect(parsed.unparsed).toEqual([]);
+    const effect = parsed.abilities?.triggered?.[0]?.effect;
+    expect(effect?.target).toEqual({ kind: "unit", scope: "friendly", excludeSelf: true });
+    expect(effect?.second).toEqual({ kind: "unit", scope: "enemy" });
+  });
+
+  it('reads a bare "Choose …" sentence as slots with the verb still to come', () => {
+    const parsed = parseCardText(
+      "Choose a friendly unit and an enemy unit. They deal damage equal to their Mights to each other.",
+    );
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.effect?.target).toEqual({ kind: "unit", scope: "friendly" });
+    expect(parsed.effect?.second).toEqual({ kind: "unit", scope: "enemy" });
+    expect(parsed.effect?.effects).toEqual([{ kind: "mutualDamage" }]);
+  });
+
+  it('reads "we" as the source being one of the pair, so only one is chosen', () => {
+    const parsed = parseCardText(
+      "When you play me, choose an enemy unit at a battlefield. " +
+        "We deal damage equal to our Mights to each other.",
+    );
+    expect(parsed.unparsed).toEqual([]);
+    const effect = parsed.abilities?.triggered?.[0]?.effect;
+    expect(effect?.target).toEqual({ kind: "unit", scope: "enemy", atBattlefield: true });
+    expect(effect?.second).toBeUndefined();
+    expect(effect?.effects).toEqual([{ kind: "mutualDamage", self: true }]);
+  });
+
+  it("fills the second slot from a later sentence than the one naming the first", () => {
+    const parsed = parseCardText(
+      "Give a friendly unit +3 Might this turn. Then, choose an enemy unit. " +
+        "They deal damage equal to their Mights to each other.",
+    );
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.effect?.target).toEqual({ kind: "unit", scope: "friendly" });
+    expect(parsed.effect?.second).toEqual({ kind: "unit", scope: "enemy" });
+    expect(parsed.effect?.effects).toEqual([
+      { kind: "giveMight", amount: 3 },
+      { kind: "mutualDamage" },
+    ]);
+  });
+
+  it("refuses a second slot with no first, which would choose one thing and act on two", () => {
+    expect(parseCardText("Choose an enemy unit.").unparsed).not.toEqual([]);
+  });
+});

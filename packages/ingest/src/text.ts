@@ -404,6 +404,8 @@ interface ClauseResult {
   readonly pronoun?: boolean | undefined;
   /** 449.1's Destination, for a clause whose verb is a Move. */
   readonly destination?: DestinationSpec | undefined;
+  /** 355.5's second chosen thing — see `CardEffect.second`. */
+  readonly second?: TargetSpec | undefined;
 }
 
 const SELF: TargetSpec = { kind: 'self' };
@@ -953,6 +955,98 @@ const CLAUSES: readonly ClauseRule[] = [
       effects: [{ kind: 'play', ignore: m[1] === undefined ? 'all' : 'energy' }],
       target: { kind: 'revealed' },
       destination: { kind: 'unitEntry' as const },
+    }),
+  },
+  {
+    /**
+     * "Stun a friendly unit **and** an enemy unit at the same battlefield",
+     * "return another friendly unit and an enemy unit to their owners' hands"
+     * (355.5).
+     *
+     * Two chosen objects with *different* specs, which is what
+     * `CardEffect.second` exists for. The verb still consumes one target at a
+     * time, so it runs once per chosen object — both get stunned, both get
+     * returned.
+     */
+    pattern:
+      /^(stun|kill|buff|ready|exhaust|heal|return) (an?|another) ((?:damaged |exhausted |ready |stunned |buffed )*)friendly unit and (an?|another) ((?:damaged |exhausted |ready |stunned |buffed )*)enemy unit( at the same battlefield| at a battlefield)?(?: to (?:their|its) owners'? hands?)?$/i,
+    build: (m) => {
+      const verb = (m[1] ?? '').toLowerCase();
+      const kind = verb === 'return' ? 'toHand' : verb;
+      const first = unitTarget(m[2], `${m[3] ?? ''}friendly`, 'unit', undefined);
+      const second = unitTarget(m[4], `${m[5] ?? ''}enemy`, 'unit', undefined);
+      if (first === undefined || second === undefined || second.kind !== 'unit') {
+        return undefined;
+      }
+      const same = /same battlefield/i.test(m[6] ?? '');
+      return {
+        effects: [{ kind } as Effect],
+        target: first,
+        second: same ? { ...second, sameLocation: true } : second,
+      };
+    },
+  },
+  {
+    /**
+     * "**Choose** a friendly unit and an enemy unit." — 355.5's choice stated
+     * on its own, with the verb in the sentence that follows.
+     *
+     * It contributes no effect, only the two slots, which is exactly what a
+     * `CardEffect` carrying one target and one `second` needs.
+     */
+    pattern:
+      /^choose (an?|another) ((?:damaged |exhausted |ready |stunned |buffed )*)friendly unit(?: anywhere)? and (an?|another) ((?:damaged |exhausted |ready |stunned |buffed )*)enemy unit( at a battlefield| at the same battlefield| here)?$/i,
+    build: (m) => {
+      const first = unitTarget(m[1], `${m[2] ?? ''}friendly`, 'unit', undefined);
+      const where = (m[5] ?? '').trim().toLowerCase();
+      const second = unitTarget(
+        m[3],
+        `${m[4] ?? ''}enemy`,
+        'unit',
+        where === 'at a battlefield' ? 'at a battlefield' : where === 'here' ? 'here' : undefined,
+      );
+      if (first === undefined || second === undefined || second.kind !== 'unit') {
+        return undefined;
+      }
+      return {
+        effects: [],
+        target: first,
+        second: where === 'at the same battlefield' ? { ...second, sameLocation: true } : second,
+      };
+    },
+  },
+  {
+    /**
+     * "**Choose an enemy unit.**" on its own — the *second* slot, where an
+     * earlier clause in the same run already named the first.
+     *
+     * Refused when nothing named a first: `parseEffects` checks that at the
+     * end, because a lone second slot would leave the card choosing one thing
+     * and acting on two.
+     */
+    pattern:
+      /^choose (an?|another) ((?:damaged |exhausted |ready |stunned |buffed )*)enemy unit( at a battlefield| here)?$/i,
+    build: (m) => {
+      const where = (m[3] ?? '').trim().toLowerCase();
+      const second = unitTarget(
+        m[1],
+        `${m[2] ?? ''}enemy`,
+        'unit',
+        where === 'at a battlefield' ? 'at a battlefield' : where === 'here' ? 'here' : undefined,
+      );
+      return second === undefined ? undefined : { effects: [], target: NO_TARGET, second };
+    },
+  },
+  {
+    /**
+     * "They deal damage equal to their Mights to each other" (417, 143), and
+     * Carnivorous Snapvine's "**We** deal damage … to each other", where one of
+     * the pair is the source.
+     */
+    pattern: /^(they|we) deal damage equal to (?:their|our) mights? to each other$/i,
+    build: (m) => ({
+      effects: [{ kind: 'mutualDamage', ...(/^we$/i.test(m[1] ?? '') ? { self: true } : {}) }],
+      target: NO_TARGET,
     }),
   },
   {
@@ -2646,11 +2740,14 @@ export function parseEffects(body: string): CardEffect | undefined {
   // a whole-line match can only be the clause it names.
   const asOne = matchClause(body.replace(/[.]+$/, '').trim());
   // A pronoun clause alone refers to the triggering object, which the split
-  // path below builds — so the whole-line shortcut steps aside for it.
-  if (asOne !== undefined && asOne.pronoun !== true) {
+  // path below builds — so the whole-line shortcut steps aside for it. A lone
+  // *second* slot steps aside for the same reason: the first is named by an
+  // earlier clause, and one clause on its own has none.
+  if (asOne !== undefined && asOne.pronoun !== true && asOne.second === undefined) {
     return {
       target: asOne.target,
       effects: asOne.effects,
+      ...(asOne.second === undefined ? {} : { second: asOne.second }),
       ...(asOne.destination === undefined ? {} : { destination: asOne.destination }),
     };
   }
@@ -2660,7 +2757,7 @@ export function parseEffects(body: string): CardEffect | undefined {
   // it from what it gates, which is why the two levels are separate.
   const sentences = body
     .split(/\.\s*/)
-    .map((one) => one.replace(/^then\s+/i, '').replace(/[.]+$/, '').trim())
+    .map((one) => one.replace(/^then,?\s+/i, '').replace(/[.]+$/, '').trim())
     .filter((one) => one.length > 0);
 
   if (sentences.length === 0) {
@@ -2670,6 +2767,7 @@ export function parseEffects(body: string): CardEffect | undefined {
   const effects: GuardedEffect[] = [];
   let target: TargetSpec = NO_TARGET;
   let destination: DestinationSpec | undefined;
+  let second: TargetSpec | undefined;
   let pronoun = false;
   let previous: Condition | undefined;
 
@@ -2712,7 +2810,7 @@ export function parseEffects(body: string): CardEffect | undefined {
         ? [joined]
         : joined
             .split(/,\s*then\s+|\s+then\s+|,\s*and\s+|\s+and\s+|,\s*/i)
-            .map((part) => part.replace(/^then\s+/i, '').trim())
+            .map((part) => part.replace(/^then,?\s+/i, '').trim())
             .filter((part) => part.length > 0);
     if (parts.length === 0) {
       return undefined;
@@ -2735,6 +2833,12 @@ export function parseEffects(body: string): CardEffect | undefined {
         }
         destination = built.destination;
       }
+      if (built.second !== undefined) {
+        if (second !== undefined && JSON.stringify(second) !== JSON.stringify(built.second)) {
+          return undefined;
+        }
+        second = built.second;
+      }
       if (built.target.kind !== 'none') {
         if (target.kind !== 'none' && JSON.stringify(target) !== JSON.stringify(built.target)) {
           return undefined;
@@ -2749,6 +2853,21 @@ export function parseEffects(body: string): CardEffect | undefined {
     }
   }
 
+  // 355.5: a second slot with no first would leave the card choosing one thing
+  // and acting on two. "We deal damage … to each other" is the exception — its
+  // first half is the source, so it names only one choice.
+  if (second !== undefined && target.kind === 'none') {
+    const mutualSelf = effects.some(
+      (one) => one.kind === 'mutualDamage' && one.self === true,
+    );
+    if (mutualSelf) {
+      target = second;
+      second = undefined;
+    } else {
+      return undefined;
+    }
+  }
+
   // A pronoun with nothing earlier in the run to refer back to is the "it" of
   // "When a friendly unit dies, buff **it**" — the triggering event's object.
   // `parseLine` refuses that outside a trigger, where there is no such object.
@@ -2756,7 +2875,12 @@ export function parseEffects(body: string): CardEffect | undefined {
     target = { kind: 'triggerObject' };
   }
 
-  return { target, effects, ...(destination === undefined ? {} : { destination }) };
+  return {
+    target,
+    effects,
+    ...(second === undefined ? {} : { second }),
+    ...(destination === undefined ? {} : { destination }),
+  };
 }
 
 /**
@@ -3395,6 +3519,7 @@ export function parseCardText(text: string, card: CardFacts = {}): ParsedText {
   const unparsed: string[] = [];
   const effects: Effect[] = [];
   let target: TargetSpec = NO_TARGET;
+  let second: TargetSpec | undefined;
   let destination: DestinationSpec | undefined;
   let condition: Condition | undefined;
   const triggered: TriggeredAbility[] = [];
@@ -3617,6 +3742,21 @@ export function parseCardText(text: string, card: CardFacts = {}): ParsedText {
         }
         destination = parsed.effect.destination;
       }
+      // 355.5's second slot rides with the effects for the same reason the
+      // Destination does — one per card, so two lines naming different ones
+      // cannot be merged. Dropping it instead would leave `mutualDamage`
+      // reading a slot nothing filled, which is a card that parses and does
+      // nothing.
+      if (parsed.effect.second !== undefined) {
+        if (
+          second !== undefined &&
+          JSON.stringify(second) !== JSON.stringify(parsed.effect.second)
+        ) {
+          unparsed.push(line);
+          continue;
+        }
+        second = parsed.effect.second;
+      }
       effects.push(...parsed.effect.effects);
     }
     if (parsed.triggered !== undefined) {
@@ -3650,6 +3790,7 @@ export function parseCardText(text: string, card: CardFacts = {}): ParsedText {
           effect: {
             target,
             effects,
+            ...(second === undefined ? {} : { second }),
             ...(destination === undefined ? {} : { destination }),
             ...(condition === undefined ? {} : { condition }),
           },

@@ -130,6 +130,16 @@ export type TargetSpec =
       /** Narrowing beyond the controller — see `ObjectFilter`. */
       readonly filter?: ObjectFilter | undefined;
       /**
+       * "a friendly unit and an enemy unit **at the same battlefield**" — a
+       * constraint across the two slots rather than on this one alone.
+       *
+       * Only meaningful on `CardEffect.second`, where it means "share a
+       * Location with the first choice". There is nowhere else for a
+       * cross-target constraint to live: every other field narrows one object
+       * against the board or the source.
+       */
+      readonly sameLocation?: boolean | undefined;
+      /**
        * "**up to 2** friendly units", "give **two** friendly units each +1
        * Might" — one choice of several objects rather than several choices.
        *
@@ -450,6 +460,19 @@ export type Effect =
    * says what may be chosen, and this is what was not.
    */
   | { readonly kind: 'recycleRest' }
+  /**
+   * "They deal damage equal to their Mights to each other" (417, 143).
+   *
+   * Reads the *pair* rather than each member, which is why it consumes no
+   * target: looping it would have each of them damage the other twice. The two
+   * Deals are simultaneous, the same reading 465.2.c.1.a gives Combat — so
+   * both amounts are measured before either is applied, and a Unit that dies
+   * still deals its damage.
+   *
+   * `self` is Carnivorous Snapvine's "**We** deal damage … to each other":
+   * the source and one chosen Unit rather than two chosen ones.
+   */
+  | { readonly kind: 'mutualDamage'; readonly self?: boolean | undefined }
   /** Rule 429: Add resources to the controller's Rune Pool. */
   | { readonly kind: 'addEnergy'; readonly count: number }
   | { readonly kind: 'addPower'; readonly domain: Domain; readonly count: number }
@@ -670,6 +693,21 @@ export type Effect =
 /** The rules text of a card: what it targets, and what it then does. */
 export interface CardEffect {
   readonly target: TargetSpec;
+  /**
+   * A **second** thing the card chooses — "choose a friendly unit **and** an
+   * enemy unit" (355.5).
+   *
+   * A separate slot rather than a list, because the two are different *roles*
+   * with different specs: the first names a friendly Unit and the second an
+   * enemy one, and a list of one spec cannot say that. Both choices are settled
+   * at step 2 alongside every other, so `legalActions` offers the product.
+   *
+   * The chosen objects arrive in `choices.targets` in slot order, and a
+   * target-consuming step still runs once per object — "stun a friendly unit
+   * and an enemy unit" stuns both. A verb that reads the *pair* rather than
+   * each member says so by not consuming a target; `mutualDamage` is the one.
+   */
+  readonly second?: TargetSpec | undefined;
   /**
    * Where a `move` effect on this card sends its target (rule 449.1).
    *

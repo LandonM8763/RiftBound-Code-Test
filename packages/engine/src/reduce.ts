@@ -43,9 +43,9 @@ import {
   type TriggerEventInstance,
 } from './abilities.js';
 import {
+  allTargetChoices,
   executeEffect,
-  isValidTarget,
-  legalTargets,
+  isValidChoice,
   type EffectContext,
 } from './effects.js';
 import { totalCost } from './costs.js';
@@ -366,7 +366,7 @@ function playCard(
 
   // Step 2 (355.6): targets are chosen now, and step 5 (358.1) checks them.
   const effect = effectOf(definition);
-  if (effect !== undefined && !isValidTarget(state, player, effect.target, targets, card)) {
+  if (effect !== undefined && !isValidChoice(state, player, effect, targets, card)) {
     throw new IllegalActionError(`${definition.name} has no valid target ${String(targets)}`);
   }
   if (effect === undefined && targets !== undefined && targets.length > 0) {
@@ -554,7 +554,7 @@ function activateAbility(
       `Ability ${index} of ${source} cannot be activated by player ${player} now`,
     );
   }
-  if (!isValidTarget(state, player, chosen.ability.effect.target, targets, source)) {
+  if (!isValidChoice(state, player, chosen.ability.effect, targets, source)) {
     throw new IllegalActionError(
       `Ability ${index} of ${source} has no valid target ${String(targets)}`,
     );
@@ -672,7 +672,7 @@ function resolveTrigger(
 
   // 402.2: the choices are made now, and 358.1's legality check applies to them
   // exactly as it does to a played card's.
-  if (!isValidTarget(state, player, effect.target, targets, top.entity, top.revealed)) {
+  if (!isValidChoice(state, player, effect, targets, top.entity, top.revealed)) {
     throw new IllegalActionError('Invalid target for the Triggered Ability');
   }
   if (ability !== undefined && !triggerCostPayable(state, player, ability, top.entity)) {
@@ -948,9 +948,15 @@ function queueTriggers(
     // Finalized Chain Item — it is removed at step 2 instead. 402.4.a is
     // explicit that this is not the ability being countered, so nothing else
     // observes it; it simply does not go on.
+    //
+    // Asked of the *whole* choice rather than of the first slot, because 402.2
+    // settles "all choices required for this ability" together: a card whose
+    // second slot (355.5) has no legal object has no legal choice at all, and
+    // one whose first slot is satisfiable would otherwise reach the Chain and
+    // strand there with nothing its controller could do.
     if (
       choosesTarget &&
-      legalTargets(next, trigger.controller, ability.effect.target, trigger.source).length === 0
+      allTargetChoices(next, trigger.controller, ability.effect, trigger.source).length === 0
     ) {
       continue;
     }

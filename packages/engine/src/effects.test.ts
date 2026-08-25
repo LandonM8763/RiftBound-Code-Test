@@ -258,6 +258,51 @@ const ONE_SHOT = makeSpell(['fury'], {
   },
 });
 
+/** "Stun a friendly unit and an enemy unit at the same battlefield." (355.5) */
+const FACEBREAK = makeSpell(['fury'], {
+  id: cardId('E-046'),
+  name: 'Facebreak',
+  cost: cost(1),
+  timing: 'action',
+  effect: {
+    target: { kind: 'unit', scope: 'friendly' },
+    second: { kind: 'unit', scope: 'enemy', sameLocation: true },
+    effects: [{ kind: 'stun' }],
+  },
+});
+
+/** "Choose a friendly unit and an enemy unit. They deal damage to each other." */
+const DUEL = makeSpell(['fury'], {
+  id: cardId('E-047'),
+  name: 'Duel',
+  cost: cost(1),
+  timing: 'action',
+  effect: {
+    target: { kind: 'unit', scope: 'friendly' },
+    second: { kind: 'unit', scope: 'enemy' },
+    effects: [{ kind: 'mutualDamage' }],
+  },
+});
+
+/** "When you play me, stun a friendly unit and an enemy unit." (355.5 with 402.4) */
+const RINGLEADER = makeUnit(2, ['fury'], {
+  id: cardId('E-048'),
+  name: 'Ringleader',
+  cost: cost(1),
+  abilities: {
+    triggered: [
+      {
+        condition: { event: 'played', subject: 'self' },
+        effect: {
+          target: { kind: 'unit', scope: 'friendly' },
+          second: { kind: 'unit', scope: 'enemy' },
+          effects: [{ kind: 'stun' }],
+        },
+      },
+    ],
+  },
+});
+
 const FURY_RUNE = makeRune('fury', { id: cardId('E-100') });
 const BATTLEFIELDS = Array.from({ length: 3 }, (_, i) =>
   makeBattlefield({ id: cardId(`E-20${i}`) }),
@@ -285,6 +330,9 @@ const REGISTRY = CardRegistry.from([
   TRIUMPH,
   CONFRONT,
   ONE_SHOT,
+  FACEBREAK,
+  DUEL,
+  RINGLEADER,
   FURY_RUNE,
   ...BATTLEFIELDS,
 ] as CardDefinition[]);
@@ -313,6 +361,9 @@ function deck(): DeckList {
       ...Array.from({ length: 2 }, () => TRIUMPH.id),
       ...Array.from({ length: 2 }, () => CONFRONT.id),
       ...Array.from({ length: 2 }, () => ONE_SHOT.id),
+      ...Array.from({ length: 2 }, () => FACEBREAK.id),
+      ...Array.from({ length: 2 }, () => DUEL.id),
+      ...Array.from({ length: 2 }, () => RINGLEADER.id),
     ],
     runes: Array.from({ length: 8 }, () => FURY_RUNE.id),
     battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
@@ -1234,3 +1285,105 @@ describe('Delayed Passive Abilities (rule 390.4)', () => {
     checkInvariants(next);
   });
 });
+
+describe('a second chosen thing (rule 355.5)', () => {
+  const other = (state: GameState) =>
+    playerId((state.activePlayer + 1) % state.players.length);
+
+  it('applies a target-consuming step to both chosen objects', () => {
+    let state = withEnergy(inMainPhase('two-slots'), 1);
+    const [a, mine] = onBoard(state, state.activePlayer, PLAIN, 0);
+    state = a;
+    const [b, theirs] = onBoard(state, other(state), PLAIN, 0);
+    state = b;
+    const [c, spell] = toHand(state, FACEBREAK);
+    state = c;
+
+    state = reduce(state, { type: 'playCard', card: spell, targets: [mine, theirs] }).state;
+    state = reduce(reduce(state, { type: 'pass' }).state, { type: 'pass' }).state;
+
+    expect(getEntity(state, mine).stunned).toBe(true);
+    expect(getEntity(state, theirs).stunned).toBe(true);
+    checkInvariants(state);
+  });
+
+  it('offers the product of the two slots, and never the same object twice', () => {
+    let state = withEnergy(inMainPhase('product'), 1);
+    const [a] = onBoard(state, state.activePlayer, PLAIN, 0);
+    state = a;
+    const [b] = onBoard(state, state.activePlayer, PLAIN, 0);
+    state = b;
+    const [c] = onBoard(state, other(state), PLAIN, 0);
+    state = c;
+    const [d, spell] = toHand(state, FACEBREAK);
+    state = d;
+
+    const plays = legalActions(state, state.activePlayer).filter(
+      (action) => action.type === 'playCard' && action.card === spell,
+    ) as { targets?: readonly EntityId[] }[];
+    expect(plays.length).toBeGreaterThan(0);
+    for (const play of plays) {
+      const [first, ...rest] = play.targets ?? [];
+      expect(rest).toHaveLength(1);
+      expect(first).not.toBe(rest[0]);
+      // The first slot is friendly, the second is not.
+      expect(getEntity(state, first as EntityId).controller).toBe(state.activePlayer);
+      expect(getEntity(state, rest[0] as EntityId).controller).not.toBe(state.activePlayer);
+    }
+  });
+
+  it('refuses a choice that breaks the same-Location constraint', () => {
+    let state = withEnergy(inMainPhase('same-place'), 1);
+    const [a, mine] = onBoard(state, state.activePlayer, PLAIN, 0);
+    state = a;
+    // The enemy Unit is at a *different* Battlefield.
+    const [b, theirs] = onBoard(state, other(state), PLAIN, 1);
+    state = b;
+    const [c, spell] = toHand(state, FACEBREAK);
+    state = c;
+
+    expect(() =>
+      reduce(state, { type: 'playCard', card: spell, targets: [mine, theirs] }),
+    ).toThrow(IllegalActionError);
+  });
+
+  it('417 with 143: mutual damage reads both Mights before either applies', () => {
+    let state = withEnergy(inMainPhase('mutual'), 1);
+    const [a, mine] = onBoard(state, state.activePlayer, PLAIN, 0);
+    state = a;
+    const [b, theirs] = onBoard(state, other(state), PLAIN, 0);
+    state = b;
+    const [c, spell] = toHand(state, DUEL);
+    state = c;
+
+    state = reduce(state, { type: 'playCard', card: spell, targets: [mine, theirs] }).state;
+    state = reduce(reduce(state, { type: 'pass' }).state, { type: 'pass' }).state;
+
+    // Equal Mights: each was dealt the *other's* full Might, rather than the
+    // second read seeing a Unit the first had already damaged. Death is a
+    // Cleanup's job (323.5), not this effect's.
+    expect(getEntity(state, mine).damage).toBe(PLAIN.might);
+    expect(getEntity(state, theirs).damage).toBe(PLAIN.might);
+    checkInvariants(state);
+  });
+
+  it('402.4: a trigger whose second slot has no legal object never goes on the Chain', () => {
+    // The friendly slot is satisfiable — the Unit itself — while the enemy slot
+    // is not. Asked of the first slot alone the trigger would reach the Chain
+    // and strand there, with nothing its controller could legally do.
+    let state = withEnergy(inMainPhase('no-second'), 1);
+    const [a, unit] = toHand(state, RINGLEADER);
+    state = a;
+
+    state = reduce(state, {
+      type: 'playCard',
+      card: unit,
+      location: playerLocation(state.activePlayer, 'base'),
+    }).state;
+
+    expect(state.chain).toHaveLength(0);
+    expect(legalActions(state, state.activePlayer).length).toBeGreaterThan(0);
+    checkInvariants(state);
+  });
+});
+

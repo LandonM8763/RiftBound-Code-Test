@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 266 of the 468 cards with text
+with damage spells, draw and Play Effects firing. 271 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -495,7 +495,8 @@ builds the batch on top of it. Keep that split — a win rate computed inside
 | `additional.ts` | Additional Costs (356.2): what can be paid, and paying it |
 | `statics.ts` | Static and Passive abilities: Might, granted keywords, entering ready, and rule 002's restrictions |
 | `costs.ts` | Rule 356's layers: what a card or ability actually costs to play |
-| `legal.ts` | `legalActions(state, player)`, and `targetChoices` — every legal *set* of Targets for a spec (355.6) |
+| `effects.ts` | The effect interpreter, plus `legalTargets` and the choice enumerators: `targetChoices` for one spec (355.6) and `allTargetChoices` for a card's whole choice across both slots (355.5) |
+| `legal.ts` | `legalActions(state, player)` — every action a player may take right now |
 | `view.ts` | Per-player observable view; redacts hidden zones |
 | `token.ts` | Tokens (179-187): Creating them, and 186.1's rule that one leaving the Board stops existing |
 | `attach.ts` | Attachment (434-435, 716-719): the link, and `activeAbilities`, which is the one honest answer to what a Game Object can do |
@@ -856,7 +857,7 @@ authored overlay, because it is a lot of grammar for a handful of cards and
 ### Counted targets
 
 `TargetCount` in `cards/effect.ts`, enumerated by `targetChoices` in
-`engine/legal.ts`.
+`engine/effects.ts`.
 
 **A counted target is one choice of a *set*, and that is why `targets` is a
 list everywhere.** "Give two friendly units each +2 Might", "buff up to 2
@@ -899,6 +900,50 @@ chosen target is a choice of *zero or one*, which `TargetCount` already states �
 so the wording needed no `optional` flag on a step. It is refused on a clause
 that chooses nothing: "you may draw 1" read as a bare draw would be mandatory,
 which is a different and stronger card than the one printed.
+
+### A second chosen thing
+
+`CardEffect.second` in `cards/effect.ts`, enumerated by `allTargetChoices` and
+checked by `isValidChoice`, both in `engine/effects.ts`.
+
+**Two slots, not one wider one.** "Stun a friendly unit **and** an enemy unit",
+"return another friendly unit and an enemy unit to their owners' hands" — 355.5
+lets one effect choose two objects that satisfy *different* criteria, which a
+counted `unit` spec cannot state: a count of two says the same thing twice.
+So `second` is a second `TargetSpec` beside `target`, and the chosen ids
+concatenate into the one `targets` list every layer already carries.
+
+Four things are load-bearing:
+
+- **The executor needed nothing.** A target-consuming step already runs once
+  per chosen object, so one verb over two slots stuns both and returns both
+  with no new case. `second` is enumeration and validation only.
+- **`allTargetChoices` is the product of the slots, minus the pairs that are
+  not choices.** 355.6 chooses *distinct* objects, across the slots as much as
+  within one, so a pair naming the same Unit twice is dropped. `sameLocation`
+  is the other cross-slot rule — "at the same battlefield" is a constraint
+  between the two, which is why it is asked in the product rather than inside
+  either sweep.
+- **The split point is the first slot's count.** `isValidChoice` re-checks
+  358.1 per slot, and the only thing telling it where slot 0 ends is
+  `targetCount(target).min` — which is why a `second` beside an "up to N" first
+  slot is refused rather than guessed at.
+- **402.4 must be asked of the *whole* choice.** 402.2 settles "all choices
+  required for this ability" together, so a Triggered Ability whose second slot
+  has no legal object has no legal choice at all. Checking only the first slot
+  put such a trigger on the Chain, where its controller then had nothing legal
+  to do and the game stranded — which is what moved `allTargetChoices` out of
+  `legal.ts` and down beside `legalTargets`, so the reducer can ask it too.
+
+**`mutualDamage` is the effect this exists for** (417 with 143). "They deal
+damage equal to their Mights to each other" reads *both* Mights before applying
+either, the same reading 465.2.c.1.a gives combat: assignment is not dealing, so
+one side being damaged first must not shrink what it deals back. `self: true` is
+Carnivorous Snapvine's "**We** deal damage …", where the source is one of the
+pair and only the other is chosen — so that card carries no `second` at all.
+
+Death is not part of it. 323.5 kills a Unit with lethal damage at the next
+Cleanup, so `mutualDamage` marks damage exactly as `dealDamage` does.
 
 ### Object filters
 
@@ -2240,7 +2285,10 @@ a spell [that costs no more than N [and no more than M Power]]`, `Gain N XP` and
 (`Ready/Buff/Heal/Exhaust/Recall me`, `Give me +N Might this turn`); the
 criteria forms that choose nothing (`Deal N to all [friendly|enemy] units
 [here|at battlefields|at my battlefield|in combat]`, `Kill/Buff all …`);
-sequences
+the two-slot forms
+(`<verb> a friendly unit and an enemy unit [at the same battlefield]`,
+`Choose a friendly unit and an enemy unit`, and `They/We deal damage equal to
+their/our Mights to each other`); sequences
 joined by "then" or "and"; the trigger grammar below; `Play [N] [ready] [<M>
 Might] <Name> <unit|gear> token [here|in your base] [exhausted]`; the modelled
 keywords and the desugared ones (`DEATHKNELL - <effects>`, `TEMPORARY`,
@@ -2258,15 +2306,15 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 266 of the 468 cards that have text** — 258 parsed and 8 hand-authored, and the shape of what is
+**Coverage is 271 of the 468 cards that have text** — 263 parsed and 8 hand-authored, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 258 |
+| Fully parsed | 263 |
 | Hand-authored | 8 |
-| Blocked | 202 |
+| Blocked | 197 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 4 times, the next 2, and every one of
@@ -2402,8 +2450,13 @@ rows and they are all small:
 | Modal effects ("choose one •…") | +0 |
 | Repeat (820) | +0 |
 
-Building **all** of them reaches 197, measured. Nothing left is worth its own
-round; the authored overlay is the cheaper route past here.
+**That ranking was measured from the 173 baseline and the rounds since have
+outrun it**: it said nothing left was worth its own round, and the rounds after
+it delivered +3, +3, +7, +6, +10, +3, +3, +4, +5, +3 and +5. What was wrong was
+not the arithmetic but the unit — it ranked *mechanics the parser was missing*,
+and most of what those rounds added was a mechanic the **authored overlay**
+needed in order to say anything at all. Re-measure from the current baseline
+before trusting any row above.
 
 **Repeat has now measured +0 from three separate baselines** (55, 124 and 173).
 Its ten printings are each blocked on something else as well, and that is what
@@ -2452,6 +2505,7 @@ What each round actually delivered, for calibrating the next projection:
 | Delayed Passive Abilities (390.4) | +5 projected, **+4** delivered |
 | Looking at the deck, with a Linked Ability to choose (424, 390.5) | +8 projected, **+5** delivered |
 | Bonus Damage (712-715) | +3 projected, **+3** delivered |
+| A second chosen thing (355.5) with mutual damage (417) | **+5** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic
@@ -2501,34 +2555,40 @@ list of missing verbs.
 
 What the corpus is blocked on now, in the order measurement puts them:
 
-1. **Durations proper — a restriction or a modifier scoped to *this turn*.**
-   "Opponents can't play cards this turn", "the next spell you play this turn
-   costs 5 less". The *static* half of what used to be filed here is built (see
-   [Static restrictions](#static-restrictions)); what is left needs turn-scoped
-   state rather than a standing statement, and it is +2.
-2. **The rest of statics beyond a scope plus a grant** — "While I'm attacking
+1. **Effect-outcome predicates.** "Deal 3 to a unit. **If this kills it**, draw
+   1", "deal 6 to it **unless its controller** has you draw 2". `Condition`
+   asks about the state and about the chosen target; it cannot ask about what
+   the step above it just did, and there is no seam for an opponent to answer.
+2. **Replacement effects.** "The next time it dies this turn, you may pay 1
+   Fury to **recall it instead**", "if I would be killed, …". Rule 438's
+   Replace is not built at all, and it is what Battlefield tokens (187.8,
+   187.9) want as well.
+3. **The rest of statics beyond a scope plus a grant** — "While I'm attacking
    or defending alone" needs a combat-role predicate that `Condition`
    deliberately cannot express, because a condition that reads Might back would
-   recurse through `mightOf`. +1.
-3. **Non-standard ability costs beyond the four modelled.** "You may exhaust
+   recurse through `mightOf`.
+4. **Symmetric effects and modes** — "each opponent reveals the top card of
+   their Main Deck", "choose one •…". The effect model runs one player's
+   instruction and has no modes.
+5. **Non-standard ability costs beyond the four modelled.** "You may exhaust
    me to …" and "Banish this:" are what is left; Recycle, Kill this, Discard
    and Spend a buff are built.
-4. **Conditional and modal effects** — "if this kills it", "unless its
-   controller…", "choose one •…". +1 and +0. The effect model has no outcome
-   conditions and no modes.
+
+These are read off the current blocked shapes rather than counterfactually
+measured — see the note above the ranking table about re-measuring.
 
 **The tail is now literally flat.** Past `REPEAT 2` (4 cards), *every remaining
-unparsed shape appears on exactly one card* — 309 shapes, 309 cards — and **251
-of the 278 blocked cards are blocked by exactly one clause**. Building every
-mechanic in the table above reaches **197 of 468**,
-measured, and there is no further mechanic to find: the rest is one card per
-unit of work whichever route is taken, a parser rule or an authored entry.
+unparsed shape appears on exactly one card* — 227 of the 228 shapes — and **186
+of the 205 blocked cards are blocked by exactly one clause**. It has stayed flat
+through every round since, so the rest is one card per unit of work whichever
+route is taken, a parser rule or an authored entry.
 
-**This is where the curve flattens.** The rounds after Additional Costs
-delivered +11, +6, +5, +5, +2, +12, +6, +4, +4, +3, +4, +5, +10, +6, +11, +4
-and +2; everything left is +2 or less, and the largest of them needs a subsystem
-rather than an extension. Coverage past ~190 means paying subsystem prices for
-one or two cards at a time — which is the
+**The curve flattened and then kept paying anyway.** The rounds after
+Additional Costs delivered +11, +6, +5, +5, +2, +12, +6, +4, +4, +3, +4, +5,
++10, +6, +11, +4, +2, +5, +3, +3, +7, +6, +10, +3, +3, +4, +5, +3 and +5 — no
+single round past the low hundreds has been large, and none has been zero
+either. Coverage past ~190 means paying subsystem prices for
+a handful of cards at a time — which is the
 point at which a hand-authored overlay stops being an admission of defeat and
 starts being cheaper than the mechanic. `ingest/authored.ts` is that seam: it
 supplies an effect model for a named card, refuses itself if the card's printed

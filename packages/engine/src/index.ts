@@ -104,7 +104,7 @@ export {
 } from './statics.js';
 export type { ActiveStatic } from './statics.js';
 
-export { executeEffect, isValidTarget, legalTargets } from './effects.js';
+export { executeEffect, isValidChoice, isValidTarget, legalTargets } from './effects.js';
 export type { EffectContext } from './effects.js';
 
 export {
