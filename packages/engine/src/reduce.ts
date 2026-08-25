@@ -1084,6 +1084,16 @@ function mulligan(state: GameState, cards: readonly EntityId[]): ReduceResult {
  * can cause a Burn Out (431), and a Kill Instruction has to put the dying
  * Unit's Deathknell on the Chain while it is still on the Board (428.1.a.1.b).
  */
+/**
+ * How many times rule 322 will repeat a Cleanup before the engine gives up.
+ *
+ * 322 repeats "until a Cleanup occurs with no new change in the game's state",
+ * which terminates on its own — each pass kills at least one Unit and the
+ * Board is finite. The bound is a guard against a future rule that could
+ * genuinely cycle, not a limit anything reaches.
+ */
+const CLEANUP_PASSES = 16;
+
 const EFFECT_CONTEXT: EffectContext = {
   drawCards: (state, player, count, events) => drawCards(state, player, count, events).state,
   queueDeaths: (state, units, events) => queueDeaths(state, units, events),
@@ -1205,6 +1215,80 @@ function queueDeaths(
       events,
       { extraSources: [unit] },
     );
+  }
+  return next;
+}
+
+/** Every Unit on the Board (380): at a Battlefield, or in a player's Base. */
+function boardUnits(state: GameState): EntityId[] {
+  const found: EntityId[] = [];
+  for (const battlefield of state.battlefields) {
+    found.push(...battlefield.units);
+  }
+  for (const player of state.players) {
+    for (const id of player.zones.base) {
+      if (entityCard(state, id).type === 'unit') {
+        found.push(id);
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * Rule 323, steps 3a and 3b: a Cleanup kills every Unit with Lethal Damage.
+ *
+ * 142.4.a is what makes this the *only* thing that kills by damage — "the
+ * amount of marked Damage that will cause a unit to die **in a cleanup**". So
+ * `dealDamage` marks and this decides, and a Cleanup happens far more often
+ * than a Combat does: 319 makes one Outstanding after a Chain Item leaves the
+ * Chain (319.5) and after a Move completes (319.8), which is what a damage
+ * Spell needs to do anything at all outside Combat.
+ *
+ * 323.4 before 323.5 is load-bearing and is the opposite order from the one a
+ * Passive Kill would otherwise take under 383.2.c: the rule has the death
+ * triggers go on the Chain "making note of their current location" *while the
+ * Units are still on the Board*, which is why nothing here has to name the
+ * Battlefield the way 808.1.d.3 does elsewhere. 324.1 inserts a Special
+ * Cleanup's own steps into this one rather than replacing it, so the Combat
+ * Cleanup runs these two as well and shares the implementation.
+ */
+function killLethal(
+  state: GameState,
+  events: GameEvent[],
+  /** 807, 814: the Combat designations, which change what damage is lethal. */
+  roleOf?: ReadonlyMap<EntityId, CombatRole>,
+): GameState {
+  let next = state;
+  // 322: an event during a Cleanup that itself qualifies for one repeats the
+  // Cleanup, until one passes with no change. A static granting Might leaving
+  // the Board is how a death makes another death lethal.
+  for (let pass = 0; pass < CLEANUP_PASSES; pass += 1) {
+    const doomed = boardUnits(next).filter((unit) =>
+      hasLethalDamage(next, unit, roleOf?.get(unit)),
+    );
+    if (doomed.length === 0) {
+      return next;
+    }
+    // 323.4 (3a): the death triggers, while their sources are still present.
+    next = queueDeaths(next, doomed, events);
+    // 323.5 (3b): then the Units are killed and placed in their owners' Trash.
+    for (const unit of doomed) {
+      const owner = getEntity(next, unit).owner;
+      next = sendToNonBoardZone(next, unit, playerLocation(owner, 'trash'));
+      // 705: a Unit leaving play loses its Buffs, along with the damage and the
+      // turn's Might modifiers, none of which mean anything off the Board.
+      next = withEntity(next, unit, (current) => ({
+        ...current,
+        damage: 0,
+        exhausted: false,
+        mightBonus: 0,
+        grantedKeywords: [],
+        buffs: 0,
+        stunned: false,
+      }));
+    }
+    events.push({ type: 'unitsKilled', units: doomed });
   }
   return next;
 }
@@ -1366,6 +1450,15 @@ function pass(state: GameState): ReduceResult {
     }
     next = sendToNonBoardZone(next, top.entity, playerLocation(top.controller, 'trash'));
   }
+
+  // 319.5: a Chain Item leaving the Chain makes a Cleanup Outstanding, and
+  // 142.4.a makes a Cleanup the only thing that kills by damage. This is what
+  // lets a damage Spell kill outside Combat at all.
+  //
+  // Before the Chain is rebuilt, for the same reason the rebuild reads
+  // `next.chain`: a Deathknell queued here has to survive into it.
+  next = killLethal(next, events);
+
   // Rebuild from `next.chain`, not from `state.chain`. 383.3.c puts a
   // Triggered Ability on the Chain *as the item that woke it resolves* — a
   // Deathknell from a Kill Instruction, "when you buff" from a Buff, "when you
@@ -1527,6 +1620,10 @@ function afterMove(
 
   // 453: a Move is followed by a Cleanup.
   const before = next.battlefields;
+  // 323's steps 3a and 3b first, because 323.6's Control step is step 4 and a
+  // Unit killed here is one that no longer occupies the Battlefield it was
+  // holding.
+  next = killLethal(next, events);
   next = cleanupControl(next);
   next = cleanupFacedown(next, events);
   next.battlefields.forEach((battlefield, index) => {
@@ -1927,39 +2024,11 @@ function resolveCombat(
   }
 
   // 428.4 / 466.1: the Combat Cleanup kills Units with lethal damage, then
-  // heals the survivors.
-  const killed: EntityId[] = [];
-  for (const unit of next.battlefields[index]?.units ?? []) {
-    if (hasLethalDamage(next, unit, roleOf.get(unit))) {
-      killed.push(unit);
-    }
-  }
-  for (const unit of killed) {
-    const owner = getEntity(next, unit).owner;
-    next = sendToNonBoardZone(next, unit, playerLocation(owner, 'trash'));
-    // 705: a Unit leaving play loses its Buffs, along with the damage and the
-    // turn's Might modifiers, none of which mean anything off the Board.
-    next = withEntity(next, unit, (current) => ({
-      ...current,
-      damage: 0,
-      exhausted: false,
-      mightBonus: 0,
-      grantedKeywords: [],
-      buffs: 0,
-      stunned: false,
-    }));
-  }
-  if (killed.length > 0) {
-    events.push({ type: 'unitsKilled', units: killed });
-    // 383.2.c: a Trigger's Condition is evaluated after the inciting event has
-    // been processed, so the deaths are already resolved when these fire.
-    //
-    // Note this is *after* the move to the trash, unlike a Kill Instruction:
-    // 428.1.a.1.b puts the Deathknell on the Chain before the Unit leaves the
-    // Board, but that rule is about Active Kills. Death by lethal damage is a
-    // Passive Kill (428.1.a.2), which 383.2.c handles the ordinary way.
-    next = queueDeaths(next, killed, events, index);
-  }
+  // heals the survivors. 324.1 inserts a Special Cleanup's own steps into an
+  // ordinary one rather than replacing it, so the killing is rule 323's steps
+  // 3a and 3b and shares their implementation — what Combat adds is `roleOf`,
+  // since 807 and 814 make a designation change what damage is lethal.
+  next = killLethal(next, events, roleOf);
 
   // 466.1.a.1: heal all Units.
   for (const unit of next.battlefields[index]?.units ?? []) {
@@ -2441,8 +2510,11 @@ function passTurn(state: GameState, events: GameEvent[]): ReduceResult {
  * The "more than any opponent" clause matters: reaching 8 while tied does not
  * win, and 194.2.b has play continue until someone is ahead.
  *
- * This engine has no Cleanup system yet, so victory is checked wherever points
- * change. That is the same set of moments for the effects modelled so far.
+ * 323.1 is step 1 of a Cleanup, and this engine performs a Cleanup's steps at
+ * their own call sites rather than as one function — `killLethal` for 323.4
+ * and 323.5, `cleanupControl` for 323.6, `openShowdown` for 323.12. Victory is
+ * checked wherever points change, which is the same set of moments for the
+ * effects modelled so far.
  */
 function checkVictory(state: GameState): Outcome | null {
   let best: PlayerId | null = null;

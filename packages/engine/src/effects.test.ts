@@ -31,6 +31,7 @@ import {
   isOver,
   playerId,
   playerLocation,
+  type PlayerId,
 } from './state.js';
 
 const LEGEND = makeLegend(['fury', 'calm'], { id: cardId('E-000') });
@@ -369,6 +370,10 @@ function deck(): DeckList {
     battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
   };
 }
+
+/** The other seat, in a two-player game. */
+const other = (state: GameState): PlayerId =>
+  playerId((state.activePlayer + 1) % state.players.length);
 
 /** Take the empty Mulligan for every player so play can begin (rule 117). */
 function pastMulligan(state: GameState): GameState {
@@ -922,8 +927,11 @@ describe('spell effects (rule 359.3.d)', () => {
     expect(after.players[after.activePlayer]!.zones.trash).toContain(bolt);
   });
 
-  it('kills a Unit dealt lethal damage in the next Combat cleanup', () => {
-    // Bolt deals 3 to a 2-Might Unit, which is lethal.
+  it('323.5: kills a Unit dealt lethal damage in the Cleanup that follows', () => {
+    // Bolt deals 3 to a 2-Might Unit, which is lethal. 142.4.a makes a Cleanup
+    // the only thing that kills by damage, and 319.5 makes one Outstanding the
+    // moment the Spell leaves the Chain — so the Unit dies here, with no
+    // Combat anywhere near it.
     let state = withEnergy(inMainPhase(), 1);
     const [a, bolt] = toHand(state, BOLT);
     state = a;
@@ -932,9 +940,25 @@ describe('spell effects (rule 359.3.d)', () => {
 
     const after = castSpell(state, bolt, victim);
 
-    // Damage is marked; the Unit dies at the next cleanup that checks it.
-    expect(after.entities[victim]!.damage).toBe(3);
-    expect(mightOf(after, victim)).toBe(SCOUT.might);
+    expect(after.players[after.activePlayer]!.zones.trash).toContain(victim);
+    // 705: leaving the Board takes the damage with it.
+    expect(after.entities[victim]!.damage).toBe(0);
+    checkInvariants(after);
+  });
+
+  it('323.5: leaves a Unit alive below the lethal threshold', () => {
+    // Snipe deals 1 to a 4-Might Unit: marked, and not lethal.
+    let state = withEnergy(inMainPhase('survives'), 1);
+    const [a, snipe] = toHand(state, SNIPE);
+    state = a;
+    const [b, victim] = onBoard(state, other(state), PLAIN, 0);
+    state = b;
+
+    const after = castSpell(state, snipe, victim);
+
+    expect(after.entities[victim]!.damage).toBe(1);
+    expect(mightOf(after, victim)).toBe(PLAIN.might);
+    expect(after.players[other(state)]!.zones.trash).not.toContain(victim);
   });
 });
 
@@ -1287,9 +1311,6 @@ describe('Delayed Passive Abilities (rule 390.4)', () => {
 });
 
 describe('a second chosen thing (rule 355.5)', () => {
-  const other = (state: GameState) =>
-    playerId((state.activePlayer + 1) % state.players.length);
-
   it('applies a target-consuming step to both chosen objects', () => {
     let state = withEnergy(inMainPhase('two-slots'), 1);
     const [a, mine] = onBoard(state, state.activePlayer, PLAIN, 0);
@@ -1359,11 +1380,10 @@ describe('a second chosen thing (rule 355.5)', () => {
     state = reduce(state, { type: 'playCard', card: spell, targets: [mine, theirs] }).state;
     state = reduce(reduce(state, { type: 'pass' }).state, { type: 'pass' }).state;
 
-    // Equal Mights: each was dealt the *other's* full Might, rather than the
-    // second read seeing a Unit the first had already damaged. Death is a
-    // Cleanup's job (323.5), not this effect's.
-    expect(getEntity(state, mine).damage).toBe(PLAIN.might);
-    expect(getEntity(state, theirs).damage).toBe(PLAIN.might);
+    // Equal Mights: each was dealt the *other's* full Might, so both died
+    // rather than one surviving because the other had already been reduced.
+    expect(state.players[state.activePlayer]!.zones.trash).toContain(mine);
+    expect(state.players[other(state)]!.zones.trash).toContain(theirs);
     checkInvariants(state);
   });
 

@@ -787,7 +787,9 @@ describe("Activated Abilities (rules 376-381)", () => {
         targets: [victim],
       }).state,
     );
-    expect(getEntity(damaged, victim).damage).toBe(2);
+    // 2 damage on a 2-Might Unit is lethal, and 323.5 kills it in the Cleanup
+    // that follows the ability leaving the Chain.
+    expect(damaged.players[getEntity(damaged, victim).owner]!.zones.trash).toContain(victim);
 
     // A targeting ability with no target chosen is not a legal activation.
     expect(() =>
@@ -998,9 +1000,40 @@ describe("death triggers", () => {
     );
 
     expect(zoneOf(after, state.activePlayer, "trash")).toContain(caustic);
-    expect(getEntity(after, bystander).damage).toBe(3);
+    // 3 damage on a 2-Might Unit is lethal, so 323.5 kills it in the Cleanup.
+    expect(zoneOf(after, state.activePlayer, "trash")).toContain(bystander);
     // A different Battlefield is not "my battlefield".
     expect(getEntity(after, elsewhere).damage).toBe(0);
+    expect(zoneOf(after, state.activePlayer, "trash")).not.toContain(elsewhere);
+    checkInvariants(after);
+  });
+
+  it("323.4 before 323.5: a Deathknell fires when damage is what kills", () => {
+    // Death by Lethal Damage is a Passive Kill (428.1.a.2), and 323.4 has its
+    // Deathknell trigger *while the Unit is still on the Board* — which is why
+    // "all units at my battlefield" resolves without anyone naming the
+    // Battlefield the way 808.1.d.3 has to elsewhere.
+    let state = inMainPhase("passive-death", 3);
+    const [a, caustic] = withBoardCard(state, CAUSTIC.id);
+    state = moveEntity(a, caustic, battlefieldLocation(0));
+    const [b, bystander] = withBoardCard(state, PLAIN.id);
+    state = moveEntity(b, bystander, battlefieldLocation(0));
+    const [c, sniper] = withBoardCard(state, SNIPER.id);
+    state = c;
+
+    // The Sniper deals 2, which is lethal to the 2-Might Caustic.
+    const after = resolveChain(
+      reduce(state, {
+        type: "activateAbility",
+        source: sniper,
+        index: 0,
+        targets: [caustic],
+      }).state,
+    );
+
+    expect(zoneOf(after, state.activePlayer, "trash")).toContain(caustic);
+    // The Deathknell then dealt 3 at that Battlefield, killing the bystander.
+    expect(zoneOf(after, state.activePlayer, "trash")).toContain(bystander);
     checkInvariants(after);
   });
 
@@ -1772,8 +1805,9 @@ describe("choices for Triggered Abilities (rule 402)", () => {
       guard += 1;
     }
 
-    // This is the whole point: before, the damage was never dealt.
-    expect(next.entities[victim]!.damage).toBe(2);
+    // This is the whole point: before, the damage was never dealt. 2 on a
+    // 2-Might Unit is lethal, so 323.5 kills it in the Cleanup that follows.
+    expect(next.players[getEntity(next, victim).owner]!.zones.trash).toContain(victim);
     checkInvariants(next);
   });
 

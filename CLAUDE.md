@@ -1465,9 +1465,10 @@ Five of them encode a rule that is easy to get backwards:
 
 - **A Kill Instruction queues the dying Unit's Deathknell *before* it reaches
   the trash** (428.1.a.1.b), because the trigger has to see it on the Board.
-  Death by lethal damage is a *Passive* Kill (428.1.a.2) and does not follow
-  that rule — combat queues its triggers after the move, the ordinary way of
-  383.2.c. The two paths differ on purpose.
+  Death by lethal damage is a *Passive* Kill (428.1.a.2) and reaches the same
+  order by a different rule: 323.4 is step 3a of a Cleanup and puts the trigger
+  on the Chain, 323.5 is step 3b and moves the Unit. See
+  [Cleanups](#cleanups-and-what-damage-actually-does).
 - **A Recall is not a Move** (456). It triggers nothing that watches Moves,
   cannot be blocked by anything restricting Movement (456.3), and leaves damage
   and statuses alone (458.1) — so it is not a heal and not a ready.
@@ -1912,6 +1913,58 @@ For a card whose own cost is being determined, `dependencyMet` gets no source
 entity: the card is Finalized at step 6 (329.2) and its cost settled at step 3,
 so it genuinely is not yet among the cards played this turn. That is not a
 special case, it is the timing.
+
+### Cleanups, and what damage actually does
+
+Rules 318-324, with `killLethal` in `engine/reduce.ts`.
+
+**142.4.a is the sentence the whole thing turns on: Lethal Damage is "the
+amount of marked Damage that will cause a unit to die *in a cleanup*".** So
+`dealDamage` never kills — it marks — and a Cleanup is what decides. Miss that
+and every damage Spell in the corpus is inert unless a Combat happens to
+follow it on the same turn, which is what this engine did until the rule was
+read properly: `hasLethalDamage` was consulted only inside the Combat Cleanup,
+so "deal 3 to a unit" against a 2-Might Unit marked three damage that the
+Ending Phase then healed away.
+
+Rule 319 makes a Cleanup Outstanding at eight moments. The engine performs
+rule 323's steps 3a and 3b at the two that matter for damage, plus the Combat
+Cleanup it already had:
+
+| Rule | When | Where |
+|---|---|---|
+| 319.5 | A Chain Item leaves the Chain | `resolveTop`, before the Chain is rebuilt |
+| 319.8 | A Move completes | `afterMove`, before 323.6's Control step |
+| 466.1 | The Combat Cleanup | `resolveCombat`, with the designations |
+
+Four things are load-bearing:
+
+- **323.4 runs before 323.5, and that is the opposite of what 383.2.c would
+  give.** The rule has each doomed Unit's death triggers go on the Chain
+  "making note of their current location" *while it is still on the Board* — so
+  nothing here has to name the Battlefield the way 808.1.d.3 does elsewhere,
+  and a Deathknell reading "all units at my battlefield" resolves with no note
+  at all. The Combat Cleanup used to queue after the move and now shares this
+  path, because 324.1 inserts a Special Cleanup's own steps *into* an ordinary
+  one rather than replacing it.
+- **Combat's only contribution is the designations.** 807 and 814 make Assault
+  and Shield conditional on being an Attacker or Defender, so what counts as
+  lethal differs inside a Combat — which is the `roleOf` argument and the whole
+  of the difference.
+- **322 repeats.** An event during a Cleanup that itself qualifies for one
+  repeats the Cleanup until nothing changes, which is how a static granting
+  Might leaving the Board kills a second Unit. It terminates on its own — every
+  pass kills at least one Unit and the Board is finite — and `CLEANUP_PASSES`
+  is a guard against a future rule that could cycle, not a limit anything
+  reaches.
+- **In `resolveTop` it must run before the Chain is rebuilt**, for exactly the
+  reason the rebuild reads `next.chain`: a Deathknell queued by the Cleanup has
+  to survive into it rather than being sliced away with the resolved item.
+
+The steps of 323 the engine does *not* perform as one function are 323.1's win
+check, 323.6's Control step and 323.12's Showdown opening — each is done at its
+own call site (`cleanupControl`, `openShowdown`) and predates this. Folding
+them together is the obvious next tidy-up and is not a behaviour change.
 
 ### The interruptible phase machine
 
