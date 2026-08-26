@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells, draw and Play Effects firing. 271 of the 468 cards with text
+with damage spells killing, draw and Play Effects firing. 271 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -45,18 +45,24 @@ What is built:
   Scoring by Hold, Burn Out, the win condition, Rune Pools, the Chain with
   Priority, the Process of Play, the Standard Move and Contested status,
   Showdowns with Focus, the full Steps of Combat, Scoring by Conquer including
-  the Final Point restriction, **data-driven card effects** (draw, damage,
-  heal, Might, resources, kill, recall, move, ready/exhaust, Buffs, discard,
-  Stun, XP, Channel, Tokens, returning cards to hand, granting keywords),
+  the Final Point restriction, **Cleanups** (318-324) — which is what makes
+  damage kill anything outside a Combat — **data-driven card effects** (draw,
+  damage, heal, Might, resources, kill, recall, move, ready/exhaust, Buffs,
+  discard, Stun, XP, Channel, Tokens, Counter, returning cards to hand,
+  playing one out of the trash or off the top of the deck, granting keywords),
   targets that **choose nothing and affect everything matching a criterion**
-  (355.5.a), **the
+  (355.5.a), **counted** targets and a **second chosen thing** (355.5-355.6),
+  **guarded effect steps**, **the
   Mulligan**,
   **Activated and Triggered abilities** on an **interruptible phase machine**,
   **event-driven trigger conditions**, **rule 356 cost modification** including
-  **Additional Costs**, **static and passive abilities**, **state predicates**,
+  **Additional Costs**, **static and passive abilities** with rule 002's
+  **restrictions** and **Delayed** windows (390.4), **Bonus Damage** (712-715),
+  **state predicates** and **dynamic values**,
   **Tokens** (179-187) including the Gold token's `[A]` in the Rune Pool
   (135.2.e.5.b), **Attachment** (434-435, 716-719), the **Facedown Zone**
-  (107.3, 421), the **keywords**
+  (107.3, 421), **Predict** (436) and looking at the deck with a **Linked
+  Ability** to choose (424, 390.5), the **keywords**
   Assault, Shield, Tank, Backline, Ganking and Hidden, the **Dependent
   Keywords** Legion
   and Level, first-class legal action generation, per-player observable views,
@@ -66,11 +72,14 @@ What is built:
   Battlefield, fight over it, take Control, and score to 8.
 - **`@riftbound/ai`** — the `Agent` interface, a seeded random legal agent, a
   **heuristic agent**, a **determinizing search agent**, and a single-game
-  runner that keeps agents honest. The heuristic wins **~85% against random over
-  120 alternating-seat games**, and the search agent wins **90.8% [84.3%, 94.8%]
-  against the heuristic** over 120 games with real card data. Both controls —
-  random-vs-random and search-vs-search — measure ~50%, which is what says the
-  harness is not just reporting first-player advantage.
+  runner that keeps agents honest. Over 120 alternating-seat games each, the
+  heuristic wins **85.8% [78.5%, 91.0%] against random** and the search agent
+  wins **95.8% [90.6%, 98.2%] against the heuristic** (two worlds, 20-step
+  rollouts). Both controls — random-vs-random and search-vs-search — measure
+  ~50%, which is what says the harness is not just reporting first-player
+  advantage. **Re-measure these after any rules change**: making damage kill in
+  a Cleanup (318-324) moved the search agent's margin, because a tier that can
+  see a removal spell coming gains more from it than one that cannot.
 - **`@riftbound/analysis`** — the analytic statistics: a hypergeometric core
   (including the multivariate case), cost curve, draw probabilities by turn,
   Domain/Power consistency, and per-card castability. No engine, no agent, no
@@ -118,14 +127,24 @@ What is **not** built yet, in rough dependency order:
    printings are each blocked on something else as well. Its reason in
    `UNMODELLED_KEYWORDS` records that rather than a blocker, which is the honest
    thing for it to say.
-2. **Statics that are not a scope plus a grant.** Might modifiers, granted
-   keywords and "enters ready" are built; a *dynamic* Might ("increased by your
-   points"), a duration ("units you play this turn enter ready") and a rule
-   change ("opponents can only play units to their base") are not.
-3. **Conditional and modal effects** — "if this kills it", "unless its
-   controller…", "choose one •…", "for each…". *State* predicates and "if you
-   paid the additional cost" are built; what is left is a condition on an
-   effect's own outcome, counting, and modes.
+2. **Replacement effects (rule 438).** "The next time it dies this turn, you
+   may pay 1 Fury to **recall it instead**", "if I would be killed, …". Nothing
+   in the engine can substitute one event for another, and this is also what
+   Battlefield tokens (187.8, 187.9) need — 652.2.a Replaces a Battlefield
+   leaving play with a token one.
+3. **Effect-outcome predicates.** "Deal 3 to a unit. **If this kills it**, draw
+   1", "deal 6 to it **unless its controller** has you draw 2". `Condition`
+   asks about the state and about the chosen target (see [Guarded effect
+   steps](#guarded-effect-steps)); it cannot ask what the step above it just
+   did, and there is no seam for an opponent to answer.
+4. **Modal and symmetric effects** — "choose one •…", "each opponent reveals
+   the top card of their Main Deck". The effect model runs one player's
+   instruction and has no modes.
+5. **Statics that are still not a scope plus a grant.** Dynamic Might,
+   durations (390.4) and rule 002's restrictions are all built now; what is
+   left wants a *combat-role* predicate — "while I'm attacking alone" — which
+   `Condition` deliberately cannot express, because a condition that read Might
+   back would recurse through `mightOf`.
 
 Focus (rule 313) is implemented for both kinds of Showdown: granted to the
 contesting player (345), passing on a pass (347.2.b) and when the last Chain
@@ -172,6 +191,18 @@ would with the cards that exist today:
 - **Which cards get discarded is chosen for the player.** Rule 422.1.a lets the
   discarding player choose, and 422.1.a lets them use Private Information to do
   it. `effects.ts` takes from the front of the hand instead, deterministically.
+- **Rule 319 lists eight moments that make a Cleanup Outstanding; three of
+  them run one.** `killLethal` is called after a Chain Item leaves the Chain
+  (319.5), after a Move completes (319.8), and inside the Combat Cleanup — see
+  [Cleanups](#cleanups-and-what-damage-actually-does). Every damage effect in
+  the corpus reaches one of those, because a Spell and a Triggered Ability both
+  resolve off the Chain. The two paths that do not are **a Permanent's inline
+  Play Effect** (359.2.b, executed in `playCard` rather than on the Chain) and
+  **a Game Object entering or leaving the Board** (319.6) — so a Unit whose
+  static reduces enemy Might below their marked damage does not kill until the
+  next Cleanup from another cause. Two ingested permanents carry an inline
+  effect today and neither deals damage, so nothing in the corpus is affected;
+  an authored entry that dealt damage from one would be.
 - **Combat damage assignment order is fixed, not chosen.** Rule 465.2.c lets the
   assigning player pick the order, which decides *which* enemy Units die.
   `assignDamage` in `combat.ts` walks the targets in a fixed order instead. Every
@@ -1032,8 +1063,8 @@ Two consequences worth knowing:
   printed one does, and granting one the engine ignores is the same wrong card
   as printing it.
 - **Keywords ride the same all-or-nothing rule as everything else.** A card
-  whose other clause is unreadable keeps neither. That is why only 14 ingested
-  cards carry a keyword while 105 parse fully.
+  whose other clause is unreadable keeps neither. That is why only 33 ingested
+  cards carry a keyword while 271 are covered.
 
 `Keyword` stacking follows the rules rather than the callers: valued keywords
 sum (807.2, 814.2) and unvalued ones are redundant (810.2, 815.2, 826.5), which
@@ -2112,7 +2143,7 @@ edits by how far they move it, and swapping the objective swaps what the tool is
 for without touching the search.
 
 **The default is `CONSISTENCY`, and the reason is not taste.** A *simulated*
-objective is not trustworthy yet: 311 of the 468 cards with rules text still
+objective is not trustworthy yet: 200 of the 468 cards with rules text still
 play as vanilla, so a simulator cannot see what most cards do. Optimizing
 against it would cut the card whose text the engine ignores and keep the vanilla
 body with better stats — confidently wrong advice. Consistency depends on cost
@@ -2267,14 +2298,17 @@ it sidesteps the licensing half of open question 1.
 541 card records in (699 minus sealed products and tokens), **479 cards out**,
 covering every card type including 255 Units and 90 Champion Units. A legal
 deck builds and validates from it with no issues, and the engine plays complete
-games with it — 300 games, all decided, heuristic 59.0% ± 5.5 against random.
+games with it — 300 games, all decided, heuristic 58.7% ± 5.5 against random.
 
-153 of those cards carry an ability and 24 a keyword. The keyword figure is low
-against the 188 that parse because keywords ride the same all-or-nothing rule:
-a card whose other clause is unreadable keeps neither. 37 carry a static, 22
-create Tokens, 15 an Additional Cost, 15 carry Effect Text a Gear lends its
-Top-Most Card, 13 a cost modifier, 8 carry Accelerate, 8 choose a Gear, 7 return
-a card to hand, 5 affect every Unit matching a criterion and 4 grant a keyword.
+219 of those cards carry an ability and 33 a keyword. The keyword figure is low
+against the 271 that are covered because keywords ride the same all-or-nothing
+rule: a card whose other clause is unreadable keeps neither. 51 carry a static,
+26 create Tokens, 18 carry Effect Text a Gear lends its Top-Most Card, 17 an
+Additional Cost, 16 choose a Gear, 13 a cost modifier, 13 return a card to hand,
+9 carry Accelerate, 9 a rule 002 restriction, 8 a counted target, 8 affect every
+Unit matching a criterion, 5 open a turn-scoped window, 5 look at the deck, 4
+play a card out of another zone, 4 grant a keyword, 4 choose a second thing, 3
+deal Bonus Damage and 2 Counter.
 
 What it still cannot supply:
 
