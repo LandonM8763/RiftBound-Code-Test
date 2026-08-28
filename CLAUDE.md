@@ -191,18 +191,6 @@ would with the cards that exist today:
 - **Which cards get discarded is chosen for the player.** Rule 422.1.a lets the
   discarding player choose, and 422.1.a lets them use Private Information to do
   it. `effects.ts` takes from the front of the hand instead, deterministically.
-- **Rule 319 lists eight moments that make a Cleanup Outstanding; three of
-  them run one.** `killLethal` is called after a Chain Item leaves the Chain
-  (319.5), after a Move completes (319.8), and inside the Combat Cleanup — see
-  [Cleanups](#cleanups-and-what-damage-actually-does). Every damage effect in
-  the corpus reaches one of those, because a Spell and a Triggered Ability both
-  resolve off the Chain. The two paths that do not are **a Permanent's inline
-  Play Effect** (359.2.b, executed in `playCard` rather than on the Chain) and
-  **a Game Object entering or leaving the Board** (319.6) — so a Unit whose
-  static reduces enemy Might below their marked damage does not kill until the
-  next Cleanup from another cause. Two ingested permanents carry an inline
-  effect today and neither deals damage, so nothing in the corpus is affected;
-  an authored entry that dealt damage from one would be.
 - **Combat damage assignment order is fixed, not chosen.** Rule 465.2.c lets the
   assigning player pick the order, which decides *which* enemy Units die.
   `assignDamage` in `combat.ts` walks the targets in a fixed order instead. Every
@@ -1959,14 +1947,34 @@ so "deal 3 to a unit" against a 2-Might Unit marked three damage that the
 Ending Phase then healed away.
 
 Rule 319 makes a Cleanup Outstanding at eight moments. The engine performs
-rule 323's steps 3a and 3b at the two that matter for damage, plus the Combat
-Cleanup it already had:
+rule 323's steps 3a and 3b at every one a Unit can carry marked damage into:
 
 | Rule | When | Where |
 |---|---|---|
 | 319.5 | A Chain Item leaves the Chain | `resolveTop`, before the Chain is rebuilt |
+| 319.6 | A Game Object enters the Board | `playCard`, after the play's own events |
 | 319.8 | A Move completes | `afterMove`, before 323.6's Control step |
 | 466.1 | The Combat Cleanup | `resolveCombat`, with the designations |
+
+**The other four moments are unreachable, and 317.2 is why.** The Ending Phase
+heals every Unit, so marked damage exists only between the effect that dealt it
+and the end of that same turn — which confines it to the Main Phase and the
+Ending Phase. So a phase transition (319.2), a state change (319.1, 319.7) and
+a Pending Item arriving (319.3, 319.4) can never find a Unit under its Might
+that the four above have not already killed. Adding a sweep to the Channel
+Phase would also cost more than it sounds: Awaken, Channel and Draw resolve in
+a single action and `checkInvariants` enforces that they never hold, so a
+Cleanup that queued a Deathknell there would need the interruptible machinery
+those phases deliberately do not have.
+
+**319.6 is the entry the Chain cannot see.** A Permanent leaves the Chain the
+instant it is Finalized (359.2), so `resolveTop` never runs for it — which
+means two things reach a Cleanup only from `playCard`: a static that drops an
+enemy's Might below their marked damage, and a Play Effect that deals damage
+*inline* under 359.2.b rather than from the Chain. It runs after the play's own
+events, so the play's triggers are Pending first and the Cleanup's deaths sit
+above them: the Chain resolves last-first, and a death is a consequence of the
+entry rather than a peer of it.
 
 Four things are load-bearing:
 

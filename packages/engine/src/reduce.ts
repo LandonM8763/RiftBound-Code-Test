@@ -524,6 +524,18 @@ function playCard(
   );
   next = raiseChosen(next, player, targets, events, definition.type);
 
+  // 319.6: a Game Object entering the Board makes a Cleanup Outstanding, and
+  // this is the one entry that does not already run one — a Permanent leaves
+  // the Chain the instant it is Finalized (359.2), so `resolveTop` never sees
+  // it. Two things reach the Cleanup only here: a static that drops enemy
+  // Might below their marked damage, and a Play Effect that deals damage
+  // inline under 359.2.b rather than from the Chain.
+  //
+  // After the events, so the play's own triggers are Pending first and the
+  // Cleanup's deaths sit above them — the Chain resolves last-first, and the
+  // deaths are a consequence of the entry rather than a peer of it.
+  next = killLethal(next, events);
+
   return { state: next, events };
 }
 
