@@ -2212,6 +2212,19 @@ The simulated side is `sim/`. Three decisions in it are load-bearing:
 - **Entrants rotate through the seats**, because 485.7 gives the player going
   second an extra Rune and a fixed seating measures that alongside the agents.
   Turn rotation off only to measure the seat advantage itself.
+- **A deck belongs to an entrant, not to a seat**, and `SimulateOptions.decks`
+  is indexed by entrant for that reason. The deck travels with its pilot into
+  whichever seat the rotation gives them. Indexing by seat instead hands each
+  deck to whoever sat there — invisible in a mirror match, and silently wrong
+  for every other game the moment the two decks differ. `simulate.test.ts` pins
+  it with a lopsided matchup, which is the only kind of test that can: identical
+  decks cannot tell the two readings apart.
+- **A matchup and a mirror measure different things, and the CLI says which.**
+  `sim <deck>` is a mirror — the same deck in both seats, heuristic against
+  random, so the difference is the *agents*. `sim <deck> <deck>` is a matchup
+  with the **same** agent piloting both, so the difference is the *decks*; a
+  stronger agent on one side would be read as that side's deck being better.
+  The report's first column is headed `Agent` or `Deck` to match.
 - **Agents come from a factory, not an instance.** They carry RNG state, so
   reusing one makes game N depend on game N-1 and a single game stops being
   reproducible from its seed — which is most of what a batch run is for. Each

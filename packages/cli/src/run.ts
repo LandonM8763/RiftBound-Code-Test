@@ -1,5 +1,7 @@
 import { parseArgs } from 'node:util';
 
+import type { CardRegistry } from '@riftbound/cards';
+
 import { DEFAULT_DRAW_MODEL, analyzeDeck } from '@riftbound/analysis';
 import {
   CONSTRUCTED_BO1,
@@ -8,7 +10,9 @@ import {
   parseDeckList,
   toCardLists,
   validateDeck,
+  type Deck,
   type Format,
+  type ValidationResult,
 } from '@riftbound/deck';
 
 import { HeuristicAgent, RandomAgent } from '@riftbound/ai';
@@ -50,7 +54,7 @@ Usage:
   riftbound analyze  <deck-file> [--cards <cards.json>] [options]
   riftbound validate <deck-file> [--cards <cards.json>] [options]
   riftbound ingest   [--fetch | <raw-file>...] [--source <name>] [--json]
-  riftbound sim      <deck-file> [--cards <cards.json>] [options]
+  riftbound sim      <deck-file> [<opponent-deck>] [--cards <cards.json>] [options]
   riftbound suggest  <deck-file> [--cards <cards.json>] [options]
   riftbound help
 
@@ -84,9 +88,16 @@ unreachable.
 A deck list names cards by printed name or by collector number, whichever you
 have. Names are matched ignoring case and extra spaces.
 
-sim plays the deck against itself, heuristic agent versus random, and reports
-win rates with 95% intervals. Seats rotate each game so the result is not
-measuring the extra Rune the player going second Channels.
+sim with one deck plays it against itself, heuristic agent versus random, and
+so measures the agents. sim with two decks is a matchup: the same agent pilots
+both, so what the win rate measures is the decks. Either way seats rotate each
+game, and each deck travels with its pilot — so the result is not measuring the
+extra Rune the player going second Channels.
+
+  riftbound sim mydeck.txt theirs.txt --games 500
+
+Simulated win rates are only as good as the card text the engine models; see
+the coverage note in CLAUDE.md before reading much into a close matchup.
 
 Exit codes:
   0  success
@@ -103,6 +114,53 @@ suggest proposes deck edits and reports, for each, how far it moved the chosen
 objective and the measurement that motivated it. It never proposes an edit that
 would make the deck illegal for the format.
 `;
+
+
+/**
+ * Read, parse and validate one deck list.
+ *
+ * Factored out for `sim`'s second list: a matchup's opponent has to go through
+ * exactly the checks the first deck did, and two copies of that sequence would
+ * eventually disagree about what a readable deck is.
+ */
+function loadDeck(
+  path: string,
+  readFile: FileReader,
+  registry: CardRegistry,
+  format: Format,
+): { deck: Deck; validation: ValidationResult } | { error: CliResult } {
+  let text: string;
+  try {
+    text = readFile(path);
+  } catch (error) {
+    return { error: fail(`Cannot read deck list "${path}": ${messageOf(error)}`, EXIT.input) };
+  }
+
+  const parsed = parseDeckList(text, { resolve: byIdOrName(registry) });
+  if (!parsed.ok) {
+    const detail = parsed.errors
+      .map((issue) => (issue.line > 0 ? `  line ${issue.line}: ${issue.message}` : `  ${issue.message}`))
+      .join('\n');
+    return { error: fail(`Cannot read deck list "${path}":\n${detail}`, EXIT.input) };
+  }
+
+  const validation = validateDeck(parsed.deck, registry, format);
+  if (validation.issues.some((issue) => issue.code === 'unknown-card')) {
+    return {
+      error: fail(
+        `${formatValidation(validation, format).trimEnd()}\n\nCannot analyse a deck containing unknown cards.`,
+        EXIT.illegal,
+      ),
+    };
+  }
+  return { deck: parsed.deck, validation };
+}
+
+/** A deck list's file name, for labelling it in a matchup. */
+function nameOf(path: string): string {
+  const base = path.split(/[\\/]/).pop() ?? path;
+  return base.replace(/\.[^.]+$/, '') || path;
+}
 
 function fail(message: string, code: number): CliResult {
   return { stdout: '', stderr: `${message}\n`, code };
@@ -256,6 +314,13 @@ export function run(argv: readonly string[], readFile: FileReader): CliResult {
     return usageError(`${command} needs a deck list file.`);
   }
 
+  // A second list is a matchup: `sim a.txt b.txt` measures the decks against
+  // each other rather than the agents against each other on one deck.
+  const opponentPath = positionals[2];
+  if (opponentPath !== undefined && command !== 'sim') {
+    return usageError(`${command} takes one deck list; only sim takes two.`);
+  }
+
   // `cards.json` in the working directory is where `ingest` is documented to
   // write, so the common flow needs no flag at all. Named explicitly the moment
   // a second pool is in play.
@@ -366,25 +431,62 @@ export function run(argv: readonly string[], readFile: FileReader): CliResult {
   }
 
   if (command === 'sim') {
-    // A mirror match: the same deck in both seats, so the difference measured
-    // is the agents rather than the decks. Deck-vs-deck needs two lists and is
-    // a separate command when there is a reason to want it.
     const lists = toCardLists(deck);
+    const seed = typeof values['seed'] === 'string' ? values['seed'] : 'riftbound';
+
+    if (opponentPath === undefined) {
+      // One list is a mirror match: the same deck in both seats, so what the
+      // difference measures is the agents rather than the decks.
+      const result = simulate({
+        decks: [lists, lists],
+        registry,
+        games,
+        seed,
+        entrants: [
+          { name: 'heuristic', create: (agentSeed) => new HeuristicAgent({ seed: agentSeed }) },
+          { name: 'random', create: (agentSeed) => new RandomAgent(agentSeed) },
+        ],
+      });
+
+      return {
+        stdout: asJson ? `${JSON.stringify(result, null, 2)}\n` : formatSimulation(result),
+        stderr: '',
+        code: validation.legal ? EXIT.ok : EXIT.illegal,
+      };
+    }
+
+    // Two lists is a matchup. The *same* agent pilots both, so the decks are
+    // the only thing that differs — a stronger agent on one side would be
+    // measured as that side's deck being better.
+    const opponent = loadDeck(opponentPath, readFile, registry, format);
+    if ('error' in opponent) {
+      return opponent.error;
+    }
+
     const result = simulate({
-      decks: [lists, lists],
+      decks: [lists, toCardLists(opponent.deck)],
       registry,
       games,
-      seed: typeof values['seed'] === 'string' ? values['seed'] : 'riftbound',
+      seed,
       entrants: [
-        { name: 'heuristic', create: (agentSeed) => new HeuristicAgent({ seed: agentSeed }) },
-        { name: 'random', create: (agentSeed) => new RandomAgent(agentSeed) },
+        { name: nameOf(deckPath), create: (agentSeed) => new HeuristicAgent({ seed: agentSeed }) },
+        {
+          name: nameOf(opponentPath),
+          create: (agentSeed) => new HeuristicAgent({ seed: agentSeed }),
+        },
       ],
     });
 
+    const legal = validation.legal && opponent.validation.legal;
+    const warning = opponent.validation.legal
+      ? ''
+      : `${formatValidation(opponent.validation, format).trimEnd()}\n`;
     return {
-      stdout: asJson ? `${JSON.stringify(result, null, 2)}\n` : formatSimulation(result),
-      stderr: '',
-      code: validation.legal ? EXIT.ok : EXIT.illegal,
+      stdout: asJson
+        ? `${JSON.stringify(result, null, 2)}\n`
+        : formatSimulation(result, 'Deck'),
+      stderr: warning,
+      code: legal ? EXIT.ok : EXIT.illegal,
     };
   }
 

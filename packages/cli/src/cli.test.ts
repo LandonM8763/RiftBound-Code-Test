@@ -779,3 +779,48 @@ describe("finding card data without being told where", () => {
     expect(result.stderr).toContain("cards.json");
   });
 });
+
+describe("sim as a matchup between two decks", () => {
+  it("names both decks and says it is comparing decks, not agents", () => {
+    const result = run(
+      ["sim", "deck.txt", "deck-by-name.txt", "--cards", "cards.json", "--games", "6"],
+      files,
+    );
+
+    expect(result.code).toBe(EXIT.ok);
+    expect(result.stdout).toContain("Deck");
+    expect(result.stdout).toContain("deck");
+    expect(result.stdout).toContain("deck-by-name");
+    // The agent names must not appear: the same agent pilots both sides, so
+    // reporting one would suggest the agents were what differed.
+    expect(result.stdout).not.toContain("heuristic");
+    expect(result.stdout).not.toContain("random");
+  });
+
+  it("still measures the agents when given one deck", () => {
+    const result = run(
+      ["sim", "deck.txt", "--cards", "cards.json", "--games", "6"],
+      files,
+    );
+    expect(result.code).toBe(EXIT.ok);
+    expect(result.stdout).toContain("Agent");
+    expect(result.stdout).toContain("heuristic");
+  });
+
+  it("reports a second deck that cannot be read", () => {
+    const result = run(
+      ["sim", "deck.txt", "missing.txt", "--cards", "cards.json", "--games", "4"],
+      files,
+    );
+    expect(result.code).toBe(EXIT.input);
+    expect(result.stderr).toContain("missing.txt");
+  });
+
+  it("refuses a second deck for the commands that compare nothing", () => {
+    for (const command of ["analyze", "validate", "suggest"]) {
+      const result = run([command, "deck.txt", "deck.txt", "--cards", "cards.json"], files);
+      expect(result.code).toBe(EXIT.usage);
+      expect(result.stderr).toContain("only sim takes two");
+    }
+  });
+});

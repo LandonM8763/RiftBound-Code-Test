@@ -286,7 +286,17 @@ export function formatIngest(result: IngestResult, source: CardSource): string {
  * "83%" and "83% ± 2.3 over 1000 games" support very different decisions, and
  * the first one silently invites the wrong one.
  */
-export function formatSimulation(result: SimulationResult): string {
+export function formatSimulation(
+  result: SimulationResult,
+  /**
+   * What the entrants are, for the first column's heading.
+   *
+   * A mirror match pits two agents against each other and a matchup pits two
+   * decks, and the reader needs to know which they are looking at — the rows
+   * are named the same way either way.
+   */
+  entrantLabel: 'Agent' | 'Deck' = 'Agent',
+): string {
   const lines = [
     `${result.games} games — ${result.decided} decided, ${result.draws} drawn`,
     '',
@@ -304,7 +314,7 @@ export function formatSimulation(result: SimulationResult): string {
   const level = Math.round(confidenceLevel(result) * 100);
   lines.push(
     ...table(
-      ['Agent', 'Wins', 'Rate', '', `${level}% CI`, 'Avg points'],
+      [entrantLabel, 'Wins', 'Rate', '', `${level}% CI`, 'Avg points'],
       rows,
       ['left', 'right', 'right', 'right', 'right', 'right'],
     ).map((row) => `  ${row}`),

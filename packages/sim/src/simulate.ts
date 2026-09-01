@@ -32,7 +32,15 @@ export interface Entrant {
 }
 
 export interface SimulateOptions {
-  /** One deck per seat. Entrants rotate through the seats, decks do not. */
+  /**
+   * One deck per **entrant**, in the same order — an entrant is a contestant,
+   * and a contestant brings a deck.
+   *
+   * The deck travels with its entrant into whatever seat the rotation puts
+   * them in. Indexing decks by *seat* instead would hand each deck to whoever
+   * sat there, which is invisible in a mirror match and silently attributes
+   * every other game's result to the wrong deck as soon as the two differ.
+   */
   readonly decks: readonly DeckList[];
   readonly registry: CardRegistry;
   /** One entrant per seat, in starting seat order. */
@@ -126,8 +134,14 @@ export function simulate(options: SimulateOptions): SimulationResult {
       agents[seat] = factory.create(`${gameSeed}/${factory.name}`);
     }
 
+    // The deck follows its entrant into the seat the rotation gave them.
+    const gameDecks = new Array<DeckList>(seats);
+    for (let entrant = 0; entrant < seats; entrant += 1) {
+      gameDecks[seatOf[entrant] as number] = decks[entrant] as DeckList;
+    }
+
     const result = playGame({
-      decks,
+      decks: gameDecks,
       registry,
       agents,
       seed: gameSeed,

@@ -52,6 +52,13 @@ node packages/cli/dist/main.js analyze mydeck.txt
 command needs no flags. A deck list names cards by printed name or by collector
 number, whichever you have — see `packages/cli/examples/deck-by-name.txt`.
 
+Two deck lists is a matchup, with the same agent piloting both so that what the
+win rate measures is the decks:
+
+```bash
+node packages/cli/dist/main.js sim mydeck.txt theirs.txt --games 500
+```
+
 The example cards are invented placeholders, not real Riftbound cards — see
 `packages/cli/examples/README.md`.
 

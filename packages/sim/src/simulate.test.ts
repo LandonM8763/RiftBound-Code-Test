@@ -93,6 +93,84 @@ const base = {
   config: { maxTurns: 300 },
 } as const;
 
+/**
+ * Two decks that differ inside the game rather than on paper: same costs and
+ * the same Runes, but one fields Units twice the Might of the other.
+ *
+ * A mirror match cannot tell whether decks are indexed by seat or by entrant,
+ * so telling them apart needs decks that are actually different.
+ */
+const BIG = Array.from({ length: 14 }, (_, i) =>
+  makeUnit(6, ["fury"], {
+    id: cardId(`OGN-5${String(i).padStart(2, "0")}`),
+    name: `Big ${i}`,
+    cost: cost(1 + (i % 3)),
+  }),
+);
+const SMALL = Array.from({ length: 14 }, (_, i) =>
+  makeUnit(1, ["fury"], {
+    id: cardId(`OGN-6${String(i).padStart(2, "0")}`),
+    name: `Small ${i}`,
+    cost: cost(1 + (i % 3)),
+  }),
+);
+
+const MATCHUP_REGISTRY = CardRegistry.from([
+  LEGEND,
+  CHAMPION,
+  ...BIG,
+  ...SMALL,
+  FURY_RUNE,
+  CALM_RUNE,
+  ...BATTLEFIELDS,
+] as CardDefinition[]);
+
+const deckOf = (units: readonly CardDefinition[]): DeckList => ({
+  legend: LEGEND.id,
+  champion: CHAMPION.id,
+  main: [
+    ...units.slice(0, 13).flatMap((unit) => [unit.id, unit.id, unit.id]),
+    (units[13] as CardDefinition).id,
+  ],
+  runes: [
+    ...Array.from({ length: 6 }, () => FURY_RUNE.id),
+    ...Array.from({ length: 6 }, () => CALM_RUNE.id),
+  ],
+  battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
+});
+
+describe("a deck belongs to its entrant, not to a seat", () => {
+  it("carries the deck with the entrant through the seat rotation", () => {
+    // Same agent on both sides, so the decks are the only variable. Were decks
+    // indexed by seat, the rotation would hand each entrant each deck half the
+    // time and this would measure ~50% however lopsided the matchup.
+    const result = simulate({
+      decks: [deckOf(BIG), deckOf(SMALL)],
+      registry: MATCHUP_REGISTRY,
+      config: { maxTurns: 300 },
+      entrants: [heuristic("big"), heuristic("small")],
+      games: 60,
+      seed: "matchup",
+    });
+
+    const big = result.entrants[0];
+    expect(big?.name).toBe("big");
+    expect(big?.winRate ?? 0).toBeGreaterThan(0.7);
+  });
+
+  it("is unchanged for a mirror match, where the two readings coincide", () => {
+    const options = {
+      ...base,
+      entrants: [heuristic(), random()],
+      games: 20,
+      seed: "mirror",
+    } as const;
+    const first = simulate(options);
+    const second = simulate({ ...options, decks: [DECK, DECK] });
+    expect(first.entrants[0]?.wins).toBe(second.entrants[0]?.wins);
+  });
+});
+
 describe("simulate", () => {
   it("reports wins, a rate and an interval per entrant", () => {
     const result = simulate({
