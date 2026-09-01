@@ -21,6 +21,7 @@
  * condition that silently reads false makes a card quietly weaker than printed.
  */
 import type { CardType } from './card.js';
+import type { ObjectFilter } from './effect.js';
 
 /** What a `controls` predicate counts. */
 export type ControlledKind = CardType | 'battlefield';
@@ -50,6 +51,15 @@ export type Condition =
       /** How many are needed. "a Poro" is 1, "two or more gear" is 2. */
       readonly min: number;
       readonly tag?: string | undefined;
+      /**
+       * "if there is a **ready** enemy unit here" — the same narrowing an
+       * effect's target takes, asked of a count instead.
+       *
+       * One `ObjectFilter` rather than a second set of adjectives, for the
+       * reason the two Board sweeps already share one: a filter that meant
+       * different things in a count and in a choice would drift.
+       */
+      readonly filter?: ObjectFilter | undefined;
       /** "another Dragon" — the source does not count toward the total. */
       readonly excludeSelf?: boolean | undefined;
       /**

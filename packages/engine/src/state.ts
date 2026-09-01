@@ -1,3 +1,4 @@
+import type { ObjectFilter } from '@riftbound/cards';
 import {
   DOMAINS,
   type AbilityRef,
@@ -676,4 +677,84 @@ export function zoneOf(state: GameState, player: PlayerId, zone: PlayerZone): re
 /** Seat that acts after `player`. */
 export function nextPlayer(state: GameState, player: PlayerId): PlayerId {
   return playerId((player + 1) % state.players.length);
+}
+
+/**
+ * A Unit's Attacker or Defender designation (464.2.c.3), or `null` for neither.
+ *
+ * Lives here rather than beside the rest of Combat because three different
+ * sweeps ask it — a guarded step's `targetIs`, an `ObjectFilter`, and Combat
+ * itself — and it reads nothing but the Showdown and the Unit's Location. Two
+ * implementations of "is this Unit attacking" would eventually disagree, and
+ * `combat.ts` sits above `condition.ts` in the import order so it cannot be
+ * the shared home.
+ */
+export function designationOf(
+  state: GameState,
+  unit: EntityId,
+): 'attacker' | 'defender' | null {
+  const showdown = state.showdown;
+  if (showdown === null || !showdown.combat) {
+    return null;
+  }
+  const location = state.entities[unit]?.location;
+  if (location?.kind !== 'battlefield' || location.index !== showdown.battlefield) {
+    return null;
+  }
+  const controller = state.entities[unit]?.controller;
+  if (controller === undefined) {
+    return null;
+  }
+  if (showdown.attacker !== null && controller === showdown.attacker) {
+    return 'attacker';
+  }
+  if (showdown.defender !== null && controller === showdown.defender) {
+    return 'defender';
+  }
+  return null;
+}
+
+/**
+ * Does this Game Object match the spec's narrowing (see `ObjectFilter`)?
+ *
+ * One implementation for *three* sweeps now: `legalTargets` asks it when the
+ * choice is made (355.6), `allTargets` when the effect resolves (355.5.a), and
+ * `countControlled` when a predicate counts ("if there is a ready enemy unit
+ * here"). They must never disagree about what "damaged" means.
+ *
+ * Here rather than in `effects.ts` for the same import-order reason
+ * `designationOf` is: `count.ts` sits below `effects.ts` and needs it too.
+ */
+export function matchesFilter(
+  state: GameState,
+  id: EntityId,
+  filter: ObjectFilter | undefined,
+): boolean {
+  if (filter === undefined) {
+    return true;
+  }
+  const entity = getEntity(state, id);
+  if (filter.damaged !== undefined && entity.damage > 0 !== filter.damaged) {
+    return false;
+  }
+  if (filter.exhausted !== undefined && entity.exhausted !== filter.exhausted) {
+    return false;
+  }
+  if (filter.stunned !== undefined && entity.stunned !== filter.stunned) {
+    return false;
+  }
+  if (filter.buffed !== undefined && entity.buffs > 0 !== filter.buffed) {
+    return false;
+  }
+  // 464.2.c.3's designation, read off the Showdown by the one helper three
+  // sweeps share — see `designationOf`.
+  if (filter.role !== undefined && designationOf(state, id) !== filter.role) {
+    return false;
+  }
+  // 133.8. The export carries no tags, so this matches nothing today and the
+  // shortfall is recorded as a gap rather than hidden by refusing the clause.
+  if (filter.tag !== undefined && !entityCard(state, id).tags.includes(filter.tag)) {
+    return false;
+  }
+  return true;
 }

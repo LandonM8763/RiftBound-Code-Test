@@ -1316,7 +1316,7 @@ describe("dynamic values (counts read off the state)", () => {
           who: "you",
           what: "unit",
           here: true,
-          buffed: true,
+          filter: { buffed: true },
         },
       },
     });
@@ -2476,7 +2476,7 @@ describe("trigger events the reducer now raises", () => {
 
   it("428 with 702 and 133.8: adjectives narrow a death", () => {
     expect(conditionOf("When a buffed friendly unit dies, draw 1.")).toEqual([
-      { event: "dies", subject: "friendly", filter: { buffed: true } },
+      { event: "dies", subject: "friendly", filter: { object: { buffed: true } } },
     ]);
     expect(conditionOf("When another non-Recruit unit you control dies, draw 1.")).toEqual([
       { event: "dies", subject: "friendly", filter: { excludeSelf: true, excludeTag: "Recruit" } },
@@ -2835,5 +2835,35 @@ describe("a second chosen thing (rule 355.5)", () => {
 
   it("refuses a second slot with no first, which would choose one thing and act on two", () => {
     expect(parseCardText("Choose an enemy unit.").unparsed).not.toEqual([]);
+  });
+});
+
+describe("the combat designations as an adjective (464.2.c.3)", () => {
+  it("narrows a chosen target", () => {
+    const parsed = parseCardText("Stun an attacking unit.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.effect?.target).toEqual({
+      kind: "unit",
+      scope: "any",
+      filter: { role: "attacker" },
+    });
+  });
+
+  it("narrows a criteria set the same way, from the one shared alternation", () => {
+    // The adjective run lives in `ADJECTIVES` rather than in each pattern, so
+    // a new adjective reaches every clause or none — the failure mode being
+    // that it reaches eleven of twelve and one card reads too widely.
+    const parsed = parseCardText("Kill all defending units here.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.effect?.target).toEqual({
+      kind: "all",
+      scope: "any",
+      here: true,
+      filter: { role: "defender" },
+    });
+  });
+
+  it("still refuses an adjective the table does not know", () => {
+    expect(parseCardText("Stun a lurking unit.").unparsed).not.toEqual([]);
   });
 });

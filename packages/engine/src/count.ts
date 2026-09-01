@@ -14,6 +14,7 @@ import { type Count, type ValuedKeywordKind } from '@riftbound/cards';
 import {
   entityCard,
   getEntity,
+  matchesFilter,
   type EntityId,
   type GameState,
   type PlayerId,
@@ -159,9 +160,10 @@ function countControlled(
     if (count.buffed === true && getEntity(state, entity).buffs < 1) {
       continue;
     }
-    // 423.1.a: Stunned is a stored binary status, so like a Buff it reads
-    // nothing derived and a static's grant may ask about it.
-    if (count.stunned === true && !getEntity(state, entity).stunned) {
+    // The same narrowing an effect's target takes. Every field of it is a
+    // stored status, so a static's grant may ask about it — unlike `mighty`
+    // below, which is computed and would recurse.
+    if (!matchesFilter(state, entity, count.filter)) {
       continue;
     }
     // 708: Mighty is Might >= 5, and Might is what statics compute — which is

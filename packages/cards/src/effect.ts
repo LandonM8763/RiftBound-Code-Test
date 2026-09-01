@@ -45,6 +45,14 @@ export interface ObjectFilter {
   /** 702: "**buffed** friendly units". */
   readonly buffed?: boolean | undefined;
   /**
+   * 464.2.c.3: "stun an **attacking** unit", "kill all **defending** units".
+   *
+   * The designation rather than the Move that caused it, so a Unit that
+   * arrived at the Battlefield later and holds the designation qualifies —
+   * which is what the words on the card mean.
+   */
+  readonly role?: 'attacker' | 'defender' | undefined;
+  /**
    * 133.8: "ready another friendly **Mech**".
    *
    * Answerable by the engine and not by today's data — the export publishes no

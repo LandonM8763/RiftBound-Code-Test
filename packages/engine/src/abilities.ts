@@ -45,6 +45,7 @@ import {
   getEntity,
   getPlayer,
   isClosed,
+  matchesFilter,
   type EntityId,
   type GameState,
   type PlayerId,
@@ -309,7 +310,7 @@ export function matchesTrigger(
       filter.cardType !== undefined ||
       filter.minEnergy !== undefined ||
       filter.minPower !== undefined ||
-      filter.buffed !== undefined ||
+      filter.object !== undefined ||
       filter.mighty !== undefined ||
       filter.excludeTag !== undefined);
 
@@ -434,9 +435,11 @@ function matchesObjectFilter(
   if (filter.minPower !== undefined && (cost?.power.length ?? 0) < filter.minPower) {
     return false;
   }
-  // 702: "a **buffed** friendly unit". Read off the entity, which for a Unit
-  // that just died is the pre-move copy `extraSources` kept alive.
-  if (filter.buffed !== undefined && (state.entities[object]?.buffs ?? 0) > 0 !== filter.buffed) {
+  // 702, 423: "a **buffed** friendly unit", "a **stunned** enemy unit". Read
+  // off the entity, which for a Unit that just died is the pre-move copy
+  // `extraSources` kept alive — and through the one `matchesFilter` every
+  // other Board sweep uses.
+  if (!matchesFilter(state, object, filter.object)) {
     return false;
   }
   // 133.8: "another **non-Recruit** unit". Matches nothing to exclude while the

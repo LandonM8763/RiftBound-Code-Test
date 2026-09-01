@@ -398,7 +398,7 @@ const MOURNER_OF_BUFFS = makeUnit(2, ["fury"], {
   abilities: {
     triggered: [
       {
-        condition: { event: "dies", subject: "friendly", filter: { buffed: true } },
+        condition: { event: "dies", subject: "friendly", filter: { object: { buffed: true } } },
         effect: DRAW_ONE,
       },
     ],

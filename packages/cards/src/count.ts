@@ -1,4 +1,5 @@
 import type { ControlledKind } from './condition.js';
+import type { ObjectFilter } from './effect.js';
 import type { ValuedKeywordKind } from './keyword.js';
 
 /**
@@ -38,13 +39,17 @@ export type Count =
       /** "each **other** battlefield" — the source does not count itself. */
       readonly excludeSelf?: boolean | undefined;
       /**
-       * "Stunned enemy units here" (423.1.a) — a binary status on the Unit.
+       * "Stunned enemy units here", "a **ready** enemy unit here" — the same
+       * narrowing an effect's target takes (see `ObjectFilter`).
        *
-       * Unlike `mighty`, this is safe inside a `StaticGrant`: being Stunned is
-       * stored on the entity rather than computed from statics, so reading it
-       * cannot recurse back through `mightOf`.
+       * One shape rather than a status field per adjective, and the same one
+       * `TargetSpec` uses, so a count and a choice can never disagree about
+       * what "stunned" means. Safe inside a `StaticGrant` for the reason each
+       * of its fields is: every one is stored on the entity rather than
+       * computed from statics, so reading it cannot recurse through `mightOf`
+       * the way `mighty` below would.
        */
-      readonly stunned?: boolean | undefined;
+      readonly filter?: ObjectFilter | undefined;
       /**
        * "MIGHTY" (rules 706-709): a description, not a keyword — 708 makes a
        * Unit Mighty exactly while its Might is 5 or greater.

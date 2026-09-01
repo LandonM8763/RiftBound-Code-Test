@@ -21,7 +21,6 @@ import type {
   Count,
   DestinationSpec,
   Effect,
-  ObjectFilter,
   TargetSpec,
 } from '@riftbound/cards';
 
@@ -45,6 +44,7 @@ import { createTokens, sendToNonBoardZone } from './token.js';
 import type { EntityId, GameState, Location, PlayerId } from './state.js';
 import {
   addAnyPowerTo,
+  matchesFilter,
   addEnergyTo,
   addPowerTo,
   battlefieldLocation,
@@ -353,41 +353,7 @@ export function legalTargets(
     .map(({ unit }) => unit);
 }
 
-/**
- * Does this Game Object match the spec's narrowing (see `ObjectFilter`)?
- *
- * One implementation for both sweeps: `legalTargets` asks it when the choice
- * is made (355.6) and `allTargets` when the effect resolves (355.5.a), and the
- * two must never disagree about what "damaged" means.
- */
-function matchesFilter(
-  state: GameState,
-  id: EntityId,
-  filter: ObjectFilter | undefined,
-): boolean {
-  if (filter === undefined) {
-    return true;
-  }
-  const entity = getEntity(state, id);
-  if (filter.damaged !== undefined && entity.damage > 0 !== filter.damaged) {
-    return false;
-  }
-  if (filter.exhausted !== undefined && entity.exhausted !== filter.exhausted) {
-    return false;
-  }
-  if (filter.stunned !== undefined && entity.stunned !== filter.stunned) {
-    return false;
-  }
-  if (filter.buffed !== undefined && entity.buffs > 0 !== filter.buffed) {
-    return false;
-  }
-  // 133.8. The export carries no tags, so this matches nothing today and the
-  // shortfall is recorded as a gap rather than hidden by refusing the clause.
-  if (filter.tag !== undefined && !entityCard(state, id).tags.includes(filter.tag)) {
-    return false;
-  }
-  return true;
-}
+
 
 /**
  * Every Game Object an `all` spec covers, at the moment the effect runs.
@@ -1322,13 +1288,24 @@ function applyEffect(
         return state;
       }
       const owner = entity.owner;
+      const wasOnBoard = onBoard(state, target);
       events.push({ type: 'returnedToHand', player: owner, cards: [target] });
       // 186.1: a Token reaching a Non-Board Zone stops existing instead — it
       // never becomes a card in a hand, because it is not a card (185).
-      return clearCounters(
+      const bounced = clearCounters(
         sendToNonBoardZone(state, target, playerLocation(owner, 'hand')),
         target,
       );
+      // 383.2: leaving the Board is its own event, distinct from `dies` — a
+      // bounce is not a death (428). Raised only if it was on the Board:
+      // returning a card from a trash moves it between Non-Board Zones.
+      return wasOnBoard
+        ? context.raise(
+            bounced,
+            { event: 'leave', actor: controller, objects: [target] },
+            events,
+          )
+        : bounced;
     }
 
     /**

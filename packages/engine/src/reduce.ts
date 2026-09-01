@@ -1227,6 +1227,19 @@ function queueDeaths(
       events,
       { extraSources: [unit] },
     );
+    // 383.2: a death is also a departure. Raised as its own event because
+    // "when this leaves the board" covers a bounce and a Banish as well, and
+    // an ability watching for one must not have to watch for three.
+    next = raiseEvent(
+      next,
+      {
+        event: 'leave',
+        actor: next.entities[unit]?.controller ?? next.activePlayer,
+        objects: [unit],
+      },
+      events,
+      { extraSources: [unit] },
+    );
   }
   return next;
 }

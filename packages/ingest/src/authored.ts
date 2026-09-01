@@ -240,6 +240,65 @@ export const AUTHORED_CARDS: Readonly<Record<string, AuthoredCard>> = {
     note: '"one or more" plural on a per-object event (383.2).',
   },
 
+  // 383.2's `leave` event, raised when a Permanent goes off the Board. Its own
+  // event rather than three: a bounce is not a death (428), and a card watching
+  // for "leaves the board" must not have to watch for each way of leaving.
+  'Treasure Trove': {
+    text: 'When this leaves the board, draw 1 and channel 1 rune exhausted.',
+    abilities: {
+      triggered: [
+        {
+          condition: { event: 'leave', subject: 'self' },
+          effect: {
+            target: { kind: 'none' },
+            effects: [
+              { kind: 'draw', count: 1 },
+              { kind: 'channel', count: 1, exhausted: true },
+            ],
+          },
+        },
+      ],
+    },
+    note: 'A `leave` trigger with two steps; the grammar reads neither together.',
+  },
+
+  // 403 with 356.7: a Triggered Ability that costs an exhaust, on a `dies`
+  // event narrowed by both who caused it (`byController`) and the state of what
+  // died (`object`). The grammar has no rule for "when you kill …".
+  'Solari Shrine': {
+    text: 'When you kill a stunned enemy unit, you may exhaust this to draw 1.',
+    abilities: {
+      triggered: [
+        {
+          condition: {
+            event: 'dies',
+            subject: 'enemy',
+            filter: { byController: true, object: { stunned: true } },
+          },
+          optional: true,
+          exhaustSelf: true,
+          effect: { target: { kind: 'none' }, effects: [{ kind: 'draw', count: 1 }] },
+        },
+      ],
+    },
+    note: '"When you kill" is the actor and the object at once (383.1).',
+  },
+
+  // 464.2.c.3's designation as a target filter, plus 820's Repeat. Both are
+  // modelled; the grammar reads the Repeat line and the stun clause separately
+  // but not the reminder-flattened whole.
+  'Thwonk!': {
+    text:
+      "ACTION (Play on your turn or in showdowns.)\n" +
+      "REPEAT (You may pay the additional cost to repeat this spell's effect.)\n" +
+      "Stun an attacking unit. (It doesn't deal combat damage this turn.)",
+    effect: {
+      target: { kind: 'unit', scope: 'any', filter: { role: 'attacker' } },
+      effects: [{ kind: 'stun' }],
+    },
+    note: 'Printed REPEAT carries no cost (820.1.c), so only the stun is modelled.',
+  },
+
 };
 
 /**

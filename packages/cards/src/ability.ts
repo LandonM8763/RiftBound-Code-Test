@@ -9,7 +9,7 @@ import type { CardType } from './card.js';
 import type { Cost } from './cost.js';
 import type { AdditionalCost, CostPayment } from './additional-cost.js';
 import type { CostModifier } from './cost-modifier.js';
-import type { CardEffect } from './effect.js';
+import type { CardEffect, ObjectFilter } from './effect.js';
 import type { StaticAbility } from './static.js';
 
 /**
@@ -242,8 +242,16 @@ export interface TriggerFilter {
    * card strictly stronger than printed.
    */
   readonly byController?: boolean | undefined;
-  /** "When a **buffed** friendly unit dies" (702) — the object carries a Buff. */
-  readonly buffed?: boolean | undefined;
+  /**
+   * "When a **buffed** friendly unit dies" (702), "when you kill a **stunned**
+   * enemy unit" (423) — the same narrowing every other Board sweep takes.
+   *
+   * An `ObjectFilter` rather than a status field per adjective, and the fourth
+   * sweep to share it: a target choice, a criteria set, a `controls` count and
+   * this. A filter that meant different things in a trigger and in a target
+   * would be the same drift the other three were merged to prevent.
+   */
+  readonly object?: ObjectFilter | undefined;
   /**
    * "When you choose me **with a spell**" — the type of the card that *caused*
    * the event, not of the object it happened to.

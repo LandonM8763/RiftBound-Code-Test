@@ -218,7 +218,13 @@ const COUNTS: readonly {
   },
   {
     pattern: /^(?:each )?buffed friendly units?(?: (?:at|in) my battlefield| here)?$/i,
-    build: () => ({ kind: 'controlled', who: 'you', what: 'unit', here: true, buffed: true }),
+    build: () => ({
+      kind: 'controlled',
+      who: 'you',
+      what: 'unit',
+      here: true,
+      filter: { buffed: true },
+    }),
   },
   {
     // 423.1.a: "stunned enemy units here".
@@ -227,7 +233,7 @@ const COUNTS: readonly {
       kind: 'controlled',
       who: (m[1] ?? '').toLowerCase() === 'enemy' ? 'opponent' : 'you',
       what: 'unit',
-      stunned: true,
+      filter: { stunned: true },
       ...(m[2] === undefined ? {} : { here: true }),
     }),
   },
@@ -286,6 +292,21 @@ const COUNTS: readonly {
  * "Order, Kill a friendly unit" is a real Equip cost this model cannot state,
  * and reading it as plain Order would make the card cheaper than printed.
  */
+/**
+ * The adjectives a target phrase may carry, as one alternation.
+ *
+ * Interpolated rather than repeated: the same run appeared in a dozen clause
+ * patterns, and an adjective added to eleven of them is a card that parses and
+ * is read too widely. `STATES` below is the other half — the words here are
+ * matched, the words there are what they mean, and both have to know about a
+ * new adjective for it to do anything.
+ */
+const ADJECTIVES = '(?:damaged |exhausted |ready |stunned |buffed |attacking |defending )*';
+
+/** The same, plus the controller scopes some phrases allow before the noun. */
+const ADJECTIVES_AND_SCOPE =
+  '(?:damaged |exhausted |ready |stunned |buffed |attacking |defending |friendly |enemy )*';
+
 function parseResourceCost(phrase: string): Cost | undefined {
   const parts = phrase
     .trim()
@@ -444,6 +465,10 @@ function objectFilter(prefix: string | undefined): ObjectFilter | undefined | 'r
     ready: { exhausted: false },
     stunned: { stunned: true },
     buffed: { buffed: true },
+    // 464.2.c.3's designations. Adjectives like the rest, because that is how
+    // the cards print them: "stun an **attacking** unit".
+    attacking: { role: 'attacker' },
+    defending: { role: 'defender' },
   };
   let filter: ObjectFilter = {};
   for (const word of words) {
@@ -667,7 +692,7 @@ const CLAUSES: readonly ClauseRule[] = [
      * board instead of the one chosen.
      */
     pattern:
-      /^deal (\d+) (?:damage )?to all ((?:damaged |exhausted |ready |stunned |buffed |friendly |enemy )*)units(?: (here|at my battlefield|at battlefields|in combat))?$/i,
+      new RegExp(`^deal (\\d+) (?:damage )?to all (${ADJECTIVES_AND_SCOPE})units(?: (here|at my battlefield|at battlefields|in combat))?$`, 'i'),
     build: (m) => {
       const n = count(m[1] ?? '');
       if (n === undefined) return undefined;
@@ -684,7 +709,7 @@ const CLAUSES: readonly ClauseRule[] = [
      * target's location and "to its base" is the Destination.
      */
     pattern:
-      /^move (an?|another|up to (?:\d+|one|two|three|four)|two|three|four) ((?:damaged |exhausted |ready |stunned |buffed |friendly |enemy )*)units?(?: (?:at|from) a battlefield)? (?:to|on) (?:its |your |their )?base$/i,
+      new RegExp(`^move (an?|another|up to (?:\\d+|one|two|three|four)|two|three|four) (${ADJECTIVES_AND_SCOPE})units?(?: (?:at|from) a battlefield)? (?:to|on) (?:its |your |their )?base$`, 'i'),
     build: (m) => ({
       effects: [{ kind: 'move' }],
       target: unitTarget(m[1], m[2], 'unit', 'at a battlefield'),
@@ -693,7 +718,7 @@ const CLAUSES: readonly ClauseRule[] = [
   },
   {
     /** "Kill all gear", "Buff all friendly units" — the same `all` spec. */
-    pattern: /^(kill|buff) all ((?:damaged |exhausted |ready |stunned |buffed |friendly |enemy )*)(unit|gear)s?(?: (here|at my battlefield|at battlefields))?$/i,
+    pattern: new RegExp(`^(kill|buff) all (${ADJECTIVES_AND_SCOPE})(unit|gear)s?(?: (here|at my battlefield|at battlefields))?$`, 'i'),
     build: (m) => {
       const where = (m[4] ?? '').toLowerCase();
       const cardType = (m[3] ?? 'unit').toLowerCase() as 'unit' | 'gear';
@@ -711,7 +736,7 @@ const CLAUSES: readonly ClauseRule[] = [
   {
     // 417 damages a Unit and nothing else, so the noun is fixed here where
     // `kill` and `toHand` take one — a Gear cannot be damaged.
-    pattern: /^deal (\d+) to (an?|another) ((?:damaged |exhausted |ready |stunned |buffed |friendly |enemy )*)unit( at a battlefield| here)?$/i,
+    pattern: new RegExp(`^deal (\\d+) to (an?|another) (${ADJECTIVES_AND_SCOPE})unit( at a battlefield| here)?$`, 'i'),
     build: (m) => {
       const n = count(m[1] ?? '');
       return n === undefined
@@ -739,7 +764,7 @@ const CLAUSES: readonly ClauseRule[] = [
   },
   {
     pattern:
-      /^give (an?|another|up to (?:\d+|one|two|three|four)|two|three|four) ((?:damaged |exhausted |ready |stunned |buffed |friendly |enemy )*)units?(?: each)?( here| at a battlefield)? ([+-])(\d+) might this turn(?:, to a minimum of (\d+) might)?$/i,
+      new RegExp(`^give (an?|another|up to (?:\\d+|one|two|three|four)|two|three|four) (${ADJECTIVES_AND_SCOPE})units?(?: each)?( here| at a battlefield)? ([+-])(\\d+) might this turn(?:, to a minimum of (\\d+) might)?$`, 'i'),
     build: (m) => {
       const grant = signedMight(m[4], m[5], m[6]);
       return grant === undefined
@@ -833,7 +858,7 @@ const CLAUSES: readonly ClauseRule[] = [
      * outcome: half a grant is the wrong card.
      */
     pattern:
-      /^give (?:(an?|another) ((?:damaged |exhausted |ready |stunned |buffed |friendly |enemy )*)unit( here)?|(me)) ([a-z][a-z\s\d,-]*?) this turn$/i,
+      new RegExp(`^give (?:(an?|another) (${ADJECTIVES_AND_SCOPE})unit( here)?|(me)) ([a-z][a-z\\s\\d,-]*?) this turn$`, 'i'),
     build: (m) => {
       // 801.3.a grants each keyword separately, so "SHIELD 3 and TANK" is two
       // grants on one target rather than an unreadable clause. The whole line
@@ -861,7 +886,7 @@ const CLAUSES: readonly ClauseRule[] = [
     // 355.9.a.1 makes a Unit target a Game Object on the Board, and a Gear is
     // one too — 412's zone move does not care which. Only the sweep narrows.
     pattern:
-      /^return (an?|another) ((?:damaged |exhausted |ready |stunned |buffed |friendly |enemy )*)(unit|gear)( at a battlefield| here)? to (?:its|their) owner'?s? hand$/i,
+      new RegExp(`^return (an?|another) (${ADJECTIVES_AND_SCOPE})(unit|gear)( at a battlefield| here)? to (?:its|their) owner'?s? hand$`, 'i'),
     build: (m) => ({
       effects: [{ kind: 'toHand' }],
       target: unitTarget(m[1], m[2], m[3], m[4]),
@@ -973,7 +998,7 @@ const CLAUSES: readonly ClauseRule[] = [
      * returned.
      */
     pattern:
-      /^(stun|kill|buff|ready|exhaust|heal|return) (an?|another) ((?:damaged |exhausted |ready |stunned |buffed )*)friendly unit and (an?|another) ((?:damaged |exhausted |ready |stunned |buffed )*)enemy unit( at the same battlefield| at a battlefield)?(?: to (?:their|its) owners'? hands?)?$/i,
+      new RegExp(`^(stun|kill|buff|ready|exhaust|heal|return) (an?|another) (${ADJECTIVES})friendly unit and (an?|another) (${ADJECTIVES})enemy unit( at the same battlefield| at a battlefield)?(?: to (?:their|its) owners'? hands?)?$`, 'i'),
     build: (m) => {
       const verb = (m[1] ?? '').toLowerCase();
       const kind = verb === 'return' ? 'toHand' : verb;
@@ -999,7 +1024,7 @@ const CLAUSES: readonly ClauseRule[] = [
      * `CardEffect` carrying one target and one `second` needs.
      */
     pattern:
-      /^choose (an?|another) ((?:damaged |exhausted |ready |stunned |buffed )*)friendly unit(?: anywhere)? and (an?|another) ((?:damaged |exhausted |ready |stunned |buffed )*)enemy unit( at a battlefield| at the same battlefield| here)?$/i,
+      new RegExp(`^choose (an?|another) (${ADJECTIVES})friendly unit(?: anywhere)? and (an?|another) (${ADJECTIVES})enemy unit( at a battlefield| at the same battlefield| here)?$`, 'i'),
     build: (m) => {
       const first = unitTarget(m[1], `${m[2] ?? ''}friendly`, 'unit', undefined);
       const where = (m[5] ?? '').trim().toLowerCase();
@@ -1029,7 +1054,7 @@ const CLAUSES: readonly ClauseRule[] = [
      * and acting on two.
      */
     pattern:
-      /^choose (an?|another) ((?:damaged |exhausted |ready |stunned |buffed )*)enemy unit( at a battlefield| here)?$/i,
+      new RegExp(`^choose (an?|another) (${ADJECTIVES})enemy unit( at a battlefield| here)?$`, 'i'),
     build: (m) => {
       const where = (m[3] ?? '').trim().toLowerCase();
       const second = unitTarget(
@@ -1080,7 +1105,7 @@ const CLAUSES: readonly ClauseRule[] = [
      * each` already uses: a printed 1 scaled by what the count reads.
      */
     pattern:
-      /^deal damage equal to (.+?) to (an?|another) ((?:damaged |exhausted |ready |stunned |buffed |friendly |enemy )*)unit( at a battlefield| here)?$/i,
+      new RegExp(`^deal damage equal to (.+?) to (an?|another) (${ADJECTIVES_AND_SCOPE})unit( at a battlefield| here)?$`, 'i'),
     build: (m) => {
       const per = parseCount(m[1] ?? '');
       return per === undefined
@@ -1095,7 +1120,7 @@ const CLAUSES: readonly ClauseRule[] = [
     // 428 kills any Permanent, so "kill a gear" is the same clause with a
     // different noun — the sweep narrows and the effect does not change.
     pattern:
-      /^kill (an?|another) ((?:damaged |exhausted |ready |stunned |buffed |friendly |enemy )*)(unit|gear)( at a battlefield| here)?(?: with (\d+) might or less)?$/i,
+      new RegExp(`^kill (an?|another) (${ADJECTIVES_AND_SCOPE})(unit|gear)( at a battlefield| here)?(?: with (\\d+) might or less)?$`, 'i'),
     build: (m) => {
       const bound = m[5] === undefined ? undefined : count(m[5]);
       return m[5] !== undefined && bound === undefined
@@ -1106,7 +1131,7 @@ const CLAUSES: readonly ClauseRule[] = [
   {
     // Rule 423. Same shape as `kill` above, because the wording is the same and
     // only the verb differs.
-    pattern: /^stun (an?|another) ((?:damaged |exhausted |ready |stunned |buffed |friendly |enemy )*)unit( at a battlefield| here)?$/i,
+    pattern: new RegExp(`^stun (an?|another) (${ADJECTIVES_AND_SCOPE})unit( at a battlefield| here)?$`, 'i'),
     build: (m) => ({ effects: [{ kind: 'stun' }], target: unitTarget(m[1], m[2], 'unit', m[3]) }),
   },
   {
@@ -1117,7 +1142,7 @@ const CLAUSES: readonly ClauseRule[] = [
      * base" still reads its printed Destination rather than becoming a free
      * choice — `matchClause` takes the first rule that consumes the line whole.
      */
-    pattern: /^move (an?|another) ((?:damaged |exhausted |ready |stunned |buffed |friendly |enemy )*)unit$/i,
+    pattern: new RegExp(`^move (an?|another) (${ADJECTIVES_AND_SCOPE})unit$`, 'i'),
     build: (m) => ({
       effects: [{ kind: 'move' }],
       target: unitTarget(m[1], m[2], 'unit', undefined),
@@ -1148,7 +1173,7 @@ const CLAUSES: readonly ClauseRule[] = [
     // One rule rather than three: the verbs differ and the target phrase does
     // not, which is the whole reason `unitTarget` exists.
     pattern:
-      /^(ready|buff|heal|exhaust) (an?|another|(?:up to )?(?:\d+|one|two|three|four))( other)? ((?:damaged |exhausted |ready |stunned |buffed |friendly |enemy )*)(units?|[A-Z][A-Za-z'-]+s?)( at a battlefield| here)?$/i,
+      new RegExp(`^(ready|buff|heal|exhaust) (an?|another|(?:up to )?(?:\\d+|one|two|three|four))( other)? (${ADJECTIVES_AND_SCOPE})(units?|[A-Z][A-Za-z'-]+s?)( at a battlefield| here)?$`, 'i'),
     build: (m) => ({
       effects: [{ kind: (m[1] ?? '').toLowerCase() as 'ready' | 'buff' | 'heal' | 'exhaust' }],
       // "buff **two other** friendly units": the count and the "other" are one
@@ -1439,7 +1464,7 @@ const CONDITIONS: readonly {
       const words = (m[0] ?? '').toLowerCase();
       const negated = /non-([a-z'-]+)/i.exec(m[0] ?? '');
       const filter = {
-        ...(/\bbuffed\b/.test(words) ? { buffed: true } : {}),
+        ...(/\bbuffed\b/.test(words) ? { object: { buffed: true } } : {}),
         ...(/^another\b/.test(words) ? { excludeSelf: true } : {}),
         ...(negated === null
           ? {}

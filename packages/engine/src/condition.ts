@@ -13,7 +13,14 @@
 import { isSourceCondition, type Condition } from '@riftbound/cards';
 
 import { countOf } from './count.js';
-import { entityCard, getPlayer, type EntityId, type GameState, type PlayerId } from './state.js';
+import {
+  designationOf,
+  entityCard,
+  getPlayer,
+  type EntityId,
+  type GameState,
+  type PlayerId,
+} from './state.js';
 
 /**
  * Is `condition` satisfied for `player`?
@@ -84,18 +91,9 @@ function targetSatisfies(
       return false;
     }
   }
-  if (condition.role !== undefined) {
-    const showdown = state.showdown;
-    if (showdown === null || !showdown.combat || entity.location.kind !== 'battlefield') {
-      return false;
-    }
-    if (entity.location.index !== showdown.battlefield) {
-      return false;
-    }
-    const side = condition.role === 'attacker' ? showdown.attacker : showdown.defender;
-    if (side === null || entity.controller !== side) {
-      return false;
-    }
+  // 464.2.c.3's designation, from the one helper an `ObjectFilter` also uses.
+  if (condition.role !== undefined && designationOf(state, target) !== condition.role) {
+    return false;
   }
   return true;
 }

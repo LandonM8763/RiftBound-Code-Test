@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells killing, draw and Play Effects firing. 276 of the 468 cards with text
+with damage spells killing, draw and Play Effects firing. 279 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -957,13 +957,26 @@ Cleanup, so `mutualDamage` marks damage exactly as `dealDamage` does.
 ### Object filters
 
 `ObjectFilter` in `cards/effect.ts`, applied by `matchesFilter` in
-`engine/effects.ts`.
+`engine/state.ts`.
 
-**Both Board sweeps narrow the same way, and that is the whole point.** "Buff an
-**exhausted** friendly unit" is a choice (355.6) and "kill all **damaged** enemy
-units here" is a criterion (355.5.a), so `unit` and `all` ask at different
-moments — but a filter that meant two things would be two sweeps drifting apart,
-so there is one shape and one implementation.
+**Four sweeps narrow the same way, and that is the whole point.** "Buff an
+**exhausted** friendly unit" is a choice (355.6), "kill all **damaged** enemy
+units here" is a criterion (355.5.a), "if there is a **ready** enemy unit here"
+is a count (`Condition.controls`), and "when you kill a **stunned** enemy unit"
+is a trigger (`TriggerFilter.object`). They ask at different moments — but a
+filter that meant different things in four places would be four sweeps drifting
+apart, so there is one shape and one implementation.
+
+It lives in `state.ts` rather than beside the effects because `count.ts` sits
+below `effects.ts` in the import order and needs it too. `designationOf` is
+there for the same reason: 464.2.c.3's Attacker/Defender designation is asked by
+`ObjectFilter.role`, by a guarded step's `targetIs`, and by Combat, and two
+implementations of "is this Unit attacking" would eventually disagree.
+
+**The adjective run is one constant, not a dozen copies.** `ADJECTIVES` in
+`ingest/text.ts` is interpolated into every clause pattern that takes one. It
+was written out longhand in twelve patterns, which is the shape where a new
+adjective reaches eleven of them and the twelfth card reads wider than printed.
 
 Three things are load-bearing:
 
@@ -2419,15 +2432,15 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 276 of the 468 cards that have text** — 268 parsed and 8 hand-authored, and the shape of what is
+**Coverage is 279 of the 468 cards that have text** — 268 parsed and 11 hand-authored, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
 | Fully parsed | 268 |
-| Hand-authored | 8 |
-| Blocked | 192 |
+| Hand-authored | 11 |
+| Blocked | 189 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 4 times, the next 2, and every one of
@@ -2621,6 +2634,7 @@ What each round actually delivered, for calibrating the next projection:
 | Bonus Damage (712-715) | +3 projected, **+3** delivered |
 | A second chosen thing (355.5) with mutual damage (417) | **+5** delivered |
 | Repeat (820), re-measured from a later baseline | +5 projected, **+5** delivered |
+| One `ObjectFilter` across all four Board sweeps, and the `leave` event | **+3** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic
