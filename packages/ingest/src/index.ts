@@ -16,4 +16,4 @@ export type { ParsedText } from './text.js';
 
 export { summarizeGaps } from './gaps.js';
 export type { Gap, GapSummary } from './gaps.js';
-export type { CardSource, IngestResult } from './source.js';
+export type { CardSource, IngestResult, RemoteSet } from './source.js';

@@ -94,6 +94,31 @@ describe("CardRegistry", () => {
       /Duplicate card id OGN-1/,
     );
   });
+
+  it("looks cards up by printed name, for lists a person typed", () => {
+    const unit = makeUnit(3, ["fury"], {
+      id: cardId("OGN-2"),
+      name: "Kai'Sa - Survivor",
+    });
+    const registry = CardRegistry.from([unit]);
+
+    expect(registry.byName("Kai'Sa - Survivor")).toBe(unit);
+    // A typed name varies in case and spacing; the card it names does not.
+    expect(registry.byName("  kai'sa  -  survivor ")).toBe(unit);
+    expect(registry.byName("Kaisa")).toBeUndefined();
+  });
+
+  it("refuses a name two different cards carry", () => {
+    // 103.2.b.2 makes same-named cards the same card, so this is a fault in
+    // the data. Answering with either one would build a deck nobody wrote.
+    const first = makeUnit(3, ["fury"], { id: cardId("OGN-3"), name: "Echo" });
+    const second = makeUnit(4, ["calm"], { id: cardId("OGN-4"), name: "Echo" });
+    const registry = CardRegistry.from([first, second]);
+
+    expect(registry.byName("Echo")).toBeUndefined();
+    // The ids still resolve: only the ambiguous name is refused.
+    expect(registry.get(first.id)).toBe(first);
+  });
 });
 
 describe("supertypes (rule 133.7)", () => {

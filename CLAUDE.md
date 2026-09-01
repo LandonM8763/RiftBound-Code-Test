@@ -2286,16 +2286,31 @@ reachable on `raw.githubusercontent.com`. It carries **Might**, the **Champion
 and Signature supertypes**, and **printed Spell timing** — the three things the
 older community export lacked.
 
-Ingest it with the default source. `ingest` takes several files, because the
-data is published one file per set and a deck is not limited to one set:
+Ingest it with the default source:
 
 ```bash
-base=https://raw.githubusercontent.com/apitcg/riftbound-tcg-data/main/cards/en
-curl -sO $base/origins.json
-curl -sO $base/spiritforged.json
-curl -sO $base/origins-proving-grounds.json
-node packages/cli/dist/main.js ingest *.json > cards.json
+node packages/cli/dist/main.js ingest --fetch > cards.json
 ```
+
+`--fetch` downloads every set `APITCG_SETS` names — the adapter owns that list,
+because knowing a source's shape and knowing where it lives are the same
+knowledge. **Add a set there when one releases**: the list is pinned rather than
+discovered because the hosts that would serve a directory listing are not
+reachable (see [What is reachable](#what-is-reachable)), and a silently partial
+fetch would produce a card pool that looks complete and is not. One unreachable
+set fails the whole fetch for that reason.
+
+`ingest` still takes files instead, because the data is published one file per
+set and a deck is not limited to one set:
+
+```bash
+node packages/cli/dist/main.js ingest origins.json spiritforged.json > cards.json
+```
+
+The download happens in `cli/main.ts` rather than in `run.ts`, and is handed
+back through the same `FileReader` a real file goes through — which keeps `run`
+a synchronous pure function of its arguments, and keeps the whole command
+surface testable with neither a network nor a filesystem.
 
 `packages/cli/examples/real-deck.txt` is a legal deck of real collector numbers
 to point the tools at once that has run. It lists ids only — no card text — so

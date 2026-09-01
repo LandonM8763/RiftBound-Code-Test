@@ -19,6 +19,26 @@ export interface CardSource {
   /** Human-readable description, including where the data came from. */
   readonly description: string;
   readonly normalize: (raw: unknown) => IngestResult;
+  /**
+   * Where this source publishes its data, when it publishes it openly.
+   *
+   * The adapter owns this rather than the CLI, because knowing the shape of a
+   * source's data and knowing where it lives are the same knowledge — a second
+   * source with a different layout brings its own list.
+   *
+   * A pinned list rather than a directory listing: the hosts that would serve
+   * one are not reachable (see CLAUDE.md), and a silent partial fetch would
+   * produce a card pool that looks complete and is not. **Add a set here when
+   * one releases** — a missing set is missing cards, not an error.
+   */
+  readonly sets?: readonly RemoteSet[] | undefined;
+}
+
+/** One published file of a source's card data. */
+export interface RemoteSet {
+  /** Set name, used as the file name the ingest reports against. */
+  readonly name: string;
+  readonly url: string;
 }
 
 export interface IngestResult {

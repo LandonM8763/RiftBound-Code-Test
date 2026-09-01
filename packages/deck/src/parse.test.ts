@@ -1,4 +1,5 @@
-import { cardId } from "@riftbound/cards";
+import { CardRegistry, cardId } from "@riftbound/cards";
+import { makeLegend, makeUnit } from "@riftbound/cards/testing";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -10,6 +11,7 @@ import {
   uniqueCards,
 } from "./deck.js";
 import {
+  byIdOrName,
   parseDeckList,
   parseDeckText,
   textImporter,
@@ -206,7 +208,7 @@ describe("parseDeckList", () => {
       }),
     };
 
-    const result = parseDeckList("stub: anything", [stub, textImporter]);
+    const result = parseDeckList("stub: anything", { importers: [stub, textImporter] });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.deck.legend).toBe(cardId("X-1"));
@@ -224,10 +226,74 @@ describe("parseDeckList", () => {
       parse: () => ({ ok: false, errors: [] }),
     };
 
-    const result = parseDeckList(FULL_LIST, [picky]);
+    const result = parseDeckList(FULL_LIST, { importers: [picky] });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.errors[0]?.code).toBe("unrecognised-format");
+  });
+});
+
+describe("naming cards by printed name", () => {
+  const POOL = CardRegistry.from([
+    makeLegend(["fury"], { id: cardId("N-000"), name: "Kai'Sa - Daughter of the Void" }),
+    makeUnit(3, ["fury"], { id: cardId("N-001"), name: "Kai'Sa - Survivor", champion: true }),
+    makeUnit(2, ["fury"], { id: cardId("N-002"), name: "Blazing Scorcher" }),
+  ]);
+
+  const NAMED = [
+    "# Legend",
+    "1 Kai'Sa - Daughter of the Void",
+    "# Champion",
+    "1 Kai'Sa - Survivor",
+    "# Main",
+    "3 blazing scorcher",
+  ].join("\n");
+
+  it("resolves names to ids when a lookup is supplied", () => {
+    const result = parseDeckText(NAMED, byIdOrName(POOL));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.deck.legend).toBe(cardId("N-000"));
+    expect(result.deck.champion).toBe(cardId("N-001"));
+    expect(result.deck.main).toEqual([{ card: cardId("N-002"), count: 3 }]);
+  });
+
+  it("leaves the token alone without one, so ids keep working unchanged", () => {
+    // The no-lookup behaviour is the whole back-compatibility story: a list of
+    // ids parses identically whether or not card data is to hand.
+    const result = parseDeckText(NAMED);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.deck.legend).toBe(cardId("Kai'Sa - Daughter of the Void"));
+  });
+
+  it("prefers a printed id over a name", () => {
+    const byId = parseDeckText(
+      "# Legend\n1 N-000\n# Champion\n1 N-001\n",
+      byIdOrName(POOL),
+    );
+    expect(byId.ok).toBe(true);
+    if (!byId.ok) return;
+    expect(byId.deck.legend).toBe(cardId("N-000"));
+  });
+
+  it("keeps an unreadable token as an id, so validation reports it", () => {
+    // Rather than a second error path in the parser saying the same thing:
+    // `validateDeck` already knows how to say "unknown card".
+    const result = parseDeckText(
+      "# Legend\n1 Not A Real Card\n# Champion\n1 Kai'Sa - Survivor\n",
+      byIdOrName(POOL),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.deck.legend).toBe(cardId("Not A Real Card"));
+  });
+
+  it("reaches the text importer through parseDeckList", () => {
+    const result = parseDeckList(NAMED, { resolve: byIdOrName(POOL) });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.deck.champion).toBe(cardId("N-001"));
   });
 });
 

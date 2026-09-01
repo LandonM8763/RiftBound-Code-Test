@@ -9,6 +9,12 @@ import type { CardDefinition, CardId } from './card.js';
  */
 export class CardRegistry {
   readonly #byId: ReadonlyMap<CardId, CardDefinition>;
+  /**
+   * Lazily built, because most callers only ever look a card up by id.
+   *
+   * `null` marks a name two different cards carry — see `byName`.
+   */
+  #byName: Map<string, CardDefinition | null> | undefined;
 
   private constructor(byId: ReadonlyMap<CardId, CardDefinition>) {
     this.#byId = byId;
@@ -50,7 +56,37 @@ export class CardRegistry {
     return card;
   }
 
+  /**
+   * The card with this printed name, when exactly one card carries it.
+   *
+   * For deck lists written by people: 103.2.b.2 makes same-named cards the
+   * same card, and the ingest collapses printings by name for that reason, so
+   * a name identifies a card in any well-formed pool. Matching ignores case
+   * and surrounding whitespace, because the name is typed rather than copied.
+   *
+   * A name two *different* cards carry is a fault in the data rather than a
+   * choice to make, so this answers `undefined` — the same as an unknown name.
+   * Returning either card would silently build a deck the author did not
+   * write, which is the failure this codebase refuses everywhere else.
+   */
+  byName(name: string): CardDefinition | undefined {
+    if (this.#byName === undefined) {
+      const index = new Map<string, CardDefinition | null>();
+      for (const card of this.#byId.values()) {
+        const key = normalizeName(card.name);
+        index.set(key, index.has(key) ? null : card);
+      }
+      this.#byName = index;
+    }
+    return this.#byName.get(normalizeName(name)) ?? undefined;
+  }
+
   all(): IterableIterator<CardDefinition> {
     return this.#byId.values();
   }
+}
+
+/** Fold the case and the whitespace a typed name varies in. */
+function normalizeName(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, ' ');
 }

@@ -15,10 +15,12 @@ const examples = (name: string): string =>
 
 const CARDS = examples("cards.json");
 const DECK = examples("deck.txt");
+const NAMED_DECK = examples("deck-by-name.txt");
 
 /** Serves the example files by name; anything else is a missing file. */
 const files: FileReader = (path) => {
   if (path === "deck.txt") return DECK;
+  if (path === "deck-by-name.txt") return NAMED_DECK;
   if (path === "cards.json") return CARDS;
   throw new Error(`ENOENT: no such file or directory, open '${path}'`);
 };
@@ -164,12 +166,6 @@ describe("usage", () => {
     const result = run(["analyze", "--cards", "cards.json"], files);
     expect(result.code).toBe(EXIT.usage);
     expect(result.stderr).toMatch(/needs a deck list file/);
-  });
-
-  it("requires card data", () => {
-    const result = run(["analyze", "deck.txt"], files);
-    expect(result.code).toBe(EXIT.usage);
-    expect(result.stderr).toMatch(/--cards is required/);
   });
 
   it("rejects an unknown format", () => {
@@ -643,8 +639,9 @@ describe("the real-card example deck", () => {
   });
 
   it("tells the reader how to get the card data it needs", () => {
-    expect(REAL_DECK).toContain("riftbound-tcg-data");
-    expect(REAL_DECK).toContain("ingest");
+    // The instruction, not the URL: the set list lives in the ingest adapter
+    // now, so a file repeating it here would be a second copy to go stale.
+    expect(REAL_DECK).toContain("ingest --fetch");
   });
 });
 
@@ -736,5 +733,49 @@ describe("the suggest command", () => {
 
     expect(result.code).toBe(EXIT.ok);
     expect(result.stdout).toContain("Nothing to suggest");
+  });
+});
+
+describe("naming cards the way a person writes them", () => {
+  it("reads a deck list of printed names", () => {
+    const result = run(
+      ["validate", "deck-by-name.txt", "--cards", "cards.json"],
+      files,
+    );
+    expect(result.code).toBe(EXIT.ok);
+    expect(result.stdout).toContain("LEGAL");
+  });
+
+  it("reaches the same deck as the id-based list beside it", () => {
+    // The two example files are the same deck written two ways, so a change
+    // to one without the other is a broken example rather than a new deck.
+    const byName = run(["analyze", "deck-by-name.txt", "--cards", "cards.json"], files);
+    const byId = run(["analyze", "deck.txt", "--cards", "cards.json"], files);
+    expect(byName.stdout).toBe(byId.stdout);
+  });
+
+  it("reports an unreadable name as the unknown card it is", () => {
+    const withTypo = NAMED_DECK.replace("Ember Warden", "Embr Warden");
+    const result = run(["validate", "deck.txt", "--cards", "cards.json"], (path) =>
+      path === "deck.txt" ? withTypo : files(path),
+    );
+    expect(result.code).toBe(EXIT.illegal);
+    expect(result.stdout).toContain("Embr Warden");
+  });
+});
+
+describe("finding card data without being told where", () => {
+  it('defaults --cards to "cards.json" in the working directory', () => {
+    const result = run(["validate", "deck.txt"], files);
+    expect(result.code).toBe(EXIT.ok);
+    expect(result.stdout).toContain("LEGAL");
+  });
+
+  it("still says which file it could not read", () => {
+    const result = run(["validate", "deck.txt"], (path) =>
+      path === "deck.txt" ? DECK : (() => { throw new Error("ENOENT"); })(),
+    );
+    expect(result.code).toBe(EXIT.input);
+    expect(result.stderr).toContain("cards.json");
   });
 });

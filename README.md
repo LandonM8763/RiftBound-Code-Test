@@ -41,12 +41,16 @@ node packages/cli/dist/main.js analyze packages/cli/examples/deck.txt \
   --cards packages/cli/examples/cards.json
 ```
 
-Real card data can be ingested from `apitcg/riftbound-tcg-data`:
+Real card data is downloaded and normalized in one step:
 
 ```bash
-curl -sO https://raw.githubusercontent.com/apitcg/riftbound-tcg-data/main/cards/en/origins.json
-node packages/cli/dist/main.js ingest origins.json > cards.json
+node packages/cli/dist/main.js ingest --fetch > cards.json
+node packages/cli/dist/main.js analyze mydeck.txt
 ```
+
+`--cards` defaults to `cards.json` in the working directory, so the second
+command needs no flags. A deck list names cards by printed name or by collector
+number, whichever you have — see `packages/cli/examples/deck-by-name.txt`.
 
 The example cards are invented placeholders, not real Riftbound cards — see
 `packages/cli/examples/README.md`.

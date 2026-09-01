@@ -3,11 +3,8 @@
 // Unlike deck.txt next to it, this references the real card pool rather than
 // the invented sample cards, so it needs card data ingested first:
 //
-//   curl -sO https://raw.githubusercontent.com/apitcg/riftbound-tcg-data/main/cards/en/origins.json
-//   curl -sO https://raw.githubusercontent.com/apitcg/riftbound-tcg-data/main/cards/en/spiritforged.json
-//   curl -sO https://raw.githubusercontent.com/apitcg/riftbound-tcg-data/main/cards/en/origins-proving-grounds.json
-//   node packages/cli/dist/main.js ingest *.json > cards.json
-//   node packages/cli/dist/main.js analyze packages/cli/examples/real-deck.txt --cards cards.json
+//   node packages/cli/dist/main.js ingest --fetch > cards.json
+//   node packages/cli/dist/main.js analyze packages/cli/examples/real-deck.txt
 //
 // Kai'Sa - Daughter of the Void (Fury/Mind). Only collector numbers are listed
 // here; no card text is reproduced.

@@ -4,6 +4,7 @@ import { DEFAULT_DRAW_MODEL, analyzeDeck } from '@riftbound/analysis';
 import {
   CONSTRUCTED_BO1,
   CONSTRUCTED_BO3,
+  byIdOrName,
   parseDeckList,
   toCardLists,
   validateDeck,
@@ -41,16 +42,22 @@ export const EXIT = { ok: 0, illegal: 1, usage: 2, input: 3 } as const;
 
 export const USAGE = `riftbound — deck testing tools
 
+Getting started:
+  riftbound ingest --fetch > cards.json     download the card pool, once
+  riftbound analyze mydeck.txt              then work on a deck
+
 Usage:
-  riftbound analyze  <deck-file> --cards <cards.json> [options]
-  riftbound validate <deck-file> --cards <cards.json> [options]
-  riftbound ingest   <raw-file>... [--source <name>] [--json]
-  riftbound sim      <deck-file> --cards <cards.json> [options]
-  riftbound suggest  <deck-file> --cards <cards.json> [options]
+  riftbound analyze  <deck-file> [--cards <cards.json>] [options]
+  riftbound validate <deck-file> [--cards <cards.json>] [options]
+  riftbound ingest   [--fetch | <raw-file>...] [--source <name>] [--json]
+  riftbound sim      <deck-file> [--cards <cards.json>] [options]
+  riftbound suggest  <deck-file> [--cards <cards.json>] [options]
   riftbound help
 
 Options:
-  --cards <path>   Card data: a JSON array of card definitions. Required.
+  --cards <path>   Card data: a JSON array of card definitions.
+                   Default "cards.json" in the working directory.
+  --fetch          ingest: download the source's sets instead of reading files.
   --format <name>  bo1 (default) or bo3. Only bo3 permits a sideboard.
   --turn <n>       Turn used for the draw-odds column. Default 3.
   --games <n>      Games to simulate. Default 200.
@@ -69,7 +76,13 @@ carries Might, the supertypes and printed Spell timing; the community source
 carries none of those and yields no Units or Spells at all.
 
 Give ingest several files to take in more than one set at once — the card data
-is published one file per set, and a deck is not limited to one set.
+is published one file per set, and a deck is not limited to one set. --fetch
+downloads every set the source publishes, which is that same list without the
+manual step; it fails rather than ingesting a partial pool if any set is
+unreachable.
+
+A deck list names cards by printed name or by collector number, whichever you
+have. Names are matched ignoring case and extra spaces.
 
 sim plays the deck against itself, heuristic agent versus random, and reports
 win rates with 95% intervals. Seats rotate each game so the result is not
@@ -115,7 +128,10 @@ function resolveFormat(name: string | undefined): Format | undefined {
 }
 
 /** Adapters the CLI can ingest through, by `--source` name. */
-const SOURCES: Readonly<Record<string, CardSource>> = {
+/** Where `riftbound ingest` is documented to write, and so where to look. */
+const DEFAULT_CARDS = 'cards.json';
+
+export const SOURCES: Readonly<Record<string, CardSource>> = {
   apitcg: APITCG_SOURCE,
   community: COMMUNITY_SOURCE,
 };
@@ -240,10 +256,11 @@ export function run(argv: readonly string[], readFile: FileReader): CliResult {
     return usageError(`${command} needs a deck list file.`);
   }
 
-  const cardsPath = values['cards'];
-  if (typeof cardsPath !== 'string' || cardsPath === '') {
-    return usageError('--cards is required: card data is needed to read a deck list.');
-  }
+  // `cards.json` in the working directory is where `ingest` is documented to
+  // write, so the common flow needs no flag at all. Named explicitly the moment
+  // a second pool is in play.
+  const cardsOption = values['cards'];
+  const cardsPath = typeof cardsOption === 'string' && cardsOption !== '' ? cardsOption : DEFAULT_CARDS;
 
   const format = resolveFormat(typeof values['format'] === 'string' ? values['format'] : undefined);
   if (format === undefined) {
@@ -301,7 +318,10 @@ export function run(argv: readonly string[], readFile: FileReader): CliResult {
     return fail(`Cannot load card data "${cardsPath}": ${messageOf(error)}`, EXIT.input);
   }
 
-  const parsed = parseDeckList(deckText);
+  // Card data is loaded first so the list may name cards by printed name as
+  // well as by id — a deck a person typed uses names, and only the pool can
+  // tell one from the other.
+  const parsed = parseDeckList(deckText, { resolve: byIdOrName(registry) });
   if (!parsed.ok) {
     const detail = parsed.errors
       .map((issue) => (issue.line > 0 ? `  line ${issue.line}: ${issue.message}` : `  ${issue.message}`))

@@ -27,7 +27,7 @@ import {
 } from '@riftbound/cards';
 
 import type { Gap } from './gaps.js';
-import type { CardSource, IngestResult } from './source.js';
+import type { CardSource, IngestResult, RemoteSet } from './source.js';
 import { authoredFor } from './authored.js';
 import { parseCardText } from './text.js';
 
@@ -438,8 +438,21 @@ function normalizeCard(
   }
 }
 
+/**
+ * The sets `apitcg/riftbound-tcg-data` publishes, at the one card host that is
+ * reachable from here (see CLAUDE.md's reachability table).
+ */
+const APITCG_BASE = 'https://raw.githubusercontent.com/apitcg/riftbound-tcg-data/main/cards/en';
+
+export const APITCG_SETS: readonly RemoteSet[] = [
+  { name: 'origins', url: `${APITCG_BASE}/origins.json` },
+  { name: 'spiritforged', url: `${APITCG_BASE}/spiritforged.json` },
+  { name: 'origins-proving-grounds', url: `${APITCG_BASE}/origins-proving-grounds.json` },
+];
+
 export const APITCG_SOURCE: CardSource = {
   id: 'apitcg-json',
+  sets: APITCG_SETS,
   description:
     'API TCG card export (apitcg/riftbound-tcg-data, one committed JSON per set, ' +
     'derived from the official Riot gallery). Carries Might, the Champion and ' +

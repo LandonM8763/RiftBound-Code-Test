@@ -1,4 +1,4 @@
-import { cardId, type CardId } from '@riftbound/cards';
+import { cardId, type CardId, type CardRegistry } from '@riftbound/cards';
 
 import { mergeEntries, type Deck, type DeckEntry } from './deck.js';
 
@@ -24,8 +24,23 @@ export interface DeckImporter {
   readonly name: string;
   /** Cheap check for whether this importer recognises the input at all. */
   canImport(input: string): boolean;
-  parse(input: string): ParseResult;
+  parse(input: string, resolve?: CardResolver): ParseResult;
 }
+
+/**
+ * Turn one card token from a deck list into a `CardId`.
+ *
+ * A list written by a person names cards by printed *name*; one exported by a
+ * tool names them by printed id. Only card data can tell the two apart, so an
+ * importer is handed the lookup rather than owning one — which is also what
+ * keeps this package free of a dependency on any particular card pool.
+ *
+ * `undefined` means the token names no card the pool knows. The importer then
+ * keeps it as a literal id, so an unreadable token is reported by validation
+ * the ordinary way instead of the parser growing a second error path that says
+ * the same thing.
+ */
+export type CardResolver = (token: string) => CardId | undefined;
 
 type Section = 'legend' | 'champion' | 'main' | 'runes' | 'battlefields' | 'sideboard';
 
@@ -78,10 +93,11 @@ function lookupSection(text: string): Section | undefined {
  * OGN-101
  * ```
  *
- * Cards are identified by printed id. Resolving human-readable card names needs
- * card data, and belongs in a separate importer once a data source is pinned.
+ * Cards are named by printed id, or by printed name when a `resolve` is given
+ * — see `CardResolver`. The format is the same either way, which is why this
+ * is one importer taking a lookup rather than two importers.
  */
-export function parseDeckText(input: string): ParseResult {
+export function parseDeckText(input: string, resolve?: CardResolver): ParseResult {
   const errors: ParseIssue[] = [];
   const sections: Record<Section, DeckEntry[]> = {
     legend: [],
@@ -161,7 +177,7 @@ export function parseDeckText(input: string): ParseResult {
       return;
     }
 
-    sections[current].push({ card: cardId(cardText), count });
+    sections[current].push({ card: resolve?.(cardText) ?? cardId(cardText), count });
   });
 
   const legend = singleCard(sections.legend, 'legend', errors);
@@ -211,6 +227,23 @@ function singleCard(
   return first.card;
 }
 
+/**
+ * Resolve a token as a printed id first, then as a printed name.
+ *
+ * Id first because a list exported by a tool uses ids and they are exact; the
+ * name pass is the fallback for a list a person typed. The order only matters
+ * for a card literally named after an id, which no printing is.
+ *
+ * A token that is neither is left alone, so `validateDeck` reports it as the
+ * unknown card it is.
+ */
+export function byIdOrName(registry: CardRegistry): CardResolver {
+  return (token) => {
+    const id = cardId(token);
+    return registry.has(id) ? id : registry.byName(token)?.id;
+  };
+}
+
 /** The plain-text importer. Accepts any non-empty input, so it reads as the fallback. */
 export const textImporter: DeckImporter = {
   name: 'text',
@@ -223,11 +256,16 @@ export const DEFAULT_IMPORTERS: readonly DeckImporter[] = [textImporter];
 /** Parse with the first importer that recognises the input. */
 export function parseDeckList(
   input: string,
-  importers: readonly DeckImporter[] = DEFAULT_IMPORTERS,
+  options: {
+    readonly importers?: readonly DeckImporter[] | undefined;
+    /** How a card token becomes an id — see `CardResolver`. */
+    readonly resolve?: CardResolver | undefined;
+  } = {},
 ): ParseResult {
+  const importers = options.importers ?? DEFAULT_IMPORTERS;
   for (const importer of importers) {
     if (importer.canImport(input)) {
-      return importer.parse(input);
+      return importer.parse(input, options.resolve);
     }
   }
   return {

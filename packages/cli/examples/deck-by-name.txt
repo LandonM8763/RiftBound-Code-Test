@@ -1,0 +1,37 @@
+// The same deck as deck.txt, naming cards the way a person writes them.
+//
+// A deck list may name a card by its printed name or by its collector
+// number, whichever you have — names are matched ignoring case and extra
+// spaces. Mixing the two in one list is fine.
+
+
+# Legend
+1 Ember Warden
+
+# Champion
+1 Ashen Vanguard
+
+# Main
+3 Kindling Scout
+3 Emberling
+3 Flame Adept
+3 Cinder Brute
+3 Ashfall Titan
+3 Tidewatcher
+3 Still Water Monk
+3 Deepcurrent Sage
+3 Harmony Keeper
+3 Scorch
+3 Undertow
+3 Rally Banner
+3 Tidal Charm
+1 Emberheart Relic
+
+# Runes
+6 Fury Rune
+6 Calm Rune
+
+# Battlefields
+1 Sunken Causeway
+1 Cinder Bridge
+1 Quiet Harbour
