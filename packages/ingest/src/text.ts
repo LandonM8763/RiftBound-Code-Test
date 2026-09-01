@@ -129,10 +129,14 @@ function normalize(line: string): string {
  * refuse the phrases the count grammar can now read, and the all-or-nothing
  * rule already refuses the ones it cannot.
  */
-const REFUSED_KEYWORDS = new RegExp(
-  `\\b(${Object.keys(UNMODELLED_KEYWORDS).join('|')})\\b`,
-  'i',
-);
+const REFUSED_KEYWORDS =
+  Object.keys(UNMODELLED_KEYWORDS).length === 0
+    ? // Every keyword the rulebook defines is modelled, so nothing is refused
+      // for carrying one. The guard is not hypothetical: built from an empty
+      // table, the alternation below becomes `\b()\b`, which matches every
+      // string and silently refuses the entire corpus. `(?!)` never matches.
+      /(?!)/
+    : new RegExp(`\\b(${Object.keys(UNMODELLED_KEYWORDS).join('|')})\\b`, 'i');
 
 /**
  * Keywords that are rules of the engine, matched against a whole line.
@@ -3527,6 +3531,8 @@ export function parseCardText(text: string, card: CardFacts = {}): ParsedText {
   const costModifiers: CostModifier[] = [];
   const statics: StaticAbility[] = [];
   const additionalCosts: AdditionalCost[] = [];
+  /** 820.1.c.2: how many Repeat instances have been read — at most one. */
+  let repeats = 0;
   const keywords: Keyword[] = [];
   let reaction = false;
 
@@ -3653,6 +3659,32 @@ export function parseCardText(text: string, card: CardFacts = {}): ParsedText {
         grant: { entersReady: true },
         condition: { kind: 'paidAdditionalCost' },
       });
+      continue;
+    }
+
+    // 820.1.d: Repeat is "you may pay [Cost] as an additional cost as you play
+    // this. If you do, execute the instructions of this chain item one
+    // additional time during resolution." Both halves exist — 356.2's optional
+    // payment and `CardEffect.repeat` — so it desugars like Accelerate.
+    const repeat = line.match(/^repeat\b\s*(.*)$/i);
+    if (repeat !== null) {
+      const phrase = (repeat[1] ?? '').trim();
+      // 820.1.c formats it as "Repeat [Cost]". A printing with no cost at all
+      // would be a free repeat, which is a stronger card than any rule
+      // describes — so it is recorded rather than guessed at.
+      const cost = phrase === '' ? undefined : parseResourceCost(phrase);
+      if (cost === undefined) {
+        unparsed.push(line);
+        continue;
+      }
+      // 820.1.c.2 makes each printed instance separately payable, so two are
+      // two choices rather than one. The action carries one payment flag.
+      if (repeats > 0) {
+        unparsed.push(line);
+        continue;
+      }
+      repeats += 1;
+      additionalCosts.push({ optional: true, pay: { kind: 'resources', cost } });
       continue;
     }
 
@@ -3793,6 +3825,9 @@ export function parseCardText(text: string, card: CardFacts = {}): ParsedText {
             ...(second === undefined ? {} : { second }),
             ...(destination === undefined ? {} : { destination }),
             ...(condition === undefined ? {} : { condition }),
+            // 820.1.d: the payoff half of Repeat. The cost half went into
+            // `additionalCosts` where the keyword was read.
+            ...(repeats > 0 ? { repeat: true } : {}),
           },
         }
       : {}),

@@ -115,14 +115,13 @@ export const UNMODELLED_KEYWORDS: Readonly<Record<string, string>> = Object.free
   // Cost plus "if you do, I enter ready", and both halves now exist, so it
   // desugars at ingest like Deathknell and Temporary do.
   //
-  // 820.1.d makes Repeat the same shape — an Optional Additional Cost whose
-  // payoff is executing the Chain item's instructions a second time — so it is
-  // no longer *blocked*. It stays refused because it is not worth building:
-  // pretending it exists and re-parsing the corpus unlocks **zero** cards, both
-  // alone and alongside every other keyword. Its 10 printings are each blocked
-  // on something else as well. Build it when that number moves.
-  repeat:
-    'Repeat (820) needs the effect executed twice on resolution; measured at 0 cards unlocked, so it is not built',
+  // Repeat (820) is not here either, and the story of when it stopped being is
+  // the reason this table records measurements rather than blockers. It sat
+  // refused through three baselines at a measured +0 — every printing blocked
+  // on something else as well — and the note said "build it when that number
+  // moves". Re-measured once the rest of those blockers had been built, it was
+  // +5, so it was built: 820.1.d is an Optional Additional Cost whose payoff is
+  // `CardEffect.repeat`, executing the instructions a second time.
   // Deflect (809) is not here either. 809.1.c is a Passive cost increase of
   // `[A]` on Spells and Abilities an opponent controls that choose this Game
   // Object — the one modifier that depends on a *choice* rather than on the

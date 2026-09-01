@@ -469,11 +469,12 @@ describe("keywords (rules 800-828)", () => {
     expect(parseCardText("LEGION - Draw 1.").unparsed).toHaveLength(1);
   });
 
-  it("refuses a keyword the engine does not model, with a stated reason", () => {
-    // Repeat is the last one, and its reason is a measurement rather than a
-    // blocker: 820.1.d is a shape the model has, and it unlocks zero cards.
-    expect(parseCardText("REPEAT 2").unparsed).toHaveLength(1);
-    expect(Object.keys(UNMODELLED_KEYWORDS)).toContain("repeat");
+  it("has nothing left to refuse: every keyword is modelled", () => {
+    // The table is empty, and `REFUSED_KEYWORDS` guards that case explicitly —
+    // built from no keys the alternation becomes `\b()\b`, which matches
+    // every string and would silently refuse the whole corpus.
+    expect(Object.keys(UNMODELLED_KEYWORDS)).toEqual([]);
+    expect(parseCardText("Draw 1.").unparsed).toEqual([]);
   });
 
   it("805: Accelerate is no longer among them, because it now desugars", () => {
@@ -842,9 +843,34 @@ describe("Accelerate (rule 805)", () => {
     expect(parseCardText("ACCELERATE").unparsed).toEqual(["ACCELERATE"]);
   });
 
-  it("820: Repeat is still refused, and the reason is now its measured worth", () => {
+  it("820.1.d: Repeat is an optional cost plus a second execution", () => {
+    const parsed = parseCardText(
+      "REPEAT 2\nGive a unit +2 Might this turn.",
+      { domains: ["fury"] },
+    );
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.additionalCosts).toEqual([
+      { optional: true, pay: { kind: "resources", cost: { energy: 2, power: [] } } },
+    ]);
+    expect(parsed.effect?.repeat).toBe(true);
+  });
+
+  it("820.1.c: reads a Power cost, and refuses a Repeat with none printed", () => {
+    const power = parseCardText("REPEAT Chaos\nDraw 1.");
+    expect(power.unparsed).toEqual([]);
+    expect(power.abilities?.additionalCosts?.[0]?.pay).toEqual({
+      kind: "resources",
+      cost: { energy: 0, power: ["chaos"] },
+    });
+
+    // A Repeat with no cost at all would be a free second execution, which is
+    // a stronger card than 820.1.c describes.
+    expect(parseCardText("REPEAT\nDraw 1.").unparsed).toContain("REPEAT");
+  });
+
+  it("820.1.c.2: refuses a second instance, which is a second choice", () => {
     expect(
-      parseCardText("REPEAT 2", { domains: ["fury"] }).unparsed,
+      parseCardText("REPEAT 2\nREPEAT 3\nDraw 1.").unparsed,
     ).toHaveLength(1);
   });
 });
@@ -2201,8 +2227,8 @@ describe("scoring and Predict", () => {
     });
   });
 
-  it("leaves Repeat as the only refused keyword", () => {
-    expect(Object.keys(UNMODELLED_KEYWORDS)).toEqual(["repeat"]);
+  it("leaves no refused keyword at all", () => {
+    expect(Object.keys(UNMODELLED_KEYWORDS)).toEqual([]);
   });
 });
 

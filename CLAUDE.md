@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells killing, draw and Play Effects firing. 271 of the 468 cards with text
+with damage spells killing, draw and Play Effects firing. 276 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -117,30 +117,20 @@ quantity in `GameConfig` cites its rule number.
 
 What is **not** built yet, in rough dependency order:
 
-1. **Repeat (820), the last keyword, and it is not blocked — it is not worth
-   building.** Every other keyword the rulebook defines is now modelled:
-   Assault, Shield, Tank, Backline, Ganking and Hidden as engine rules, and
-   Accelerate, Equip, Quick-Draw, Deathknell, Temporary, Weaponmaster, Deflect
-   and Vision as desugars into machinery that exists. 820.1.d makes Repeat the
-   same optional-cost shape as Accelerate, so the mechanic is expressible; it
-   has measured **+0 cards from three separate baselines**, because its ten
-   printings are each blocked on something else as well. Its reason in
-   `UNMODELLED_KEYWORDS` records that rather than a blocker, which is the honest
-   thing for it to say.
-2. **Replacement effects (rule 438).** "The next time it dies this turn, you
+1. **Replacement effects (rule 438).** "The next time it dies this turn, you
    may pay 1 Fury to **recall it instead**", "if I would be killed, …". Nothing
    in the engine can substitute one event for another, and this is also what
    Battlefield tokens (187.8, 187.9) need — 652.2.a Replaces a Battlefield
    leaving play with a token one.
-3. **Effect-outcome predicates.** "Deal 3 to a unit. **If this kills it**, draw
+2. **Effect-outcome predicates.** "Deal 3 to a unit. **If this kills it**, draw
    1", "deal 6 to it **unless its controller** has you draw 2". `Condition`
    asks about the state and about the chosen target (see [Guarded effect
    steps](#guarded-effect-steps)); it cannot ask what the step above it just
    did, and there is no seam for an opponent to answer.
-4. **Modal and symmetric effects** — "choose one •…", "each opponent reveals
+3. **Modal and symmetric effects** — "choose one •…", "each opponent reveals
    the top card of their Main Deck". The effect model runs one player's
    instruction and has no modes.
-5. **Statics that are still not a scope plus a grant.** Dynamic Might,
+4. **Statics that are still not a scope plus a grant.** Dynamic Might,
    durations (390.4) and rule 002's restrictions are all built now; what is
    left wants a *combat-role* predicate — "while I'm attacking alone" — which
    `Condition` deliberately cannot express, because a condition that read Might
@@ -2429,15 +2419,15 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 271 of the 468 cards that have text** — 263 parsed and 8 hand-authored, and the shape of what is
+**Coverage is 276 of the 468 cards that have text** — 268 parsed and 8 hand-authored, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 263 |
+| Fully parsed | 268 |
 | Hand-authored | 8 |
-| Blocked | 197 |
+| Blocked | 192 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 4 times, the next 2, and every one of
@@ -2571,7 +2561,6 @@ rows and they are all small:
 | Conditions about the source at death ("if I died alone") | +1 |
 | A granted tag ("I am a mech") | +1 |
 | Modal effects ("choose one •…") | +0 |
-| Repeat (820) | +0 |
 
 **That ranking was measured from the 173 baseline and the rounds since have
 outrun it**: it said nothing left was worth its own round, and the rounds after
@@ -2581,11 +2570,13 @@ and most of what those rounds added was a mechanic the **authored overlay**
 needed in order to say anything at all. Re-measure from the current baseline
 before trusting any row above.
 
-**Repeat has now measured +0 from three separate baselines** (55, 124 and 173).
-Its ten printings are each blocked on something else as well, and that is what
-its entry in `UNMODELLED_KEYWORDS` records — a measurement rather than a
-blocker, because 820.1.d's optional-cost shape has been expressible since
-Additional Costs landed.
+**Repeat measured +0 from three separate baselines** (55, 124 and 173) and
+then **+5 from the fourth**, which is the clearest lesson in this file about
+re-measuring. Nothing about the keyword changed; what changed is that the other
+blockers on its printings got built, so the cards it shares were no longer
+blocked twice over. A mechanic parked at +0 is parked *at that baseline* — the
+note in `UNMODELLED_KEYWORDS` said "build it when that number moves", and the
+number moved.
 
 What each round actually delivered, for calibrating the next projection:
 
@@ -2629,6 +2620,7 @@ What each round actually delivered, for calibrating the next projection:
 | Looking at the deck, with a Linked Ability to choose (424, 390.5) | +8 projected, **+5** delivered |
 | Bonus Damage (712-715) | +3 projected, **+3** delivered |
 | A second chosen thing (355.5) with mutual damage (417) | **+5** delivered |
+| Repeat (820), re-measured from a later baseline | +5 projected, **+5** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic
@@ -2645,8 +2637,16 @@ because the rewrite replaces a line the real parser now reads with a stand-in
 that loses it. Delete a rewrite when its mechanic lands; leaving it in makes the
 next re-measurement quietly wrong.
 
-**The keyword tail is spent.** Equip, Quick-Draw, Weaponmaster, Deflect, Vision
-and Hidden are all built. Repeat is the only one left and it measures +0.
+**The keyword tail is spent, and `UNMODELLED_KEYWORDS` is now empty.** Every
+keyword rules 800-828 define is modelled: Assault, Shield, Tank, Backline,
+Ganking and Hidden as engine rules, and Accelerate, Equip, Quick-Draw,
+Deathknell, Temporary, Weaponmaster, Deflect, Vision and Repeat as desugars
+into machinery that exists.
+
+An empty table is a trap worth knowing about: `REFUSED_KEYWORDS` builds a regex
+from its keys, and `\b()\b` matches every string — emptying the table without
+the guard in `text.ts` silently refuses the entire corpus, which is how it was
+found (coverage went 263 → 38).
 
 Additional Costs and state predicates were the two best single investments and
 **do not overlap**: together they measured +14 and delivered +10. The shortfall

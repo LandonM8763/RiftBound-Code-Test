@@ -744,10 +744,40 @@ export function executeEffect(
           }
         : invocation.choices;
 
+  // 820.1.d: Repeat executes "the instructions of this chain item one
+  // additional time" when its optional Additional Cost was paid. Two runs of
+  // the same steps rather than a doubled amount, because the instructions may
+  // be anything — a Token creation, a draw, a Move.
+  //
+  // 820.2.a lets the second execution make *different* choices. This engine
+  // settles every choice when the card is played (355.8), so both runs use the
+  // one set: narrower than printed rather than wrong, the same direction every
+  // other choice simplification takes.
+  const runs = effect.repeat === true && invocation.paidAdditionalCost === true ? 2 : 1;
+
+  let next = state;
+  for (let run = 0; run < runs; run += 1) {
+    next = executeOnce(next, invocation, effect, choices, events, context);
+  }
+  return next;
+}
+
+/** One execution of a card's instructions — see 820.1.d for why this is separate. */
+function executeOnce(
+  state: GameState,
+  invocation: EffectInvocation,
+  effect: CardEffect,
+  choices: EffectChoices,
+  events: GameEvent[],
+  context: EffectContext,
+): GameState {
   let next = state;
   // Every step's guard is asked against the state as it was on entry, so an
   // "otherwise" cannot see what the branch above it did. A step reading an
   // earlier step's *outcome* is a different mechanic — see `GuardedEffect`.
+  //
+  // "On entry" is per execution: a Repeat's second run reads the board its
+  // first run left, which is what running the instructions again means.
   const before = next;
   const guarded = (step: GuardedEffect, target: EntityId | undefined): boolean =>
     conditionMet(before, invocation.controller, invocation.source, step.condition, {

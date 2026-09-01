@@ -111,6 +111,23 @@ const BONUS = makeUnit(2, ["fury"], {
   },
 });
 
+/** 820: "REPEAT [E]. Draw 1." — the optional cost, and a second execution. */
+const ECHO = makeUnit(2, ["fury"], {
+  id: cardId("D-015"),
+  name: "Echo",
+  cost: cost(1),
+  abilities: {
+    additionalCosts: [
+      { optional: true, pay: { kind: "resources", cost: cost(1) } },
+    ],
+  },
+  effect: {
+    target: { kind: "none" },
+    effects: [{ kind: "draw", count: 1 }],
+    repeat: true,
+  },
+});
+
 const RUNE = makeRune("fury", { id: cardId("D-100") });
 const BATTLEFIELDS = Array.from({ length: 3 }, (_, i) =>
   makeBattlefield({ id: cardId(`D-20${i}`) }),
@@ -123,6 +140,7 @@ const REGISTRY = CardRegistry.from([
   BARGAIN,
   SACRIFICE,
   BONUS,
+  ECHO,
   ACCELERATED,
   RUNE,
   ...BATTLEFIELDS,
@@ -133,11 +151,12 @@ function deck(): DeckList {
     legend: LEGEND.id,
     champion: CHAMPION.id,
     main: [
-      ...Array.from({ length: 2 }, () => PLAIN.id),
+      ...Array.from({ length: 4 }, () => PLAIN.id),
       ...Array.from({ length: 4 }, () => BARGAIN.id),
       ...Array.from({ length: 4 }, () => SACRIFICE.id),
       ...Array.from({ length: 4 }, () => BONUS.id),
       ...Array.from({ length: 4 }, () => ACCELERATED.id),
+      ...Array.from({ length: 4 }, () => ECHO.id),
     ],
     runes: Array.from({ length: 8 }, () => RUNE.id),
     battlefields: BATTLEFIELDS.map((battlefield) => battlefield.id),
@@ -438,5 +457,46 @@ describe("Accelerate (rule 805)", () => {
 
     expect(plays).toHaveLength(1);
     expect(plays[0]).not.toHaveProperty("payAdditional");
+  });
+});
+
+describe("Repeat (rule 820)", () => {
+  it("820.1.d: runs the instructions an additional time when the cost is paid", () => {
+    const [state, card] = inHand(inMainPhase("repeat-paid", 6), ECHO.id);
+    const player = state.activePlayer;
+    const handBefore = state.players[player]!.zones.hand.length;
+
+    const played = reduce(state, {
+      type: "playCard",
+      card,
+      payAdditional: true,
+    }).state;
+
+    // The card left the hand and two draws came back: one execution each.
+    expect(played.players[player]!.zones.hand.length).toBe(handBefore + 1);
+    // 1 printed plus 1 Repeat, from 6.
+    expect(played.players[player]!.pool.energy).toBe(4);
+    checkInvariants(played);
+  });
+
+  it("runs once when the cost is declined, since Repeat is optional", () => {
+    const [state, card] = inHand(inMainPhase("repeat-declined", 6), ECHO.id);
+    const player = state.activePlayer;
+    const handBefore = state.players[player]!.zones.hand.length;
+
+    const played = reduce(state, { type: "playCard", card }).state;
+
+    expect(played.players[player]!.zones.hand.length).toBe(handBefore);
+    expect(played.players[player]!.pool.energy).toBe(5);
+    checkInvariants(played);
+  });
+
+  it("356.2.b: offers both plays, because they cost different amounts", () => {
+    const [state, card] = inHand(inMainPhase("repeat-offered", 6), ECHO.id);
+    const plays = legalActions(state, state.activePlayer).filter(
+      (action) => action.type === "playCard" && action.card === card,
+    );
+    expect(plays).toHaveLength(2);
+    expect(plays.filter((play) => "payAdditional" in play)).toHaveLength(1);
   });
 });

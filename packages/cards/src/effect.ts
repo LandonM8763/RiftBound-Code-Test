@@ -709,6 +709,21 @@ export interface CardEffect {
    */
   readonly second?: TargetSpec | undefined;
   /**
+   * Rule 820.1.d: Repeat — run these instructions **one additional time** when
+   * the optional Additional Cost was paid.
+   *
+   * A boolean rather than a count, because 820.1.c.2 makes each printed
+   * instance of Repeat separately payable, so two instances are two choices
+   * rather than one choice of "how many". Every printing in the corpus has
+   * exactly one; a second would need a second payment flag on the action,
+   * which is a different shape, so the parser refuses it.
+   *
+   * It reads `paidAdditionalCost` off the invocation, which is the same flag
+   * `Condition.paidAdditionalCost` asks — so Repeat needed no new plumbing
+   * between playing a card and resolving it.
+   */
+  readonly repeat?: boolean | undefined;
+  /**
    * Where a `move` effect on this card sends its target (rule 449.1).
    *
    * One per card rather than one per effect, matching `target`: a card that
