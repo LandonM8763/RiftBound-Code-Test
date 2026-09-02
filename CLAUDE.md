@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells killing, draw and Play Effects firing. 286 of the 468 cards with text
+with damage spells killing, draw and Play Effects firing. 287 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -139,9 +139,10 @@ What is **not** built yet, in rough dependency order:
    asks about the state and about the chosen target (see [Guarded effect
    steps](#guarded-effect-steps)); it cannot ask what the step above it just
    did, and there is no seam for an opponent to answer.
-3. **Modal and symmetric effects** — "choose one •…", "each opponent reveals
-   the top card of their Main Deck". The effect model runs one player's
-   instruction and has no modes.
+3. **Modal effects** — "choose one •…". The effect model has no modes; a
+   *symmetric* effect is partly built now, since `EffectPlayer` names the seats
+   a player-directed effect acts on ("each player channels 1 rune exhausted").
+   What is left there needs each player to make their own choice.
 4. **Statics that are still not a scope plus a grant.** Dynamic Might,
    durations (390.4), rule 002's restrictions and the combat-role narrowing
    ("while I'm attacking alone") are all built. What is left wants a
@@ -2466,15 +2467,15 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 286 of the 468 cards that have text** — 274 parsed and 12 hand-authored, and the shape of what is
+**Coverage is 287 of the 468 cards that have text** — 275 parsed and 12 hand-authored, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 274 |
+| Fully parsed | 275 |
 | Hand-authored | 12 |
-| Blocked | 182 |
+| Blocked | 181 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 4 times, the next 2, and every one of
@@ -2672,6 +2673,7 @@ What each round actually delivered, for calibrating the next projection:
 | Counted discounts over the shared count grammar, and two malformed reminders | **+3** delivered |
 | Runes and the Legend as targets (161.1.a, 103.1) | **+2** delivered |
 | "Alone" in combat, over a fifth sweep sharing `ObjectFilter` | **+2** delivered |
+| Player-directed effects (`EffectPlayer`) | **+1** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic

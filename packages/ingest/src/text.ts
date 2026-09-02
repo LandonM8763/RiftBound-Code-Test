@@ -699,13 +699,28 @@ const CLAUSES: readonly ClauseRule[] = [
     },
   },
   {
-    pattern: /^channel (\d+|one|two|three) runes?( exhausted)?$/i,
+    // "Each player channels 1 rune exhausted" is the same instruction with a
+    // player named — see `EffectPlayer`. "Its owner channels …" is not: that
+    // names the owner of a *target*, which is a different question.
+    pattern: /^(each player |each opponent )?channels? (\d+|one|two|three) runes?( exhausted)?$/i,
     build: (m) => {
-      const n = count(m[1] ?? '');
+      const n = count(m[2] ?? '');
       if (n === undefined) return undefined;
+      const who = /each player/i.test(m[1] ?? '')
+        ? ('each' as const)
+        : /each opponent/i.test(m[1] ?? '')
+          ? ('opponent' as const)
+          : undefined;
       // 430.2: an effect may specify that Runes enter exhausted.
       return {
-        effects: [{ kind: 'channel', count: n, exhausted: m[2] !== undefined }],
+        effects: [
+          {
+            kind: 'channel',
+            count: n,
+            exhausted: m[3] !== undefined,
+            ...(who === undefined ? {} : { who }),
+          },
+        ],
         target: NO_TARGET,
       };
     },
@@ -1288,7 +1303,9 @@ const CLAUSES: readonly ClauseRule[] = [
   {
     // 467-471: "you score 1 point". 471.1.a.1 keeps it clear of the Final
     // Point restriction, which belongs to Conquer alone.
-    pattern: /^(?:you )?scores? (\d+) points?$/i,
+    // "Choose an opponent. They score 1 point." names the one opponent 485's
+    // Duel leaves, so it is `who` rather than a choice — see `EffectPlayer`.
+    pattern: /^(?:you |they |each player |each opponent )?scores? (\d+) points?$/i,
     build: (m) => {
       const n = count(m[1] ?? '');
       return n === undefined ? undefined : { effects: [{ kind: 'score', amount: n }], target: NO_TARGET };

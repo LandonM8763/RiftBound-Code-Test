@@ -483,6 +483,28 @@ function consumesTarget(kind: Effect['kind']): boolean {
   }
 }
 
+
+/**
+ * The players a player-directed effect acts on (see `EffectPlayer`).
+ *
+ * Turn order from the controller, so a symmetric effect resolves in the order
+ * the rules would have players act — which matters the moment one of them runs
+ * out of Runes and the other does not.
+ */
+function playersFor(
+  state: GameState,
+  controller: PlayerId,
+  who: 'opponent' | 'each' | undefined,
+): PlayerId[] {
+  if (who === undefined) {
+    return [controller];
+  }
+  const seats = state.players.map((seat) => seat.id);
+  const from = seats.indexOf(controller);
+  const inOrder = [...seats.slice(from), ...seats.slice(0, from)];
+  return who === 'each' ? inOrder : inOrder.filter((seat) => seat !== controller);
+}
+
 /** Everything `player` controls that is on the Board (rule 380). */
 function boardEntitiesOf(state: GameState, player: PlayerId): EntityId[] {
   const found: EntityId[] = [...getPlayer(state, player).zones.base];
@@ -1073,22 +1095,28 @@ function applyEffect(
       if (amount === 0) {
         return state;
       }
-      // Rule 002: "opponents can't score points" binds every source of points,
-      // not only Conquer and Hold — 471.1.a.1's exemption is about the Final
-      // Point restriction, not about a card that forbids scoring outright.
-      if (playerForbidden(state, controller, 'score')) {
-        return state;
+      let next = state;
+      // "Choose an opponent. They score 1 point." — 485's 1v1 Duel leaves one
+      // opponent to choose, so naming them is the same as choosing them.
+      for (const seat of playersFor(next, controller, effect.who)) {
+        // Rule 002: "opponents can't score points" binds every source of
+        // points, not only Conquer and Hold — 471.1.a.1's exemption is about
+        // the Final Point restriction, not about a card forbidding scoring.
+        if (playerForbidden(next, seat, 'score')) {
+          continue;
+        }
+        const total = getPlayer(next, seat).points + amount;
+        events.push({
+          type: 'pointsScored',
+          player: seat,
+          battlefield: null,
+          amount,
+          total,
+          method: 'effect',
+        });
+        next = withPlayer(next, seat, (current) => ({ ...current, points: total }));
       }
-      const total = getPlayer(state, controller).points + amount;
-      events.push({
-        type: 'pointsScored',
-        player: controller,
-        battlefield: null,
-        amount,
-        total,
-        method: 'effect',
-      });
-      return withPlayer(state, controller, (current) => ({ ...current, points: total }));
+      return next;
     }
 
     // 423: Stun the target. 423.1.a.1 makes stunning an already-Stunned Unit
@@ -1198,18 +1226,22 @@ function applyEffect(
     // not a Burn Out — that is what an empty *Main* Deck causes (431).
     case 'channel': {
       let next = state;
-      for (let i = 0; i < effect.count; i += 1) {
-        const top = getPlayer(next, controller).zones.runeDeck[0];
-        if (top === undefined) {
-          events.push({ type: 'runeDeckEmpty', player: controller });
-          break;
+      // "Each player channels 1 rune exhausted" — the same instruction, run
+      // once per player it names. 430.3's "as many as possible" is per player.
+      for (const seat of playersFor(next, controller, effect.who)) {
+        for (let i = 0; i < effect.count; i += 1) {
+          const top = getPlayer(next, seat).zones.runeDeck[0];
+          if (top === undefined) {
+            events.push({ type: 'runeDeckEmpty', player: seat });
+            break;
+          }
+          next = moveEntity(next, top, playerLocation(seat, 'runes'));
+          // 430.2.a: Runes are Channelled ready unless the effect says otherwise.
+          if (effect.exhausted === true) {
+            next = withEntity(next, top, (current) => ({ ...current, exhausted: true }));
+          }
+          events.push({ type: 'runeChannelled', player: seat, entity: top });
         }
-        next = moveEntity(next, top, playerLocation(controller, 'runes'));
-        // 430.2.a: Runes are Channelled ready unless the effect says otherwise.
-        if (effect.exhausted === true) {
-          next = withEntity(next, top, (current) => ({ ...current, exhausted: true }));
-        }
-        events.push({ type: 'runeChannelled', player: controller, entity: top });
       }
       return next;
     }

@@ -578,7 +578,7 @@ export type Effect =
    * 470's once-per-Battlefield-per-turn cap does not apply either: that rule is
    * about Scoring *a Battlefield*, and this names none.
    */
-  | { readonly kind: 'score'; readonly amount: number }
+  | { readonly kind: 'score'; readonly amount: number; readonly who?: EffectPlayer | undefined }
   /** Rules 728-733: XP is a player resource with no cap (733). */
   | { readonly kind: 'gainXp'; readonly amount: number }
   | { readonly kind: 'spendXp'; readonly amount: number }
@@ -588,7 +588,12 @@ export type Effect =
    * Too few Runes means channelling as many as possible (430.3) — deliberately
    * *not* a Burn Out, which is what an empty Main Deck causes (431).
    */
-  | { readonly kind: 'channel'; readonly count: number; readonly exhausted?: boolean | undefined }
+  | {
+      readonly kind: 'channel';
+      readonly count: number;
+      readonly exhausted?: boolean | undefined;
+      readonly who?: EffectPlayer | undefined;
+    }
   /**
    * Rules 420, 445-453: move the target to the card's chosen Destination.
    *
@@ -715,6 +720,21 @@ export type Effect =
  * It was built, measured at +0, and removed — the same evidence that keeps
  * Repeat (820) out. Add it when a counterfactual re-parse moves the number.
  */
+
+/**
+ * Which player a player-directed effect acts on.
+ *
+ * Absent means the effect's controller, which is almost every printing. The
+ * other two are how the corpus states a symmetric or an opposing effect —
+ * "each player channels 1 rune exhausted", "choose an opponent. They score 1
+ * point."
+ *
+ * **"Choose an opponent" is `opponent`, not a choice.** 485 makes the
+ * sanctioned Mode of Play a 1v1 Duel, so there is exactly one opponent to
+ * choose and the two readings coincide everywhere this engine can be played —
+ * the same reading the Burn Out beneficiary takes (431.2.c).
+ */
+export type EffectPlayer = 'opponent' | 'each';
 
 /** The rules text of a card: what it targets, and what it then does. */
 export interface CardEffect {

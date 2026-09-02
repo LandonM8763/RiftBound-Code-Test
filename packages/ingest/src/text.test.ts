@@ -2975,3 +2975,28 @@ describe("attacking and defending alone (464.2.c.3)", () => {
     ).toEqual({ who: "enemy", filter: { alone: true, role: "attacker" } });
   });
 });
+
+describe("effects that name a player (symmetric and opposing)", () => {
+  it('reads "each player channels" as one instruction run per player', () => {
+    const parsed = parseCardText("Each player channels 1 rune exhausted.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.effect?.effects).toEqual([
+      { kind: "channel", count: 1, exhausted: true, who: "each" },
+    ]);
+  });
+
+  it("leaves an unqualified channel acting on its controller", () => {
+    expect(parseCardText("Channel 1 rune exhausted.").effect?.effects).toEqual([
+      { kind: "channel", count: 1, exhausted: true },
+    ]);
+  });
+
+  it('does not read "its owner channels" as a player-directed effect', () => {
+    // That names the owner of a *target*, which is a different question from
+    // naming a seat — and reading it as one would channel for the wrong player.
+    expect(
+      parseCardText("Return a friendly unit to its owner's hand. Its owner channels 1 rune exhausted.")
+        .unparsed,
+    ).not.toEqual([]);
+  });
+});
