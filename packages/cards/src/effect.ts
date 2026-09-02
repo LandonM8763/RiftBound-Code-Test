@@ -133,8 +133,14 @@ export type TargetSpec =
        * one), so the same spec covers both and only the sweep differs; what a
        * Gear cannot be is *damaged*, and a card that says "deal 3 to a gear"
        * does not exist to be read wrong.
+       *
+       * `rune` and `legend` reach the two Game Objects that are on the Board
+       * (161.1.a, 103.1) but in a player zone rather than at a Battlefield or
+       * in a Base — "ready 2 runes", "ready your legend". They are readied and
+       * exhausted like anything else (414-415), which is every verb the corpus
+       * points at them; a card that damages or kills one does not exist.
        */
-      readonly cardType?: 'unit' | 'gear' | undefined;
+      readonly cardType?: 'unit' | 'gear' | 'rune' | 'legend' | undefined;
       /** Narrowing beyond the controller — see `ObjectFilter`. */
       readonly filter?: ObjectFilter | undefined;
       /**
@@ -179,7 +185,7 @@ export type TargetSpec =
   | {
       readonly kind: 'all';
       readonly scope: 'any' | 'friendly' | 'enemy';
-      readonly cardType?: 'unit' | 'gear' | undefined;
+      readonly cardType?: 'unit' | 'gear' | 'rune' | 'legend' | undefined;
       readonly atBattlefield?: boolean | undefined;
       readonly inCombat?: boolean | undefined;
       /** Narrowing beyond the controller — see `ObjectFilter`. */

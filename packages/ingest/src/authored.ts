@@ -299,6 +299,34 @@ export const AUTHORED_CARDS: Readonly<Record<string, AuthoredCard>> = {
     note: 'Printed REPEAT carries no cost (820.1.c), so only the stun is modelled.',
   },
 
+  // 416's recycle event with `byController`, plus 403's priced trigger. Every
+  // piece is modelled; the grammar has no rule for "when you recycle a rune".
+  'Sivir - Battle Mistress': {
+    text:
+      'When you recycle a rune, you may exhaust me to play a Gold gear token exhausted.\n' +
+      'When one or more enemy units die, ready me.',
+    abilities: {
+      triggered: [
+        {
+          condition: { event: 'recycle', subject: 'any', filter: { byController: true } },
+          optional: true,
+          exhaustSelf: true,
+          effect: {
+            target: { kind: 'none' },
+            effects: [
+              { kind: 'createToken', token: 'gold', count: 1, where: 'base', ready: false },
+            ],
+          },
+        },
+        {
+          condition: { event: 'dies', subject: 'enemy' },
+          effect: { target: { kind: 'self' }, effects: [{ kind: 'ready' }] },
+        },
+      ],
+    },
+    note: 'Two triggers; "when you recycle a rune" has no clause rule.',
+  },
+
 };
 
 /**

@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells killing, draw and Play Effects firing. 282 of the 468 cards with text
+with damage spells killing, draw and Play Effects firing. 284 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -2451,15 +2451,15 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 282 of the 468 cards that have text** — 271 parsed and 11 hand-authored, and the shape of what is
+**Coverage is 284 of the 468 cards that have text** — 272 parsed and 12 hand-authored, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 271 |
-| Hand-authored | 11 |
-| Blocked | 186 |
+| Fully parsed | 272 |
+| Hand-authored | 12 |
+| Blocked | 184 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 4 times, the next 2, and every one of
@@ -2655,6 +2655,7 @@ What each round actually delivered, for calibrating the next projection:
 | Repeat (820), re-measured from a later baseline | +5 projected, **+5** delivered |
 | One `ObjectFilter` across all four Board sweeps, and the `leave` event | **+3** delivered |
 | Counted discounts over the shared count grammar, and two malformed reminders | **+3** delivered |
+| Runes and the Legend as targets (161.1.a, 103.1) | **+2** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic

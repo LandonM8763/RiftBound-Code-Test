@@ -289,14 +289,26 @@ export function legalTargets(
   }
 
   const candidates: { unit: EntityId; atBattlefield: boolean }[] = [];
-  for (const battlefield of state.battlefields) {
-    for (const unit of battlefield.units) {
-      candidates.push({ unit, atBattlefield: true });
+  // 161.1.a keeps a Channelled Rune on the Board and 103.1 keeps the Legend
+  // there all game, but both sit in a player zone rather than at a Battlefield
+  // or in a Base — so the sweep is chosen by what the spec asks for.
+  const zone = spec.cardType === 'rune' ? 'runes' : spec.cardType === 'legend' ? 'legendZone' : null;
+  if (zone !== null) {
+    for (const player of state.players) {
+      for (const card of player.zones[zone]) {
+        candidates.push({ unit: card, atBattlefield: false });
+      }
     }
-  }
-  for (const player of state.players) {
-    for (const unit of player.zones.base) {
-      candidates.push({ unit, atBattlefield: false });
+  } else {
+    for (const battlefield of state.battlefields) {
+      for (const unit of battlefield.units) {
+        candidates.push({ unit, atBattlefield: true });
+      }
+    }
+    for (const player of state.players) {
+      for (const unit of player.zones.base) {
+        candidates.push({ unit, atBattlefield: false });
+      }
     }
   }
 
@@ -373,6 +385,10 @@ export function allTargets(
   const wanted = spec.cardType ?? 'unit';
   const found: EntityId[] = [];
 
+  // The same two player zones `legalTargets` reaches for — "ready your runes"
+  // is a criteria set (355.5.a) over everything matching, not a choice.
+  const zone = wanted === 'rune' ? 'runes' : wanted === 'legend' ? 'legendZone' : null;
+
   // 355.9's "here": the source's own Battlefield. A source at a Base names
   // none, so the set is empty rather than the whole Board — the same reading
   // `StaticScope.here` takes.
@@ -404,6 +420,15 @@ export function allTargets(
     }
     found.push(id);
   };
+
+  if (zone !== null) {
+    for (const player of state.players) {
+      for (const id of player.zones[zone]) {
+        consider(id, false);
+      }
+    }
+    return found;
+  }
 
   state.battlefields.forEach((battlefield, index) => {
     // "all enemy units in combat" — 464 runs a Combat at one Battlefield, so
@@ -1558,7 +1583,14 @@ function applyEffect(
 /** A Unit is a legal recipient only while it is on the Board (rule 141.1.a). */
 function onBoard(state: GameState, unit: EntityId): boolean {
   const location = getEntity(state, unit).location;
-  return location.kind === 'battlefield' || location.zone === 'base';
+  if (location.kind === 'battlefield') {
+    return true;
+  }
+  // 161.1.a keeps a Channelled Rune on the Board until it is Recycled, and
+  // 103.1 keeps the Legend in its zone all game — both are Board zones even
+  // though neither is a Battlefield or a Base, which is what lets "ready 2
+  // runes" and "ready your legend" reach them.
+  return location.zone === 'base' || location.zone === 'runes' || location.zone === 'legendZone';
 }
 
 /**

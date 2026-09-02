@@ -601,7 +601,12 @@ function tagNoun(noun: string | undefined): string | undefined {
   if (word === '' || /^units?$/i.test(word)) {
     return undefined;
   }
-  return word.replace(/s$/, '');
+  // The capitalisation is the whole test, and it was documented here long
+  // before it was enforced: the clause patterns carry the `i` flag, so without
+  // this check *any* plural noun became a tag. "Ready 2 runes" was reading as
+  // two Units tagged "rune" — a card that parses, looks right, and matches
+  // nothing, which is the failure the gap model exists to prevent.
+  return /^[A-Z]/.test(word) ? word.replace(/s$/, '') : undefined;
 }
 
 /**
@@ -1197,6 +1202,42 @@ const CLAUSES: readonly ClauseRule[] = [
       target: NO_TARGET,
       pronoun: true,
     }),
+  },
+  {
+    /**
+     * "Ready 2 runes", "ready your runes", "ready your legend" (414-415).
+     *
+     * 161.1.a keeps a Channelled Rune on the Board and 103.1 keeps the Legend
+     * in its zone all game, so both are ordinary Game Objects a verb can
+     * reach — the only thing that differs is which zone the sweep walks. A
+     * bare plural with no count is 355.5.a's criteria set rather than a
+     * choice: "ready your runes" names every one, not a number of them.
+     */
+    pattern:
+      /^(ready|exhaust) (?:(\d+|one|two|three|four|all) )?(?:(?:your|friendly) )?(runes?|legends?)$/i,
+    build: (m) => {
+      const kind = (m[1] ?? '').toLowerCase() as 'ready' | 'exhaust';
+      const cardType = /^rune/i.test(m[3] ?? '') ? ('rune' as const) : ('legend' as const);
+      const word = (m[2] ?? '').toLowerCase();
+      if (word === '' || word === 'all') {
+        return {
+          effects: [{ kind }],
+          target: { kind: 'all' as const, scope: 'friendly' as const, cardType },
+        };
+      }
+      const n = count(word);
+      return n === undefined
+        ? undefined
+        : {
+            effects: [{ kind }],
+            target: {
+              kind: 'unit' as const,
+              scope: 'friendly' as const,
+              cardType,
+              count: { min: n, max: n },
+            },
+          };
+    },
   },
   {
     // One rule rather than three: the verbs differ and the target phrase does

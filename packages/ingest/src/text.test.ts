@@ -2911,3 +2911,38 @@ describe("reminders the export malforms", () => {
     expect(parseCardText("Draw 1. Buff me.").unparsed).toEqual([]);
   });
 });
+
+describe("Runes and the Legend as Game Objects (161.1.a, 103.1)", () => {
+  it("reads a counted set of Runes as a choice", () => {
+    const parsed = parseCardText("Ready 2 runes.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.effect?.target).toEqual({
+      kind: "unit",
+      scope: "friendly",
+      cardType: "rune",
+      count: { min: 2, max: 2 },
+    });
+  });
+
+  it("reads a bare plural as a criteria set, not a choice (355.5.a)", () => {
+    // "Ready your runes" names every one rather than a number of them, so it
+    // is enumerated at resolution and needs no choice.
+    const parsed = parseCardText("Ready your runes.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.effect?.target).toEqual({
+      kind: "all",
+      scope: "friendly",
+      cardType: "rune",
+    });
+  });
+
+  it("reaches the Legend, which is in its own zone all game", () => {
+    const parsed = parseCardText("Ready your legend.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.effect?.target).toEqual({
+      kind: "all",
+      scope: "friendly",
+      cardType: "legend",
+    });
+  });
+});
