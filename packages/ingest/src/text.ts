@@ -2179,6 +2179,48 @@ function taggedScope(text: string): StaticScope | undefined {
   return match === null ? undefined : { who: 'friendly', tag: (match[1] ?? '').trim() };
 }
 
+/**
+ * "While **I'm attacking or defending alone**", "while a friendly unit
+ * **defends alone**" — 464.2.c.3's designation as a narrowing of the objects.
+ *
+ * Read as a whole rather than through the "While <predicate>," split, because
+ * the subject of the condition *is* the subject of the grant: "while a friendly
+ * unit defends alone, **it** gets +2 Might" grants to the units the condition
+ * describes, not to the card printing it. Routed through the split it would
+ * become a source predicate about a Legend, which is never true.
+ *
+ * "Attacking or defending" names both designations, which is an absent `role`:
+ * the Unit holds one and the card does not care which.
+ */
+const ALONE_STATIC =
+  /^while (i'm|i am|a friendly unit|friendly units|an enemy unit|enemy units) (?:(attacks?|attacking)(?: or (?:defends?|defending))?|(defends?|defending)) alone,\s*(.+)$/i;
+
+function aloneStatic(text: string): { scope: StaticScope; rest: string } | undefined {
+  const match = text.match(ALONE_STATIC);
+  if (match === null) {
+    return undefined;
+  }
+  const subject = (match[1] ?? '').toLowerCase();
+  const attacking = match[2] !== undefined;
+  const bothWays = attacking && / or (?:defends?|defending) alone/i.test(text);
+  const who =
+    subject === "i'm" || subject === 'i am'
+      ? ('self' as const)
+      : subject.startsWith('a friendly') || subject.startsWith('friendly')
+        ? ('friendly' as const)
+        : ('enemy' as const);
+  return {
+    scope: {
+      who,
+      filter: {
+        alone: true,
+        ...(bothWays ? {} : { role: attacking ? ('attacker' as const) : ('defender' as const) }),
+      },
+    },
+    rest: match[4] ?? '',
+  };
+}
+
 /** The scope a static's subject phrase names, fixed phrases before tags. */
 function scopeNamed(text: string): StaticScope | undefined {
   return STATIC_SCOPES.find((entry) => entry.pattern.test(text))?.scope ?? taggedScope(text);
@@ -2526,6 +2568,20 @@ export function parseStatic(line: string): StaticAbility | undefined {
   // `parseStatePredicate` deliberately does not answer those; anything else is
   // an ordinary state predicate and goes through the shared grammar, so
   // "While you have 8+ runes" needs no rule of its own.
+  // Read before the split: the condition's subject is also the grant's, which
+  // a "While <predicate>," split cannot express. See `ALONE_STATIC`.
+  const alone = aloneStatic(text);
+  if (alone !== undefined) {
+    // "**it** gets +2 Might", "**I** have +2 Might": the pronoun refers to the
+    // subject the condition already named, so it is dropped and the grant is
+    // read on its own.
+    return withScope(
+      alone.scope,
+      alone.rest.replace(/^(?:it|i|they)\s+(?:has|have|gets?|is|are)\s+/i, ''),
+      undefined,
+    );
+  }
+
   const whileClause = text.match(/^while (.+?),\s*(.+)$/i);
   if (whileClause !== null) {
     condition = parseSourcePredicate((whileClause[1] ?? '').trim());
@@ -2658,10 +2714,20 @@ function buildStatic(
   condition: Condition | undefined,
 ): StaticAbility | undefined {
   const scope = scopeNamed(scopePhrase);
-  if (scope === undefined) {
-    return undefined;
-  }
+  return scope === undefined ? undefined : withScope(scope, printed, condition);
+}
 
+/**
+ * The same, for a scope already resolved.
+ *
+ * Split out for `ALONE_STATIC`, whose subject carries a filter and so cannot be
+ * named by a phrase the table matches.
+ */
+function withScope(
+  scope: StaticScope,
+  printed: string,
+  condition: Condition | undefined,
+): StaticAbility | undefined {
   let body = printed;
 
   // "I have +1 Might **for each friendly gear**", "I have ASSAULT **equal to

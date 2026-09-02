@@ -20,6 +20,7 @@
 import type { AbilityDependency, CardAbilities } from './ability.js';
 import type { Condition } from './condition.js';
 import type { Count } from './count.js';
+import type { ObjectFilter } from './effect.js';
 import type { Keyword } from './keyword.js';
 
 /**
@@ -40,6 +41,19 @@ export interface StaticScope {
   readonly here?: boolean | undefined;
   /** "Other friendly units …" — never the source itself. */
   readonly excludeSelf?: boolean | undefined;
+  /**
+   * "While a friendly unit **defends alone**, it gets +2 Might" — a narrowing
+   * of the objects rather than of the source.
+   *
+   * The distinction matters: `condition` below is about the *source*, and a
+   * card whose text narrows what it affects cannot say so with it. This is the
+   * same `ObjectFilter` a target choice, a criteria set, a count and a trigger
+   * take — the fifth sweep to share it.
+   *
+   * Every field of it is a stored status or a Showdown read, so consulting it
+   * from a grant cannot recurse back through `mightOf`.
+   */
+  readonly filter?: ObjectFilter | undefined;
   /**
    * "Your **Mechs** have +1 Might" — narrowed to a tag (133.8).
    *

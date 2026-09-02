@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells killing, draw and Play Effects firing. 284 of the 468 cards with text
+with damage spells killing, draw and Play Effects firing. 286 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -143,10 +143,11 @@ What is **not** built yet, in rough dependency order:
    the top card of their Main Deck". The effect model runs one player's
    instruction and has no modes.
 4. **Statics that are still not a scope plus a grant.** Dynamic Might,
-   durations (390.4) and rule 002's restrictions are all built now; what is
-   left wants a *combat-role* predicate — "while I'm attacking alone" — which
-   `Condition` deliberately cannot express, because a condition that read Might
-   back would recurse through `mightOf`.
+   durations (390.4), rule 002's restrictions and the combat-role narrowing
+   ("while I'm attacking alone") are all built. What is left wants a
+   *comparison* — "if it has less Might than me" — which `Condition`
+   deliberately cannot express, because reading Might back would recurse
+   through `mightOf`.
 
 Focus (rule 313) is implemented for both kinds of Showdown: granted to the
 contesting player (345), passing on a pass (347.2.b) and when the last Chain
@@ -974,13 +975,27 @@ Cleanup, so `mutualDamage` marks damage exactly as `dealDamage` does.
 `ObjectFilter` in `cards/effect.ts`, applied by `matchesFilter` in
 `engine/state.ts`.
 
-**Four sweeps narrow the same way, and that is the whole point.** "Buff an
+**Five sweeps narrow the same way, and that is the whole point.** "Buff an
 **exhausted** friendly unit" is a choice (355.6), "kill all **damaged** enemy
 units here" is a criterion (355.5.a), "if there is a **ready** enemy unit here"
-is a count (`Condition.controls`), and "when you kill a **stunned** enemy unit"
-is a trigger (`TriggerFilter.object`). They ask at different moments — but a
-filter that meant different things in four places would be four sweeps drifting
-apart, so there is one shape and one implementation.
+is a count (`Condition.controls`), "when you kill a **stunned** enemy unit" is
+a trigger (`TriggerFilter.object`), and "while a friendly unit **defends
+alone**, it gets +2 Might" is a static's scope (`StaticScope.filter`). They ask
+at different moments — but a filter that meant different things in five places
+would be five sweeps drifting apart, so there is one shape and one
+implementation.
+
+**`StaticScope.filter` is about the objects, where `condition` is about the
+source**, and a card whose text narrows what it affects cannot say so with the
+latter. "While a friendly unit defends alone, **it** gets +2 Might" grants to
+the units the condition describes, not to the Legend printing it — which is why
+`ALONE_STATIC` reads the whole sentence rather than going through the ordinary
+"While <predicate>," split, where it would become a source predicate that is
+never true.
+
+**`alone` is safe to ask from a grant, unlike a Might comparison.** It reads the
+Showdown and a count of Game Objects, neither computed from statics, so it
+cannot recurse back through `mightOf`.
 
 It lives in `state.ts` rather than beside the effects because `count.ts` sits
 below `effects.ts` in the import order and needs it too. `designationOf` is
@@ -2451,15 +2466,15 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 284 of the 468 cards that have text** — 272 parsed and 12 hand-authored, and the shape of what is
+**Coverage is 286 of the 468 cards that have text** — 274 parsed and 12 hand-authored, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 272 |
+| Fully parsed | 274 |
 | Hand-authored | 12 |
-| Blocked | 184 |
+| Blocked | 182 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 4 times, the next 2, and every one of
@@ -2656,6 +2671,7 @@ What each round actually delivered, for calibrating the next projection:
 | One `ObjectFilter` across all four Board sweeps, and the `leave` event | **+3** delivered |
 | Counted discounts over the shared count grammar, and two malformed reminders | **+3** delivered |
 | Runes and the Legend as targets (161.1.a, 103.1) | **+2** delivered |
+| "Alone" in combat, over a fifth sweep sharing `ObjectFilter` | **+2** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic

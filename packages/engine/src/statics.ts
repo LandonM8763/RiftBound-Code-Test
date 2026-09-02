@@ -32,7 +32,14 @@ import { activeAbilities, attachedKeywords, attachedMight } from './attach.js';
 import { conditionMet, type ConditionContext } from './condition.js';
 import { countOf } from './count.js';
 import { dependencyMet } from './dependency.js';
-import { entityCard, getEntity, type EntityId, type GameState, type PlayerId } from './state.js';
+import {
+  entityCard,
+  getEntity,
+  matchesFilter,
+  type EntityId,
+  type GameState,
+  type PlayerId,
+} from './state.js';
 
 /** Case-insensitive tag match (133.8), the same comparison `count.ts` makes. */
 function hasTag(tags: readonly string[], tag: string): boolean {
@@ -121,9 +128,18 @@ function reaches(
   unit: EntityId,
 ): boolean {
   if (scope.who === 'self') {
-    return unit === source;
+    // A `self` scope still honours a filter: "While I'm attacking alone, I
+    // have +2 Might" is one static about one Game Object, and the narrowing is
+    // what decides whether the grant applies at all.
+    return unit === source && matchesFilter(state, unit, scope.filter);
   }
   if (scope.excludeSelf === true && unit === source) {
+    return false;
+  }
+  // The same narrowing a target choice, a criteria set, a count and a trigger
+  // take — see `ObjectFilter`. About the affected object, where `condition` is
+  // about the source.
+  if (!matchesFilter(state, unit, scope.filter)) {
     return false;
   }
 

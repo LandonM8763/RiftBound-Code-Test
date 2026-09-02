@@ -53,6 +53,18 @@ export interface ObjectFilter {
    */
   readonly role?: 'attacker' | 'defender' | undefined;
   /**
+   * "While I'm attacking **alone**", "when a friendly unit defends alone".
+   *
+   * The Unit holds a designation and is the only one its controller has at
+   * that Battlefield — 464.2.c.3 gives the designation to every Unit a side
+   * controls there, so being the only one is what "alone" means.
+   *
+   * Safe to ask from a static's grant, unlike a Might comparison: it reads the
+   * Showdown and a count of Game Objects, neither of which is computed from
+   * statics, so it cannot recurse back through `mightOf`.
+   */
+  readonly alone?: boolean | undefined;
+  /**
    * 133.8: "ready another friendly **Mech**".
    *
    * Answerable by the engine and not by today's data — the export publishes no

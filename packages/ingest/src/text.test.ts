@@ -698,8 +698,7 @@ describe("granted keywords and wider conditions", () => {
     // Dropping the condition would make the static unconditional, which is
     // strictly stronger than the printed card.
     expect(
-      parseCardText("While I'm attacking or defending alone, I have +2 Might.")
-        .unparsed,
+      parseCardText("While I've moved twice this turn, I have +2 Might.").unparsed,
     ).toHaveLength(1);
   });
 });
@@ -2944,5 +2943,35 @@ describe("Runes and the Legend as Game Objects (161.1.a, 103.1)", () => {
       scope: "friendly",
       cardType: "legend",
     });
+  });
+});
+
+describe("attacking and defending alone (464.2.c.3)", () => {
+  const staticOf = (text: string) => parseCardText(text).abilities?.statics?.[0];
+
+  it("narrows the source itself, with no designation named", () => {
+    // "Attacking or defending" is both, which is an absent `role`: the Unit
+    // holds one and the card does not care which.
+    expect(staticOf("While I'm attacking or defending alone, I have +2 Might.")).toEqual({
+      affects: { who: "self", filter: { alone: true } },
+      grant: { might: 2 },
+    });
+  });
+
+  it("narrows the objects, not the source, when the subject is a set", () => {
+    // The condition's subject *is* the grant's: "while a friendly unit defends
+    // alone, it gets +2 Might" grants to the units the condition describes, not
+    // to the Legend printing it. Read through the ordinary "While <predicate>,"
+    // split it would become a source predicate that is never true.
+    expect(staticOf("While a friendly unit defends alone, it gets +2 Might.")).toEqual({
+      affects: { who: "friendly", filter: { alone: true, role: "defender" } },
+      grant: { might: 2 },
+    });
+  });
+
+  it("keeps the designation when only one is named", () => {
+    expect(
+      staticOf("While an enemy unit attacks alone, it gets +1 Might.")?.affects,
+    ).toEqual({ who: "enemy", filter: { alone: true, role: "attacker" } });
   });
 });

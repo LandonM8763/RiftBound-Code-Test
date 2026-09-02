@@ -746,9 +746,12 @@ export function matchesFilter(
   if (filter.buffed !== undefined && entity.buffs > 0 !== filter.buffed) {
     return false;
   }
-  // 464.2.c.3's designation, read off the Showdown by the one helper three
+  // 464.2.c.3's designation, read off the Showdown by the one helper the other
   // sweeps share — see `designationOf`.
   if (filter.role !== undefined && designationOf(state, id) !== filter.role) {
+    return false;
+  }
+  if (filter.alone !== undefined && aloneInCombat(state, id) !== filter.alone) {
     return false;
   }
   // 133.8. The export carries no tags, so this matches nothing today and the
@@ -757,4 +760,26 @@ export function matchesFilter(
     return false;
   }
   return true;
+}
+
+/**
+ * Is this Unit the only one its controller has in the Combat (464.2.c.3)?
+ *
+ * "Attacking alone" and "defending alone". The designation goes to *every*
+ * Unit a side controls at the Contested Battlefield, so being the only one
+ * holding it is what the word means — and a Unit with no designation is not
+ * attacking at all, so it is not attacking alone either.
+ */
+export function aloneInCombat(state: GameState, unit: EntityId): boolean {
+  const role = designationOf(state, unit);
+  if (role === null) {
+    return false;
+  }
+  const at = state.entities[unit]?.location;
+  const controller = state.entities[unit]?.controller;
+  if (at?.kind !== 'battlefield' || controller === undefined) {
+    return false;
+  }
+  const present = state.battlefields[at.index]?.units ?? [];
+  return present.filter((id) => state.entities[id]?.controller === controller).length === 1;
 }
