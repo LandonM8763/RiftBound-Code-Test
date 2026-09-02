@@ -117,11 +117,23 @@ quantity in `GameConfig` cites its rule number.
 
 What is **not** built yet, in rough dependency order:
 
-1. **Replacement effects (rule 438).** "The next time it dies this turn, you
-   may pay 1 Fury to **recall it instead**", "if I would be killed, …". Nothing
-   in the engine can substitute one event for another, and this is also what
-   Battlefield tokens (187.8, 187.9) need — 652.2.a Replaces a Battlefield
-   leaving play with a token one.
+1. **Replacement effects (rules 367-370).** "The next time it dies this turn,
+   you may pay 1 Fury to **recall it instead**", "if I would be killed, …".
+   368 makes one "an ability that alters the application of another game effect
+   or game rule", and 369.1 says they are recognised by the words "as",
+   "would" and "instead". Nothing in the engine can substitute one event for
+   another.
+
+   **Rule 438 is a different thing and this file used to cite it.** 438's
+   Replace is the narrow act of *Creating a token in the place of* a card or
+   token (438.1) — what Battlefield tokens want (187.8, 187.9, with 652.2.a),
+   and not what "recall it instead" wants at all. Two separate mechanics that
+   the word "replace" runs together.
+
+   The engine already performs several replacement effects without naming them:
+   369.2 makes Burning Out and preventing damage two, and 369.3 names "I enter
+   ready" as a third — `entersReady` is a replacement effect, which is why it
+   is asked *before* the card moves rather than applied after.
 2. **Effect-outcome predicates.** "Deal 3 to a unit. **If this kills it**, draw
    1", "deal 6 to it **unless its controller** has you draw 2". `Condition`
    asks about the state and about the chosen target (see [Guarded effect
@@ -679,7 +691,10 @@ Five things are load-bearing:
   friendly units enter ready" must not reach the card carrying it, and once that
   card is on the Board the sweep cannot tell it apart from the units it is
   talking about. 359.2.c is about how a card enters, so before the move is also
-  when the rules ask.
+  when the rules ask — 369.3 names this exact ability as a **Replacement
+  Effect**, replacing the event of entering exhausted with one of entering
+  ready, and a replacement has to be applied instead of the thing it replaces
+  rather than after it.
 - **A grant may be an *ability*, and that is what "Friendly units have DEFLECT"
   needs.** 801.3.a makes a granted keyword do exactly what a printed one does —
   so a keyword the ingest *desugars* has to be granted as the thing it desugars
@@ -1470,9 +1485,13 @@ increase rather than a `Keyword`.
 
 **Battlefield tokens (187.8, 187.9) are still excluded**, but no longer for want
 of a Game Object — Battlefields have one now. They need rule 438's Replace,
-which swaps a card or token in place of another, and 652.2.a's rule that a
-Battlefield leaving play is Replaced by a token Battlefield with no abilities.
+which is the act of *Creating a token in the place of* a card or token (438.1)
+while it inherits the original's effects and statuses, plus 652.2.a's rule that
+a Battlefield leaving play is Replaced by a token Battlefield with no abilities.
 None of that is built.
+
+438 is **not** the rule behind "recall it instead" — those are Replacement
+Effects, rules 367-370. The two share the word and nothing else.
 
 Token definitions are seeded into every game by `createGame` rather than
 discovered from a deck list, because 181 supplies them with the game and they
@@ -2696,10 +2715,11 @@ What the corpus is blocked on now, in the order measurement puts them:
    1", "deal 6 to it **unless its controller** has you draw 2". `Condition`
    asks about the state and about the chosen target; it cannot ask about what
    the step above it just did, and there is no seam for an opponent to answer.
-2. **Replacement effects.** "The next time it dies this turn, you may pay 1
-   Fury to **recall it instead**", "if I would be killed, …". Rule 438's
-   Replace is not built at all, and it is what Battlefield tokens (187.8,
-   187.9) want as well.
+2. **Replacement effects (367-370).** "The next time it dies this turn, you may
+   pay 1 Fury to **recall it instead**", "if I would be killed, …". 369.1
+   identifies them by "as", "would" and "instead". Not to be confused with rule
+   438's Replace, which creates a token in place of a card and is what
+   Battlefield tokens want — a different mechanic sharing the word.
 3. **The rest of statics beyond a scope plus a grant** — "While I'm attacking
    or defending alone" needs a combat-role predicate that `Condition`
    deliberately cannot express, because a condition that reads Might back would
