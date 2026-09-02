@@ -190,6 +190,7 @@ export function totalCost(
     modifiersFor(state, player, card, context),
     state,
     chosen,
+    card.tags,
   );
 }
 
@@ -270,6 +271,8 @@ export function applyModifiers(
   state?: GameState,
   /** 809.1.c: which Game Object this play chooses, for a `choosesSource` filter. */
   chosen?: EntityId | undefined,
+  /** 133.8: the tags of the card being paid for, for a tag-scoped modifier. */
+  tags: readonly string[] = [],
 ): Cost {
   const relevant = active
     .filter(({ controller, modifier, own, source }) => {
@@ -280,7 +283,7 @@ export function applyModifiers(
       if (modifier.applies.choosesSource === true && (chosen === undefined || chosen !== source)) {
         return false;
       }
-      return modifierApplies(modifier.applies, target, payerFor(controller, player, own));
+      return modifierApplies(modifier.applies, target, payerFor(controller, player, own), tags);
     })
     .map(({ controller, modifier }) => resolveCount(modifier.change, controller, state));
 

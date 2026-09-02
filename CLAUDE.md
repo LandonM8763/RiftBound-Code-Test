@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells killing, draw and Play Effects firing. 279 of the 468 cards with text
+with damage spells killing, draw and Play Effects firing. 282 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -2376,7 +2376,7 @@ What it still cannot supply:
 | Power pip Domains | 18 | `powerCost` is a pip *count*, so a multi-Domain card's cost is ambiguous |
 | `might` | 1 | One Unit record has none |
 | Champion Tag on Signature cards | 0 dropped, 30 degraded | See the inference below |
-| Tags of any kind | 0 dropped, 6 degraded | The export has no tag field, so "Your Mechs have +1 Might" and "if you control another Dragon" match nothing |
+| Tags of any kind | 0 dropped, 11 degraded | The export has no tag field, so "Your Mechs have +1 Might", "if you control another Dragon" and "your Dragons' costs are reduced by 2" all match nothing |
 
 Battlefield abilities used to appear here too; 170 gives each Battlefield a
 Game Object now, so the six whose text the grammar reads keep their abilities
@@ -2451,15 +2451,15 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 279 of the 468 cards that have text** — 268 parsed and 11 hand-authored, and the shape of what is
+**Coverage is 282 of the 468 cards that have text** — 271 parsed and 11 hand-authored, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 268 |
+| Fully parsed | 271 |
 | Hand-authored | 11 |
-| Blocked | 189 |
+| Blocked | 186 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 4 times, the next 2, and every one of
@@ -2654,6 +2654,7 @@ What each round actually delivered, for calibrating the next projection:
 | A second chosen thing (355.5) with mutual damage (417) | **+5** delivered |
 | Repeat (820), re-measured from a later baseline | +5 projected, **+5** delivered |
 | One `ObjectFilter` across all four Board sweeps, and the `leave` event | **+3** delivered |
+| Counted discounts over the shared count grammar, and two malformed reminders | **+3** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic

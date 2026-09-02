@@ -1019,15 +1019,30 @@ describe("cost modifiers (rules 356, 363)", () => {
     ]);
   });
 
+  it("reads a counted discount through the shared count grammar", () => {
+    // One rule over `COUNTS` rather than a pattern per count. There were three
+    // written out longhand, and every count the effect grammar could already
+    // read was unavailable here for no reason but that nobody had repeated it.
+    const parsed = parseCardText("I cost 2 less for each of your MIGHTY units.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.costModifiers?.[0]).toEqual({
+      applies: { scope: "self" },
+      change: {
+        kind: "discount",
+        per: {
+          count: { kind: "controlled", who: "you", what: "unit", mighty: true },
+          energy: 2,
+        },
+      },
+    });
+  });
+
   it("refuses the cost clauses that want a mechanic instead", () => {
-    // Every one of these is a real card. Each needs something the model has no
-    // representation for — a zone condition, a count of something invisible, a
-    // Battlefield static — so each is refused rather than approximated into a
-    // discount that fires at the wrong time. A *duration* is no longer here:
-    // 390.4's Delayed Passive is built.
+    // Each needs something the model has no representation for — a zone
+    // condition, a Battlefield static — so each is refused rather than
+    // approximated into a discount that fires at the wrong time.
     const beyond = [
       "I cost 2 less to play from anywhere other than your hand.",
-      "I cost 2 less for each of your MIGHTY units.",
       "While you control this battlefield, friendly gear costs 1 less.",
     ];
     for (const text of beyond) {
@@ -2865,5 +2880,34 @@ describe("the combat designations as an adjective (464.2.c.3)", () => {
 
   it("still refuses an adjective the table does not know", () => {
     expect(parseCardText("Stun a lurking unit.").unparsed).not.toEqual([]);
+  });
+});
+
+describe("reminders the export malforms", () => {
+  it("reads a `{` where the `(` should be", () => {
+    // "ACTION {Play on your turn or in showdowns.)" — a defect in the source,
+    // not a wording any grammar should learn.
+    const parsed = parseCardText("ACTION {Play on your turn or in showdowns.)\nDraw 1.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.effect?.effects).toEqual([{ kind: "draw", count: 1 }]);
+  });
+
+  it("drops a reminder whose opening bracket was lost", () => {
+    const parsed = parseCardText(
+      "Your Mechs have SHIELD. +1 Might while they're defenders.)",
+    );
+    expect(parsed.unparsed).toEqual([]);
+  });
+
+  it("keeps a sentence that merely ends in a parenthetical", () => {
+    // The unmatched bracket is the whole signal. With both brackets present
+    // the ordinary strip applies and nothing before it is touched.
+    const parsed = parseCardText("Draw 1. (Then you have a card.)");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.effect?.effects).toEqual([{ kind: "draw", count: 1 }]);
+  });
+
+  it("leaves a line alone when there is no bracket at all", () => {
+    expect(parseCardText("Draw 1. Buff me.").unparsed).toEqual([]);
   });
 });

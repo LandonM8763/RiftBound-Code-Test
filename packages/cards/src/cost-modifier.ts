@@ -55,6 +55,16 @@ export interface CostFilter {
    * Deflecting player's own spells for choosing their own Unit.
    */
   readonly choosesSource?: boolean | undefined;
+  /**
+   * 133.8: "**your Dragons'** Energy costs are reduced by 2".
+   *
+   * Answerable by the engine and not by today's data — the export publishes no
+   * tag field, so such a modifier reaches nothing and the card plays weaker
+   * than printed. `apitcg.ts` records the gap; refusing the clause instead
+   * would hardcode one source's shortfall into a parser shared across sources,
+   * which is the same call `ObjectFilter.tag` makes.
+   */
+  readonly tag?: string | undefined;
 }
 
 /**
@@ -201,7 +211,18 @@ export function modifierApplies(
   filter: CostFilter,
   target: CostTarget,
   payer: CostPayer,
+  /**
+   * The tags of the card whose cost is being determined (133.8).
+   *
+   * Passed in rather than read here because this module knows nothing about
+   * Game Objects — and omitted by callers that have no card, where a
+   * tag-scoped modifier correctly applies to nothing.
+   */
+  tags: readonly string[] = [],
 ): boolean {
+  if (filter.tag !== undefined && !tags.includes(filter.tag)) {
+    return false;
+  }
   // A self modifier speaks about one cost only: its own card's.
   if (filter.scope === 'self') {
     return payer === 'self' && (filter.types === undefined || filter.types.includes(target));

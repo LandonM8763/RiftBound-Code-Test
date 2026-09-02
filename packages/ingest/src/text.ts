@@ -96,9 +96,32 @@ function count(raw: string): number | undefined {
 /**
  * Reminder text is parenthesised and restates a rule rather than adding one, so
  * it carries no effect and is dropped before parsing.
+ *
+ * Two malformations in the export are handled, and both are data defects rather
+ * than wordings to teach a grammar:
+ *
+ * - **A `{` where the `(` should be**: "ACTION {Play on your turn or in
+ *   showdowns.)". Normalised before matching, so the reminder strips as usual.
+ * - **A lost opening bracket**: "Your Mechs have SHIELD. +1 Might while they're
+ *   defenders.)" — the reminder is glued to the clause and closes a bracket
+ *   that was never opened. An unmatched `)` is the signal, and the reminder is
+ *   taken back to the previous sentence boundary. Narrow on purpose: without
+ *   the unmatched bracket nothing is dropped, so a real sentence ending in a
+ *   parenthetical cannot be eaten.
  */
 export function stripReminders(text: string): string {
-  return text.replace(/\([^)]*\)/g, ' ');
+  const bracketed = text.replace(/\{(?=[^}]*\))/g, '(').replace(/\([^)]*\)/g, ' ');
+  return bracketed
+    .split('\n')
+    .map((line) => {
+      if (!line.includes(')') || line.includes('(')) {
+        return line;
+      }
+      const closed = line.indexOf(')');
+      const boundary = line.lastIndexOf('. ', closed);
+      return boundary < 0 ? line : line.slice(0, boundary + 1);
+    })
+    .join('\n');
 }
 
 /** The export writes keywords both as `[Tank]` and `Tank`; normalise to bare. */
@@ -280,6 +303,12 @@ const COUNTS: readonly {
     }),
   },
   { pattern: /^cards? in your trash$/i, build: () => ({ kind: 'cardsInTrash' }) },
+  {
+    // 356.4's counted discount reads this, and so does an effect's amount —
+    // which is the reason it is here rather than in the cost grammar alone.
+    pattern: /^cards? you'?ve played this turn$/i,
+    build: () => ({ kind: 'cardsPlayedThisTurn' }),
+  },
 ];
 
 /**
@@ -1658,19 +1687,6 @@ const COST_MODIFIERS: readonly {
     build: () => ({ applies: { scope: 'self' }, change: { kind: 'ignoreAll' } }),
   },
   {
-    // "I cost 1 less for each card in your trash."
-    pattern: /^(?:i cost|this costs) (\d+) less for each card in your trash$/i,
-    build: (m) => {
-      const energy = count(m[1] ?? '');
-      return energy === undefined
-        ? undefined
-        : {
-            applies: { scope: 'self' },
-            change: { kind: 'discount', per: { count: { kind: 'cardsInTrash' }, energy } },
-          };
-    },
-  },
-  {
     /**
      * "**Spells you play** cost 5 less", "your Dragons' Energy costs are
      * reduced by 2, to a minimum of 1" — a discount on a *scope* rather than on
@@ -1707,25 +1723,69 @@ const COST_MODIFIERS: readonly {
     },
   },
   {
-    // "I cost 1 less for each card you've played this turn, to a minimum of 1."
-    // 356.4.e's minimum binds this discount alone, which is why it rides on the
-    // change rather than on the total.
+    /**
+     * "**Your Dragons'** Energy costs are reduced by 2, to a minimum of 1"
+     * (133.8, 356.4).
+     *
+     * A tag scope rather than a card-type one. The engine honours it; today's
+     * export publishes no tag field, so it reaches nothing and the card plays
+     * weaker than printed — recorded as a `tags` gap, the same call
+     * `ObjectFilter.tag` makes. Refusing the clause would hardcode one
+     * source's shortfall into a parser shared across sources.
+     */
     pattern:
-      /^(?:i cost|this costs) (\d+) less for each card you'?ve played this turn(?:, to a minimum of (\d+))?$/i,
+      /^[Yy]our ([A-Z][A-Za-z'-]*?)s'? (?:[Ee]nergy )?costs? (?:are|is) reduced by (\d+)(?:, to a minimum of (\d+))?$/,
     build: (m) => {
-      const energy = count(m[1] ?? '');
-      if (energy === undefined) {
+      const tag = m[1];
+      const energy = count(m[2] ?? '');
+      if (tag === undefined || energy === undefined) {
         return undefined;
       }
-      const minimum = m[2] === undefined ? undefined : count(m[2]);
-      if (m[2] !== undefined && minimum === undefined) {
+      const minimum = m[3] === undefined ? undefined : count(m[3]);
+      if (m[3] !== undefined && minimum === undefined) {
+        return undefined;
+      }
+      return {
+        applies: { scope: 'friendly' as const, tag },
+        change: {
+          kind: 'discount' as const,
+          energy,
+          ...(minimum === undefined ? {} : { minimumEnergy: minimum }),
+        },
+      };
+    },
+  },
+  {
+    /**
+     * "I cost 1 less **for each card in your trash**", "I cost 2 less for each
+     * of your MIGHTY units", "…for each card you've played this turn, to a
+     * minimum of 1".
+     *
+     * One rule over the shared count grammar rather than a pattern per count.
+     * There were three of these written out longhand, each naming its own
+     * `Count`, and every count the effect grammar could already read was
+     * unavailable here for no reason but that nobody had repeated it.
+     *
+     * 356.4.e's minimum binds this discount alone, which is why it rides on the
+     * change rather than on the running total.
+     */
+    pattern:
+      /^(?:i cost|this costs) (\d+) less for each (?:of )?(.+?)(?:, to a minimum of (\d+))?$/i,
+    build: (m) => {
+      const energy = count(m[1] ?? '');
+      const per = parseCount(m[2] ?? '');
+      if (energy === undefined || per === undefined) {
+        return undefined;
+      }
+      const minimum = m[3] === undefined ? undefined : count(m[3]);
+      if (m[3] !== undefined && minimum === undefined) {
         return undefined;
       }
       return {
         applies: { scope: 'self' },
         change: {
           kind: 'discount',
-          per: { count: { kind: 'cardsPlayedThisTurn' }, energy },
+          per: { count: per, energy },
           ...(minimum === undefined ? {} : { minimumEnergy: minimum }),
         },
       };
