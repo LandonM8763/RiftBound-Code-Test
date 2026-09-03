@@ -767,12 +767,18 @@ describe("zone movement", () => {
     });
   });
 
-  it("refuses a Might filter on the target", () => {
-    expect(
-      parseCardText(
-        "Return a unit at a battlefield with 3 Might or less to its owner's hand.",
-      ).unparsed,
-    ).toHaveLength(1);
+  it("143: reads a Might bound on the bounced Unit", () => {
+    // `unitTarget` has carried `maxMight` since the counted-target round; this
+    // clause stayed anchored against it long after it existed.
+    const parsed = parseCardText(
+      "Return a unit at a battlefield with 3 Might or less to its owner's hand.",
+    );
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.effect?.target).toMatchObject({
+      kind: "unit",
+      atBattlefield: true,
+      maxMight: 3,
+    });
   });
 
   it("412: bounces a Gear, narrowing the sweep rather than the effect", () => {
@@ -3049,5 +3055,33 @@ describe("counts and prices, read once rather than per wording", () => {
     expect(ability?.cost).toEqual({ energy: 1, power: [] });
     expect(ability?.effect.effects).toEqual([{ kind: "draw", count: 1 }]);
     expect(conditionOfEffect("When I conquer, you may pay 1. If you do, draw 1.")).toBeUndefined();
+  });
+});
+
+describe("the designations said of a player (464.2.c.3)", () => {
+  const conditionOf = (text: string) =>
+    parseCardText(text).abilities?.triggered?.[0]?.condition;
+
+  it('reads "when you defend here" as the side, scoped to this Battlefield', () => {
+    // `subject` says whose *Unit*; this says whose *side*, and every corpus
+    // printing sits on the Battlefield where it happens.
+    expect(conditionOf("When you defend here, draw 1.")).toEqual({
+      event: "defend",
+      subject: "friendly",
+      filter: { here: true },
+    });
+  });
+
+  it("leaves the self form alone", () => {
+    expect(conditionOf("When I defend, draw 1.")).toEqual({
+      event: "defend",
+      subject: "self",
+    });
+  });
+
+  it('428: reads "kill me" as the same payment as "kill this"', () => {
+    const parsed = parseCardText("When I defend, you may kill me to draw 1.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.abilities?.triggered?.[0]?.payments).toEqual([{ kind: "killSelf" }]);
   });
 });

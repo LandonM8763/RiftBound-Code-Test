@@ -395,7 +395,7 @@ const ABILITY_PAYMENTS: readonly {
     },
   },
   // 428: the source itself, so there is no choice to make.
-  { pattern: /^kill this$/i, build: () => ({ kind: 'killSelf' }) },
+  { pattern: /^kill (?:this|me)$/i, build: () => ({ kind: 'killSelf' }) },
   {
     pattern: /^discard (\d+|a) cards?$/i,
     build: (m) => {
@@ -758,10 +758,12 @@ const CLAUSES: readonly ClauseRule[] = [
      * target's location and "to its base" is the Destination.
      */
     pattern:
-      new RegExp(`^move (an?|another|up to (?:\\d+|one|two|three|four)|two|three|four) (${ADJECTIVES_AND_SCOPE})units?(?: (?:at|from) a battlefield)? (?:to|on) (?:its |your |their )?base$`, 'i'),
+      new RegExp(`^move (an?|another|up to (?:\\d+|one|two|three|four)|two|three|four) (${ADJECTIVES_AND_SCOPE})units?(?: ((?:at|from) a battlefield|here))? (?:to|on) (?:its |your |their )?base$`, 'i'),
     build: (m) => ({
       effects: [{ kind: 'move' }],
-      target: unitTarget(m[1], m[2], 'unit', 'at a battlefield'),
+      // 355.9: "a friendly unit **here**" is the source's own Battlefield,
+      // which is narrower than "at a battlefield" and has to stay so.
+      target: unitTarget(m[1], m[2], 'unit', /^here$/i.test(m[3] ?? '') ? 'here' : 'at a battlefield'),
       destination: { kind: 'base' as const },
     }),
   },
@@ -926,19 +928,22 @@ const CLAUSES: readonly ClauseRule[] = [
     /**
      * "Return a unit at a battlefield to its owner's hand" — a bounce.
      *
-     * Anchored to the whole clause so the qualified printings fall through and
-     * are recorded: "another unit at a battlefield" wants an `excludeSelf` that
-     * `TargetSpec` has no field for, and "a unit … with 3 might or less" wants
-     * a Might filter. Reading either as the unqualified form would let the card
-     * hit something the printed text forbids.
+     * 355.9.a.1 makes a Unit target a Game Object on the Board, and a Gear is
+     * one too — 412's zone move does not care which, so only the sweep narrows.
+     *
+     * The qualified printings are read rather than refused: "another" is
+     * `excludeSelf` and "with 3 Might or less" is `maxMight`, both of which
+     * `unitTarget` has carried since the counted-target round. This clause was
+     * anchored against them long after they existed.
      */
-    // 355.9.a.1 makes a Unit target a Game Object on the Board, and a Gear is
-    // one too — 412's zone move does not care which. Only the sweep narrows.
-    pattern:
-      new RegExp(`^return (an?|another) (${ADJECTIVES_AND_SCOPE})(unit|gear)( at a battlefield| here)? to (?:its|their) owner'?s? hand$`, 'i'),
+    pattern: new RegExp(
+      `^return (an?|another) (${ADJECTIVES_AND_SCOPE})(unit|gear)( at a battlefield| here)?` +
+        `(?: with (\\d+) might or less)? to (?:its|their) owner'?s? hand$`,
+      'i',
+    ),
     build: (m) => ({
       effects: [{ kind: 'toHand' }],
-      target: unitTarget(m[1], m[2], m[3], m[4]),
+      target: unitTarget(m[1], m[2], m[3], m[4], m[5] === undefined ? undefined : count(m[5])),
     }),
   },
   {
@@ -1637,6 +1642,19 @@ const CONDITIONS: readonly {
   // splits it, the same way a card with two sentences produces two.
   { pattern: /^i attack$/i, build: () => ({ event: 'attack', subject: 'self' }) },
   { pattern: /^i defend$/i, build: () => ({ event: 'defend', subject: 'self' }) },
+  // "When **you** defend here" — the same designation, said of the player and
+  // scoped to the Battlefield the ability is printed at (355.9). Its own rule
+  // rather than a widening of the two above, because `subject` says whose
+  // Unit and this says whose *side*: the printing Battlefield is where it
+  // happens, and every corpus printing is on one.
+  {
+    pattern: /^you (attack|defend)(?: (here))?$/i,
+    build: (m) => ({
+      event: (m[1] ?? '').toLowerCase() === 'attack' ? ('attack' as const) : ('defend' as const),
+      subject: 'friendly' as const,
+      ...(m[2] === undefined ? {} : { filter: { here: true } }),
+    }),
+  },
 
   // Stun (423). 423.1.a.1 is what makes "when you stun" meaningful — the
   // engine raises the event only when the status actually changes.

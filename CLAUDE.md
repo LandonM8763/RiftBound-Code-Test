@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells killing, draw and Play Effects firing. 288 of the 468 cards with text
+with damage spells killing, draw and Play Effects firing. 292 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -2469,15 +2469,15 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 288 of the 468 cards that have text** — 276 parsed and 12 hand-authored, and the shape of what is
+**Coverage is 292 of the 468 cards that have text** — 280 parsed and 12 hand-authored, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 276 |
+| Fully parsed | 280 |
 | Hand-authored | 12 |
-| Blocked | 180 |
+| Blocked | 176 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 4 times, the next 2, and every one of
@@ -2677,6 +2677,7 @@ What each round actually delivered, for calibrating the next projection:
 | "Alone" in combat, over a fifth sweep sharing `ObjectFilter` | **+2** delivered |
 | Player-directed effects (`EffectPlayer`) | **+1** delivered |
 | One `controls` predicate, and the two-sentence priced trigger | **+1** delivered |
+| Four clause phrases that outlived the refusals documenting them | **+4** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic
