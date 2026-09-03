@@ -25,7 +25,7 @@ card game). The application has four capabilities:
 of the architecture below is still a plan. **The engine plays complete games
 with real Riftbound card data, including cards whose printed text is modelled**
 — 479 cards ingested, a legal deck validated from them, 300 games simulated
-with damage spells killing, draw and Play Effects firing. 287 of the 468 cards with text
+with damage spells killing, draw and Play Effects firing. 288 of the 468 cards with text
 are covered so far, and [Card data](#card-data) explains why that number is a
 statement about the engine's mechanics rather than about the parser.
 
@@ -1251,7 +1251,9 @@ Three things follow:
   402.4.b then makes declining the only move, which is right — there is nothing
   else to do.
 - **Every price verb is also an effect verb**, so the parser splits only on a
-  " to " whose lead parses *entirely* as a payment. "You may kill a gear" is an
+  " to " whose lead parses *entirely* as a payment. "Pay 1 Fury. **If you do,**
+  …" is the same statement written across two sentences and normalises to the
+  same split, because 402.2 settles the price either way. "You may kill a gear" is an
   effect and "you may kill me to move an attacking unit" is a price; without
   that rule the first became an unreadable card, which is how it was caught.
 - **A Play Effect cannot cost an exhaust.** 359.2.c enters a Unit exhausted, so
@@ -2467,15 +2469,15 @@ than one pattern per sentence — see [Abilities](#abilities) for the shape. The
 grammar strips two orthogonal wrappers first: "the first time … each turn" is
 rule 383.3.e's per-turn limit, and "when"/"whenever" is noise.
 
-**Coverage is 287 of the 468 cards that have text** — 275 parsed and 12 hand-authored, and the shape of what is
+**Coverage is 288 of the 468 cards that have text** — 276 parsed and 12 hand-authored, and the shape of what is
 left is the finding rather than the number:
 
 | | Cards |
 |---|---|
 | With printed text | 468 |
-| Fully parsed | 275 |
+| Fully parsed | 276 |
 | Hand-authored | 12 |
-| Blocked | 181 |
+| Blocked | 180 |
 
 At the level of literal clause strings the unparsed tail is **flat** — the most
 common clause the grammar misses appears 4 times, the next 2, and every one of
@@ -2674,6 +2676,7 @@ What each round actually delivered, for calibrating the next projection:
 | Runes and the Legend as targets (161.1.a, 103.1) | **+2** delivered |
 | "Alone" in combat, over a fifth sweep sharing `ObjectFilter` | **+2** delivered |
 | Player-directed effects (`EffectPlayer`) | **+1** delivered |
+| One `controls` predicate, and the two-sentence priced trigger | **+1** delivered |
 
 **Projections run optimistic, except when they do not.** Additional Costs
 projected +8 and delivered +4; tokens projected +9 and delivered +11, dynamic

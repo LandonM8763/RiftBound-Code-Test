@@ -1982,69 +1982,55 @@ const STATE_PREDICATES: readonly {
     },
   },
   {
-    // "if you control a Poro", "if you control another Dragon",
-    // "if you control two or more gear"
-    pattern:
-      /^you control (a|an|another|one|two|three|\d+)(?: or more)? ([A-Za-z'-]+?)s?$/i,
+    /**
+     * Every "how many of these are on the board" predicate, as one rule.
+     *
+     * "If you control a Poro", "if you control another Dragon", "while you
+     * have 8+ runes", "while you have another unit here", "if there is a
+     * **ready enemy** unit here".
+     *
+     * There were three near-identical rules here, each rebuilding the same
+     * `controls` and each knowing about a different subset of the phrase — so
+     * an adjective was readable in a target and not in a count, and "here" was
+     * readable with "you have" and not with "you control". One rule over the
+     * shared `ADJECTIVES` run and the shared `ObjectFilter` fixes both.
+     *
+     * "There is an **enemy** unit" counts what the opponent controls; every
+     * other wording counts yours.
+     */
+    pattern: new RegExp(
+      `^(?:you control|you have|there (?:is|are)) ` +
+        `(a|an|another|one|two|three|four|\\d+)(?:\\+| or more)? ` +
+        `(${ADJECTIVES})(friendly |enemy |your )?([A-Za-z'-]+?)s?( here)?$`,
+      'i',
+    ),
     build: (m) => {
       const word = (m[1] ?? '').toLowerCase();
       const min = word === 'a' || word === 'an' || word === 'another' ? 1 : count(word);
       if (min === undefined) {
         return undefined;
       }
-      const noun = (m[2] ?? '').toLowerCase();
-      const what = CARD_TYPES.find((type) => type === noun);
-      return {
-        kind: 'controls',
-        who: 'you',
-        // A noun that is not a card type is a tag — "Poro", "Dragon", "Mech" —
-        // and those only ever appear on Units.
-        what: what ?? 'unit',
-        min,
-        ...(what === undefined ? { tag: m[2] ?? '' } : {}),
-        ...(word === 'another' ? { excludeSelf: true } : {}),
-      };
-    },
-  },
-  {
-    // "While you have 8+ runes" — Channelled Runes are on the Board (161.1.a),
-    // so this is an ordinary `controls` count rather than a new predicate.
-    pattern: /^you have (\d+)\+? or more ([A-Za-z'-]+?)s?$|^you have (\d+)\+ ([A-Za-z'-]+?)s?$/i,
-    build: (m) => {
-      const min = count(m[1] ?? m[3] ?? '');
-      const noun = (m[2] ?? m[4] ?? '').toLowerCase();
-      if (min === undefined) {
+      const filter = objectFilter(m[2] ?? '');
+      if (filter === 'refused') {
         return undefined;
       }
-      const what = CARD_TYPES.find((type) => type === noun);
-      return {
-        kind: 'controls',
-        who: 'you',
-        what: what ?? 'unit',
-        min,
-        ...(what === undefined ? { tag: noun } : {}),
-      };
-    },
-  },
-  {
-    // "While you have another unit here" (355.9).
-    pattern: /^you have (a|an|another|one|two|three|\d+)(?: or more)? ([A-Za-z'-]+?)s? here$/i,
-    build: (m) => {
-      const word = (m[1] ?? '').toLowerCase();
-      const min = word === 'a' || word === 'an' || word === 'another' ? 1 : count(word);
-      if (min === undefined) {
+      const noun = (m[4] ?? '').trim();
+      const what = CARD_TYPES.find((type) => type === noun.toLowerCase());
+      const tag = what === undefined ? tagNoun(noun) : undefined;
+      // A lowercase noun that is not a card type is a shape the grammar has
+      // not read, not a tag to invent — the same test `unitTarget` makes.
+      if (what === undefined && tag === undefined) {
         return undefined;
       }
-      const noun = (m[2] ?? '').toLowerCase();
-      const what = CARD_TYPES.find((type) => type === noun);
       return {
         kind: 'controls',
-        who: 'you',
+        who: /enemy/i.test(m[3] ?? '') ? 'opponent' : 'you',
         what: what ?? 'unit',
         min,
-        here: true,
-        ...(what === undefined ? { tag: noun } : {}),
+        ...(tag === undefined ? {} : { tag }),
+        ...(m[5] === undefined ? {} : { here: true }),
         ...(word === 'another' ? { excludeSelf: true } : {}),
+        ...(filter === undefined ? {} : { filter }),
       };
     },
   },
@@ -3376,6 +3362,18 @@ function splitTriggerPrice(
   // a " to " for it to precede. Every one of these verbs is also an ordinary
   // effect — "you may kill a gear" is not a price — so without the split there
   // is nothing here to read.
+  // "Pay 1 Fury. **If you do,** give me +2 Might" is the same statement as
+  // "pay 1 Fury **to** give me +2 Might" — 403 settles the price at 402.2
+  // either way, and the two-sentence form is how the corpus prints it about as
+  // often. Normalised here rather than given its own path, so a price reads
+  // the same whichever wording carried it.
+  const ifYouDo = body.match(/^(.+?)[.,]\s*if you do,\s*(.+)$/i);
+  if (ifYouDo !== null) {
+    const price = parseTriggerPrice((ifYouDo[1] ?? '').trim());
+    if (price !== undefined) {
+      return { price, rest: (ifYouDo[2] ?? '').trim() };
+    }
+  }
   if (!/^(?:pay|exhaust|spend|recycle|kill)\b/i.test(body) || !/ to /i.test(body)) {
     return { rest: body };
   }

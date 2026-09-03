@@ -3000,3 +3000,54 @@ describe("effects that name a player (symmetric and opposing)", () => {
     ).not.toEqual([]);
   });
 });
+
+describe("counts and prices, read once rather than per wording", () => {
+  const conditionOfEffect = (text: string) =>
+    parseCardText(text).abilities?.triggered?.[0]?.effect.effects?.[0]?.condition;
+
+  it("reads an adjective in a count, as a target already could", () => {
+    // Three near-identical rules built this predicate, each knowing about a
+    // different subset of the phrase — so an adjective was readable in a
+    // target and not in a count.
+    const parsed = parseCardText("Draw 1 if there is a ready enemy unit here.");
+    expect(parsed.unparsed).toEqual([]);
+    expect(parsed.effect?.condition).toEqual({
+      kind: "controls",
+      who: "opponent",
+      what: "unit",
+      min: 1,
+      here: true,
+      filter: { exhausted: false },
+    });
+  });
+
+  it('keeps "here" working with either verb', () => {
+    for (const text of [
+      "Draw 1 if you control another unit here.",
+      "Draw 1 if you have another unit here.",
+    ]) {
+      expect(parseCardText(text).effect?.condition).toMatchObject({
+        kind: "controls",
+        here: true,
+        excludeSelf: true,
+      });
+    }
+  });
+
+  it("still refuses a lowercase noun that is not a card type", () => {
+    // A tag is capitalised (133.8); a lowercase unknown noun is a shape the
+    // grammar has not read rather than a tag to invent.
+    expect(parseCardText("Draw 1 if you control a widget.").unparsed).not.toEqual([]);
+  });
+
+  it('403: reads "pay X. If you do, Y" as the price it is', () => {
+    // The same statement as "pay X to Y" — 402.2 settles the price either way.
+    const parsed = parseCardText("When I conquer, you may pay 1. If you do, draw 1.");
+    expect(parsed.unparsed).toEqual([]);
+    const ability = parsed.abilities?.triggered?.[0];
+    expect(ability?.optional).toBe(true);
+    expect(ability?.cost).toEqual({ energy: 1, power: [] });
+    expect(ability?.effect.effects).toEqual([{ kind: "draw", count: 1 }]);
+    expect(conditionOfEffect("When I conquer, you may pay 1. If you do, draw 1.")).toBeUndefined();
+  });
+});
